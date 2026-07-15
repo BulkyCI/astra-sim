@@ -1,0 +1,7 @@
+scale,mode,wall_time_cycles
+4,baseline,117069144
+4,dblp,71779536
+16,baseline,154852440
+16,dblp,98232240
+64,baseline,198416616
+64,dblp,138931008

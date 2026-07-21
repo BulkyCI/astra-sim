@@ -71,7 +71,7 @@ jobs:
       run: bash ./.github/workflows/test.sh
 
     - name: Run 3D Ring ns-3 smoke experiment
-      run: bash ./experiments/ring_3d/smoke.sh
+      run: timeout --foreground 5m bash ./experiments/ring_3d/smoke.sh
 
     - name: Upload smoke telemetry
       if: always()

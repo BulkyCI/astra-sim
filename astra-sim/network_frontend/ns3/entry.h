@@ -151,7 +151,12 @@ void start_rdma_flow(AstraSimNs3::FlowRecord flow,
         global_t == 1 ? maxRtt : pairRtt[flow.src][flow.dst], msg_handler,
         fun_arg, flow.tag, flow.src, flow.dst);
     ApplicationContainer applications = client_helper.Install(n.Get(flow.src));
-    applications.Start(Simulator::Now());
+    // Node::AddApplication schedules initialization at the current simulated
+    // time. Application::DoInitialize then treats the configured start time as
+    // a relative delay, so passing Simulator::Now() here makes every dynamic
+    // QP wait for the current timestamp a second time. That compounds across
+    // dependent collectives and can make a small run appear to hang.
+    applications.Start(Time(0));
 }
 
 void start_background_flow(AstraSimNs3::MicroburstFlow* background) {

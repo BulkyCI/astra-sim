@@ -8,15 +8,16 @@ CHAKRA_ET_DIR="${SCRIPT_DIR:?}"/../../extern/graph_frontend/chakra/schema/protob
 
 # set functions
 function compile_chakra_et() {
+  local proto_file="${CHAKRA_ET_DIR:?}/et_def.proto"
   # compile et_def.proto if one doesn't exist
   if [[ ! -f "${CHAKRA_ET_DIR:?}"/et_def.pb.h || ! -f "${CHAKRA_ET_DIR:?}"/et_def.pb.cc ]]; then
-    protoc et_def.proto \
+    protoc "${proto_file:?}" \
       --proto_path="${CHAKRA_ET_DIR:?}" \
       --cpp_out="${CHAKRA_ET_DIR:?}"
   fi
 
   if [[ ! -f "${CHAKRA_ET_DIR:?}"/et_def_pb2.py ]]; then
-    protoc et_def.proto \
+    protoc "${proto_file:?}" \
       --proto_path="${CHAKRA_ET_DIR:?}" \
       --python_out="${CHAKRA_ET_DIR:?}"
   fi

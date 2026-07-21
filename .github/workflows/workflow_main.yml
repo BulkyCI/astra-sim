@@ -1,20 +1,28 @@
-name: Main
+name: CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "dev" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "dev" ]
+  workflow_dispatch:
 
-env:
-  BUILD_TYPE: Release
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  python-quality:
+    name: Python tooling and experiment tests
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Check out source and submodules
+      uses: actions/checkout@v4
       with:
         submodules: recursive
 
@@ -24,12 +32,52 @@ jobs:
         version: "0.11.28"
         enable-cache: true
 
-    - name: Setup
-      run: ${{github.workspace}}/.github/workflows/setup.sh
+    - name: Synchronize locked Python environment
+      run: ./utils/setup.sh
 
-    - name: Build
-      run: ${{github.workspace}}/.github/workflows/build.sh
+    - name: Verify lockfile and tooling
+      run: |
+        uv lock --check
+        uv run --locked python -m compileall -q experiments/ring_3d
+        uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
+        bash -n experiments/ring_3d/smoke.sh utils/setup.sh
+        git diff --check
 
-    - name: Test
-      run: ${{github.workspace}}/.github/workflows/test.sh
+  native-integration:
+    name: Native build, regression, and ns-3 smoke
+    needs: python-quality
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: "0.11.28"
+        enable-cache: true
+
+    - name: Install native build dependencies
+      run: ./.github/workflows/setup.sh
+
+    - name: Build analytical and ns-3 backends
+      run: bash ./.github/workflows/build.sh
+
+    - name: Run analytical regression suite
+      run: bash ./.github/workflows/test.sh
+
+    - name: Run 3D Ring ns-3 smoke experiment
+      run: bash ./experiments/ring_3d/smoke.sh
+
+    - name: Upload smoke telemetry
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ring-3d-smoke-${{ github.run_id }}
+        path: runs/ring_3d/smoke_8
+        if-no-files-found: ignore
 

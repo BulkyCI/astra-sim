@@ -36,13 +36,10 @@ using json = nlohmann::json;
  * @class NS3BackendCompletionTracker
  * @brief Tracks the completion status of ranks in the NS3 backend.
  *
- * This is a hacky approach to track which ranks have completed their workload.
- * The purpose of this class is to end the ns3 simulation once all ranks have
- * completed. The hacky approach is necessary because each ASTRASimNetwork
- * instance only corresponds to one rank. That is, someone needs to keep track
- * of the completion status of all of the ranks. Because there is no exit point
- * once the ns3 simulator has started, we cannot implement such tracker in the
- * main function.
+ * Each ASTRASimNetwork instance only corresponds to one rank, so this tracker
+ * provides the process-wide completion condition. It intentionally stops the
+ * simulator only after any scheduled background microbursts complete, allowing
+ * telemetry to flush in main instead of calling exit() from a callback.
  */
 class NS3BackendCompletionTracker {
   public:
@@ -55,18 +52,30 @@ class NS3BackendCompletionTracker {
         if (completion_tracker_[rank] == 0) {
             completion_tracker_[rank] = 1;
             num_unfinished_ranks_--;
+            AstraSimNs3::experiment_telemetry.record_rank_completion(
+                rank, Simulator::Now().GetNanoSeconds());
         }
         if (num_unfinished_ranks_ == 0) {
             AstraSim::LoggerFactory::get_logger("network")->debug(
-                "All ranks have finished. Exiting simulation.");
-            // cout << "All ranks have finished. Exiting simulation.\n";
-            Simulator::Stop();
-            Simulator::Destroy();
-            exit(0);
+                "All ranks have finished. Waiting for background traffic.");
+            stop_when_ready();
         }
     }
 
   private:
+    void stop_when_ready() {
+        if (num_unfinished_ranks_ != 0) {
+            return;
+        }
+        if (has_pending_background_traffic()) {
+            Simulator::Schedule(MicroSeconds(1),
+                                &NS3BackendCompletionTracker::stop_when_ready,
+                                this);
+            return;
+        }
+        Simulator::Stop();
+    }
+
     int num_unfinished_ranks_;
     vector<int> completion_tracker_;
 };
@@ -130,7 +139,11 @@ class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
         int src_id = rank;
 
         // Trigger ns3 to schedule RDMA QP event.
-        send_flow(src_id, dst_id, message_size, msg_handler, fun_arg, tag);
+        if (request == nullptr) {
+            throw runtime_error("ns-3 sim_send requires a sim_request");
+        }
+        send_flow(src_id, dst_id, message_size, msg_handler, fun_arg, tag,
+                  *request);
         return 0;
     }
 
@@ -152,7 +165,8 @@ class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
             received_msg_standby_hash.end()) {
             // 1) ns3 has already received some message before sim_recv is
             // called.
-            int received_msg_bytes = received_msg_standby_hash[recv_event_key];
+            uint64_t received_msg_bytes =
+                received_msg_standby_hash[recv_event_key];
             if (received_msg_bytes == message_size) {
                 // 1-1) The received message size is same as what we expect.
                 // Exit.
@@ -181,7 +195,7 @@ class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
             } else {
                 // 2-2) We have already been expecting something.
                 // Increment the number of bytes we are waiting to receive.
-                int expecting_msg_bytes =
+                uint64_t expecting_msg_bytes =
                     sim_recv_waiting_hash[recv_event_key].remaining_msg_bytes;
                 recv_event.remaining_msg_bytes += expecting_msg_bytes;
                 sim_recv_waiting_hash[recv_event_key] = recv_event;
@@ -202,6 +216,8 @@ string memory_configuration;
 string comm_group_configuration = "empty";
 string logical_topology_configuration;
 string logging_configuration = "empty";
+string experiment_configuration = "empty";
+string experiment_output_dir = "empty";
 int num_queues_per_dim = 1;
 double comm_scale = 1;
 double injection_scale = 1;
@@ -260,6 +276,12 @@ void parse_args(int argc, char* argv[]) {
                  logical_topology_configuration);
     cmd.AddValue("logging-configuration", "Logging configuration file",
                  logging_configuration);
+    cmd.AddValue("experiment-configuration",
+                 "Experiment policy and microburst configuration file",
+                 experiment_configuration);
+    cmd.AddValue("experiment-output-dir",
+                 "Directory for experiment flow and completion telemetry",
+                 experiment_output_dir);
 
     cmd.AddValue("num-queues-per-dim", "Number of queues per each dimension",
                  num_queues_per_dim);
@@ -303,6 +325,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "Fail to setup ns3 simulation." << std::endl;
         return -1;
     }
+    try {
+        AstraSimNs3::configure_experiment(experiment_configuration,
+                                          experiment_output_dir);
+    } catch (const exception& error) {
+        cerr << "Unable to configure experiment: " << error.what() << "\n";
+        Simulator::Destroy();
+        return 1;
+    }
 
     // Tell workload layer to schedule first events.
     for (int i = 0; i < num_npus; i++) {
@@ -311,5 +341,7 @@ int main(int argc, char* argv[]) {
 
     // Run the simulation by triggering the ns3 event queue.
     Simulator::Run();
+    AstraSimNs3::finalize_experiment_telemetry();
+    Simulator::Destroy();
     return 0;
 }

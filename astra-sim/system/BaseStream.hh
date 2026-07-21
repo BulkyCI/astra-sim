@@ -24,7 +24,8 @@ class BaseStream : public Callable, public StreamStat {
   public:
     BaseStream(int stream_id,
                Sys* owner,
-               std::list<CollectivePhase> phases_to_go);
+               std::list<CollectivePhase> phases_to_go,
+               OperationContext operation_context = {});
     virtual ~BaseStream() = default;
 
     void changeState(StreamState state);
@@ -46,10 +47,12 @@ class BaseStream : public Callable, public StreamStat {
     Sys* owner;
     DataSet* dataset;
     int steps_finished;
-    int initial_data_size;
+    uint64_t initial_data_size;
     int priority;
     StreamState state;
     bool initialized;
+    OperationContext operation_context;
+    uint64_t next_message_sequence;
 
     Tick last_phase_change;
 

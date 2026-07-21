@@ -26,6 +26,24 @@ The setup script initializes every pinned Git submodule and runs `uv sync --lock
 
 The legacy `utils/install_chakra.sh` entry point remains as a compatibility wrapper and delegates to the same uv workflow. The Docker image also synchronizes this exact lockfile with uv; build it through `./utils/build_docker_image.sh`.
 
+## 3D Ring topology and compute-interleaving experiment
+
+The reproducible TP/PP/DP Ring experiment lives in [experiments/ring_3d](experiments/ring_3d). It generates a three-step Chakra ET workload with explicit `parallelism_domain` attributes, native Ring All-Reduce process groups, pipeline send/receive pairs, and backward bucket dependencies that permit DP communication to overlap later compute. The smoke profile is $TP=2$, $PP=2$, $DP=2$; the canonical profile is $TP=8$, $PP=4$, $DP=8$ for 256 ranks.
+
+All Python entry points must use the committed uv environment. Generate inputs only:
+
+```sh
+uv run --locked python experiments/ring_3d/generate.py \
+	--profile experiments/ring_3d/profiles/smoke_8.json \
+	--output runs/ring_3d/smoke_8 --clean
+```
+
+After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke experiment with `bash experiments/ring_3d/smoke.sh`. The runner writes generated inputs, ns-3 output, `flow_events.csv`, `rank_completion.csv`, and `summary.json` under `runs/ring_3d/smoke_8`. The generated topology is an eight-host Clos for smoke runs; the canonical profile materializes a 256-host, 16-leaf, 16-spine Clos topology.
+
+The optional data-parallel logical shedding policy is hard-whitelisted to Chakra operations marked `dp`, `CollectivePayload`, and `All_Reduce`. A selected flow is represented by a reliable 64-byte provenance-control QP on priority group 1; it is not a packet drop. The control completion resolves both the original logical send and receive while telemetry reports the original logical bytes separately from physically modeled control bytes. The default policy selects 0% of eligible flows in step 1 and 10% in steps 2 and 3. Deterministic host-originated RDMA microbursts are triggered by the first step-2 DP All-Reduce admission.
+
+This is an ASTRA-sim 2.0 experiment. It models ET dependencies, native collectives, and the bundled ns-3/RDMA topology; it does not claim ASTRA-sim 3.0 InfraGraph/cache-line behavior or exact Megatron runtime fidelity.
+
 
 ### Releases and Contributions
 

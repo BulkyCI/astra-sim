@@ -221,19 +221,29 @@ bool Ring::ready() {
         return false;
     }
     MyPacket packet = packets.front();
-    sim_request snd_req;
+    const uint64_t message_sequence = stream->next_message_sequence++;
+    sim_request snd_req{};
     snd_req.srcRank = id;
     snd_req.dstRank = packet.preferred_dest;
     snd_req.tag = stream->stream_id;
     snd_req.reqType = UINT8;
+    snd_req.reqCount = msg_size;
     snd_req.vnet = this->stream->current_queue_id;
+    snd_req.operation = stream->operation_context;
+    snd_req.operation.message_sequence = message_sequence;
     stream->owner->front_end_sim_send(
         0, Sys::dummy_data, msg_size, UINT8, packet.preferred_dest,
         stream->stream_id, &snd_req, Sys::FrontEndSendRecvType::COLLECTIVE,
         &Sys::handleEvent,
         nullptr);  // stream_id+(packet.preferred_dest*50)
-    sim_request rcv_req;
+    sim_request rcv_req{};
+    rcv_req.srcRank = packet.preferred_src;
+    rcv_req.dstRank = id;
+    rcv_req.tag = stream->stream_id;
+    rcv_req.reqType = UINT8;
+    rcv_req.reqCount = msg_size;
     rcv_req.vnet = this->stream->current_queue_id;
+    rcv_req.operation = snd_req.operation;
     RecvPacketEventHandlerData* ehd = new RecvPacketEventHandlerData(
         stream, stream->owner->id, EventType::PacketReceived,
         packet.preferred_vnet, packet.stream_id);

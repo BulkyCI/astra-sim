@@ -19,7 +19,8 @@ void BaseStream::changeState(StreamState state) {
 
 BaseStream::BaseStream(int stream_id,
                        Sys* owner,
-                       std::list<CollectivePhase> phases_to_go) {
+                       std::list<CollectivePhase> phases_to_go,
+                       OperationContext operation_context) {
     this->stream_id = stream_id;
     this->owner = owner;
     this->initialized = false;
@@ -41,4 +42,6 @@ BaseStream::BaseStream(int stream_id,
     total_packets_sent = 0;
     current_queue_id = -1;
     priority = 0;
+    this->operation_context = operation_context;
+    next_message_sequence = 0;
 }

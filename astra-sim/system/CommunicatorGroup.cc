@@ -6,6 +6,7 @@ LICENSE file in the root directory of this source tree.
 #include "astra-sim/system/CommunicatorGroup.hh"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "astra-sim/system/CollectivePlan.hh"
 #include "astra-sim/system/Sys.hh"
@@ -18,13 +19,19 @@ CommunicatorGroup::CommunicatorGroup(int comm_group_id,
     set_id(comm_group_id);
     this->involved_NPUs = involved_NPUs;
     this->generator = generator;
-    std::sort(involved_NPUs.begin(), involved_NPUs.end());
+    std::sort(this->involved_NPUs.begin(), this->involved_NPUs.end());
+    if (std::adjacent_find(this->involved_NPUs.begin(),
+                           this->involved_NPUs.end()) !=
+        this->involved_NPUs.end()) {
+        throw std::invalid_argument(
+            "Communicator group membership must not contain duplicate ranks");
+    }
 
     // -1 means the rank is not in the comm group.
     int position = -1;
-    for (int i = 0; i < involved_NPUs.size(); ++i) {
-        if (involved_NPUs[i] == generator->id) {
-            position = i;
+    for (size_t i = 0; i < this->involved_NPUs.size(); ++i) {
+        if (this->involved_NPUs[i] == generator->id) {
+            position = static_cast<int>(i);
             break;
         }
     }
@@ -89,5 +96,9 @@ CollectivePlan* CommunicatorGroup::get_collective_plan(ComType comm_type, uint64
 }
 
 int CommunicatorGroup::get_position_in_group() {
+    if (pos_in_group < 0) {
+        throw std::runtime_error(
+            "Local rank is not a member of the referenced communicator group");
+    }
     return pos_in_group;
 }

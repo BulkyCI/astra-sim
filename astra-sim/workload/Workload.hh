@@ -12,6 +12,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "astra-sim/system/Callable.hh"
 #include "astra-sim/system/CommunicatorGroup.hh"
+#include "astra-sim/system/Common.hh"
 #include "astra-sim/workload/HardwareResource.hh"
 #include "astra-sim/workload/Statistics.hh"
 #include "astra-sim/workload/LocalMemUsageTracker.hh"
@@ -70,6 +71,10 @@ class Workload : public Callable {
     // node, return nullptr.
     CommunicatorGroup* extract_comm_group(
         std::shared_ptr<Chakra::ETFeederNode> node);
+    OperationContext make_operation_context(
+      const std::shared_ptr<Chakra::ETFeederNode>& node,
+      TransportRole transport_role,
+      ComType collective_type) const;
 };
 
 }  // namespace AstraSim

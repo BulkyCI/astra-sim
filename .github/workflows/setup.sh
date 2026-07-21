@@ -9,7 +9,7 @@ PROJ_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 sudo apt-get update
 sudo apt-get install --yes --no-install-recommends \
     coreutils wget vim git \
-    gcc-11 g++-11 make cmake \
+    gcc-11 g++-11 make cmake ninja-build \
     clang-format \
     libboost-dev libboost-program-options-dev \
     libprotobuf-dev protobuf-compiler \

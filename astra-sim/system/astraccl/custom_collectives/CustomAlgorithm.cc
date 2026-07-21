@@ -50,7 +50,7 @@ void CustomAlgorithm::issue(shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
     this->et_feeder->getDependancyResolver().take_node(node->id());
     ChakraNodeType type = node->type();
     if (type == ChakraNodeType::COMM_SEND_NODE) {
-        sim_request snd_req;
+        sim_request snd_req{};
         int dst_rank = convert_algo_rank_to_real_rank(node->comm_dst());
         snd_req.srcRank = node->comm_src(this->stream->owner->id);
         snd_req.dstRank = dst_rank;
@@ -69,7 +69,7 @@ void CustomAlgorithm::issue(shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
             &snd_req, Sys::FrontEndSendRecvType::NATIVE, &Sys::handleEvent,
             sehd);
     } else if (type == ChakraNodeType::COMM_RECV_NODE) {
-        sim_request rcv_req;
+        sim_request rcv_req{};
         int src_rank = convert_algo_rank_to_real_rank(node->comm_src());
         RecvPacketEventHandlerData* rcehd = new RecvPacketEventHandlerData;
         rcehd->wlhd = new WorkloadLayerHandlerData;

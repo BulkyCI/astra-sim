@@ -26,6 +26,7 @@ build/astra_htsim/build/
 
 # uv
 .venv/
+**/*.py[cod]
 
 # logs
 **/*.log

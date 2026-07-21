@@ -246,7 +246,7 @@ bool HalvingDoubling::ready() {
         return false;
     }
     MyPacket packet = packets.front();
-    sim_request snd_req;
+    sim_request snd_req{};
     snd_req.srcRank = id;
     snd_req.dstRank = packet.preferred_dest;
     snd_req.tag = stream->stream_id;
@@ -257,7 +257,7 @@ bool HalvingDoubling::ready() {
         stream->stream_id, &snd_req, Sys::FrontEndSendRecvType::COLLECTIVE,
         &Sys::handleEvent,
         nullptr);  // stream_id+(packet.preferred_dest*50)
-    sim_request rcv_req;
+    sim_request rcv_req{};
     rcv_req.vnet = this->stream->current_queue_id;
     RecvPacketEventHandlerData* ehd = new RecvPacketEventHandlerData(
         stream, stream->owner->id, EventType::PacketReceived,

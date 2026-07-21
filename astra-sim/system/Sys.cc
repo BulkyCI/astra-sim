@@ -576,21 +576,23 @@ DataSet* Sys::generate_all_reduce(uint64_t size,
                                   vector<bool> involved_dimensions,
                                   CommunicatorGroup* communicator_group,
                                   int explicit_priority,
-                                  uint64_t workload_node_id) {
+                                  uint64_t workload_node_id,
+                                  OperationContext operation_context) {
     if (communicator_group == nullptr) {
         vector<CollectiveImpl*> implementation_per_dimension;
         implementation_per_dimension = collective_impl_lookup->get_collective_impl(ComType::All_Reduce, workload_node_id);
         return generate_collective(size, logical_topologies["AllReduce"],
                                    implementation_per_dimension,
                                    involved_dimensions, ComType::All_Reduce,
-                                   explicit_priority, communicator_group);
+                                   explicit_priority, communicator_group,
+                                   operation_context);
     } else {
         CollectivePlan* plan =
             communicator_group->get_collective_plan(ComType::All_Reduce, workload_node_id);
         return generate_collective(
             size, plan->topology, plan->implementation_per_dimension,
             plan->dimensions_involved, ComType::All_Reduce, explicit_priority,
-            communicator_group);
+            communicator_group, operation_context);
     }
 }
 
@@ -598,21 +600,23 @@ DataSet* Sys::generate_all_to_all(uint64_t size,
                                   vector<bool> involved_dimensions,
                                   CommunicatorGroup* communicator_group,
                                   int explicit_priority,
-                                  uint64_t workload_node_id) {
+                                  uint64_t workload_node_id,
+                                  OperationContext operation_context) {
     if (communicator_group == nullptr) {
         vector<CollectiveImpl*> implementation_per_dimension;
         implementation_per_dimension = collective_impl_lookup->get_collective_impl(ComType::All_to_All, workload_node_id);
         return generate_collective(size, logical_topologies["AllToAll"],
                                    implementation_per_dimension,
                                    involved_dimensions, ComType::All_to_All,
-                                   explicit_priority, communicator_group);
+                                   explicit_priority, communicator_group,
+                                   operation_context);
     } else {
         CollectivePlan* plan =
             communicator_group->get_collective_plan(ComType::All_to_All, workload_node_id);
         return generate_collective(
             size, plan->topology, plan->implementation_per_dimension,
             plan->dimensions_involved, ComType::All_to_All, explicit_priority,
-            communicator_group);
+            communicator_group, operation_context);
     }
 }
 
@@ -620,21 +624,23 @@ DataSet* Sys::generate_all_gather(uint64_t size,
                                   vector<bool> involved_dimensions,
                                   CommunicatorGroup* communicator_group,
                                   int explicit_priority,
-                                  uint64_t workload_node_id) {
+                                  uint64_t workload_node_id,
+                                  OperationContext operation_context) {
     if (communicator_group == nullptr) {
         vector<CollectiveImpl*> implementation_per_dimension;
         implementation_per_dimension = collective_impl_lookup->get_collective_impl(ComType::All_Gather, workload_node_id);
         return generate_collective(size, logical_topologies["AllGather"],
                                    implementation_per_dimension,
                                    involved_dimensions, ComType::All_Gather,
-                                   explicit_priority, communicator_group);
+                                   explicit_priority, communicator_group,
+                                   operation_context);
     } else {
         CollectivePlan* plan =
             communicator_group->get_collective_plan(ComType::All_Gather, workload_node_id);
         return generate_collective(
             size, plan->topology, plan->implementation_per_dimension,
             plan->dimensions_involved, ComType::All_Gather, explicit_priority,
-            communicator_group);
+            communicator_group, operation_context);
     }
 }
 
@@ -642,21 +648,23 @@ DataSet* Sys::generate_reduce_scatter(uint64_t size,
                                       vector<bool> involved_dimensions,
                                       CommunicatorGroup* communicator_group,
                                       int explicit_priority,
-                                      uint64_t workload_node_id) {
+                                      uint64_t workload_node_id,
+                                      OperationContext operation_context) {
     if (communicator_group == nullptr) {
         vector<CollectiveImpl*> implementation_per_dimension;
         implementation_per_dimension = collective_impl_lookup->get_collective_impl(ComType::Reduce_Scatter, workload_node_id);
         return generate_collective(size, logical_topologies["ReduceScatter"],
                                    implementation_per_dimension,
                                    involved_dimensions, ComType::Reduce_Scatter,
-                                   explicit_priority, communicator_group);
+                                   explicit_priority, communicator_group,
+                                   operation_context);
     } else {
         CollectivePlan* plan =
             communicator_group->get_collective_plan(ComType::Reduce_Scatter, workload_node_id);
         return generate_collective(
             size, plan->topology, plan->implementation_per_dimension,
             plan->dimensions_involved, ComType::Reduce_Scatter,
-            explicit_priority, communicator_group);
+            explicit_priority, communicator_group, operation_context);
     }
 }
 
@@ -667,7 +675,8 @@ DataSet* Sys::generate_collective(
     vector<bool> dimensions_involved,
     ComType collective_type,
     int explicit_priority,
-    CommunicatorGroup* communicator_group) {
+    CommunicatorGroup* communicator_group,
+    OperationContext operation_context) {
     // TODO(jinsun): For custom collective, we do not need the chunk_size here (since the chunk size is already determined)
     // Therefore, we also do not need the 'preferred-dataset-splits' value from the system JSON input. 
     // However, this variable is intertwined deeply in this function so that we cannot remove it for now.
@@ -714,7 +723,8 @@ DataSet* Sys::generate_collective(
             stream_id = communicator_group->num_streams++;
         }
         StreamBaseline* newStream =
-            new StreamBaseline(this, dataset, stream_id, vect, pri);
+            new StreamBaseline(this, dataset, stream_id, vect, pri,
+                               operation_context);
         newStream->current_queue_id = -1;
         insert_into_ready_list(newStream);
         return dataset;
@@ -943,7 +953,8 @@ DataSet* Sys::generate_collective(
                 stream_id = communicator_group->num_streams++;
             }
             StreamBaseline* newStream =
-                new StreamBaseline(this, dataset, stream_id, vect, pri);
+                new StreamBaseline(this, dataset, stream_id, vect, pri,
+                                   operation_context);
             newStream->current_queue_id = -1;
             insert_into_ready_list(newStream);
         } else {
@@ -1326,6 +1337,7 @@ int Sys::rendezvous_sim_send(Tick delay,
     newReq.reqCount = rendevouz_size;
     int newTag = tag + Sys::FrontEndSendRecvType::RENDEZVOUS;
     newReq.tag = newTag;
+    newReq.operation.transport_role = TransportRole::RendezvousControl;
     sim_recv(delay, buffer, rendevouz_size, type, dst, newTag, &newReq,
              &Sys::handleEvent, rsd);
     return 1;
@@ -1354,6 +1366,7 @@ int Sys::rendezvous_sim_recv(Tick delay,
     newReq.reqCount = rendevouz_size;
     int newTag = tag + Sys::FrontEndSendRecvType::RENDEZVOUS;
     newReq.tag = newTag;
+    newReq.operation.transport_role = TransportRole::RendezvousControl;
     sim_send(delay, buffer, rendevouz_size, type, src, newTag, &newReq,
              &Sys::handleEvent, rrd);
     return 1;

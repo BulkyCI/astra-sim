@@ -14,6 +14,7 @@ LICENSE file in the root directory of this source tree.
 #include <json/json.hpp>
 
 #include <iostream>
+#include <limits>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -301,9 +302,50 @@ void Workload::issue_comm(shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
     }
 }
 
+OperationContext Workload::make_operation_context(
+    const shared_ptr<Chakra::ETFeederNode>& node,
+    TransportRole transport_role,
+    ComType collective_type) const {
+    OperationContext context;
+    context.transport_role = transport_role;
+    context.collective_type = collective_type;
+    context.workload_node_id = node->id();
+
+    if (node->has_attr("parallelism_domain")) {
+        const auto& attr = node->get_attr_msg("parallelism_domain");
+        if (!attr.has_string_val()) {
+            throw runtime_error(
+                "parallelism_domain must be a Chakra string attribute");
+        }
+
+        const auto& domain = attr.string_val();
+        if (domain == "tp") {
+            context.parallelism_domain = ParallelismDomain::Tensor;
+        } else if (domain == "pp") {
+            context.parallelism_domain = ParallelismDomain::Pipeline;
+        } else if (domain == "dp") {
+            context.parallelism_domain = ParallelismDomain::Data;
+        } else {
+            throw runtime_error(
+                "parallelism_domain must be one of: tp, pp, dp");
+        }
+    }
+
+    if (node->has_attr("training_step")) {
+        const auto& attr = node->get_attr_msg("training_step");
+        if (!attr.has_uint64_val() || attr.uint64_val() == 0 ||
+            attr.uint64_val() > numeric_limits<uint32_t>::max()) {
+            throw runtime_error(
+                "training_step must be a nonzero uint64 Chakra attribute");
+        }
+        context.training_step = static_cast<uint32_t>(attr.uint64_val());
+    }
+
+    return context;
+}
+
 void Workload::issue_coll_comm(
     shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
-    const bool has_involve_dims = node->has_attr("involve_dims");
     std::vector<bool> involved_dims;
     if (node->has_attr("involved_dim")) {
         const ChakraProtoMsg::AttributeProto& attr =
@@ -343,28 +385,42 @@ void Workload::issue_coll_comm(
     // TODO: comm_tag? which is used to distinguish two different collective in
     // same pg
     const auto comm_priority = node->comm_priority<uint32_t>();  // default 0u
+    const auto operation_context = make_operation_context(
+        node, TransportRole::CollectivePayload, ComType::None);
 
     if (comm_type == ChakraCollectiveCommType::ALL_REDUCE) {
+        auto context = operation_context;
+        context.collective_type = ComType::All_Reduce;
         DataSet* fp = sys->generate_all_reduce(comm_size, involved_dims,
-                                               comm_group, comm_priority, node->id());
+                                               comm_group, comm_priority,
+                                               node->id(), context);
         collective_comm_node_id_map[fp->my_id] = node->id();
         collective_comm_wrapper_map[fp->my_id] = fp;
         fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
     } else if (comm_type == ChakraCollectiveCommType::ALL_TO_ALL) {
+        auto context = operation_context;
+        context.collective_type = ComType::All_to_All;
         DataSet* fp = sys->generate_all_to_all(comm_size, involved_dims,
-                                               comm_group, comm_priority, node->id());
+                                               comm_group, comm_priority,
+                                               node->id(), context);
         collective_comm_node_id_map[fp->my_id] = node->id();
         collective_comm_wrapper_map[fp->my_id] = fp;
         fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
     } else if (comm_type == ChakraCollectiveCommType::ALL_GATHER) {
+        auto context = operation_context;
+        context.collective_type = ComType::All_Gather;
         DataSet* fp = sys->generate_all_gather(comm_size, involved_dims,
-                                               comm_group, comm_priority, node->id());
+                                               comm_group, comm_priority,
+                                               node->id(), context);
         collective_comm_node_id_map[fp->my_id] = node->id();
         collective_comm_wrapper_map[fp->my_id] = fp;
         fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
     } else if (comm_type == ChakraCollectiveCommType::REDUCE_SCATTER) {
+        auto context = operation_context;
+        context.collective_type = ComType::Reduce_Scatter;
         DataSet* fp = sys->generate_reduce_scatter(comm_size, involved_dims,
-                                                   comm_group, comm_priority, node->id());
+                                                   comm_group, comm_priority,
+                                                   node->id(), context);
         collective_comm_node_id_map[fp->my_id] = node->id();
         collective_comm_wrapper_map[fp->my_id] = fp;
         fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
@@ -402,10 +458,14 @@ void Workload::issue_send_comm(
     stats->get_operator_statistics(node->id()).comm_size = size;
     const auto tag = node->comm_tag<uint32_t>();
 
-    sim_request snd_req;
+    sim_request snd_req{};
     snd_req.srcRank = src;
     snd_req.dstRank = dst;
+    snd_req.tag = tag;
     snd_req.reqType = UINT8;
+    snd_req.reqCount = size;
+    snd_req.operation = make_operation_context(
+        node, TransportRole::PointToPointPayload, ComType::None);
     SendPacketEventHandlerData* sehd = new SendPacketEventHandlerData;
     sehd->callable = this;
     sehd->wlhd = new WorkloadLayerHandlerData;
@@ -428,7 +488,14 @@ void Workload::issue_recv_comm(
     stats->get_operator_statistics(node->id()).comm_size = size;
     const auto tag = node->comm_tag<uint32_t>();
 
-    sim_request rcv_req;
+    sim_request rcv_req{};
+    rcv_req.srcRank = src;
+    rcv_req.dstRank = dst;
+    rcv_req.tag = tag;
+    rcv_req.reqType = UINT8;
+    rcv_req.reqCount = size;
+    rcv_req.operation = make_operation_context(
+        node, TransportRole::PointToPointPayload, ComType::None);
     RecvPacketEventHandlerData* rcehd = new RecvPacketEventHandlerData;
     rcehd->wlhd = new WorkloadLayerHandlerData;
     rcehd->wlhd->node_id = node->id();

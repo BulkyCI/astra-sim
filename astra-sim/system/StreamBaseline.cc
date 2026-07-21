@@ -13,8 +13,9 @@ StreamBaseline::StreamBaseline(Sys* owner,
                                DataSet* dataset,
                                int stream_id,
                                std::list<CollectivePhase> phases_to_go,
-                               int priority)
-    : BaseStream(stream_id, owner, phases_to_go) {
+                               int priority,
+                               OperationContext operation_context)
+    : BaseStream(stream_id, owner, phases_to_go, operation_context) {
     this->owner = owner;
     this->stream_id = stream_id;
     this->phases_to_go = phases_to_go;

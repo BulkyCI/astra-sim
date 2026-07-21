@@ -8,9 +8,10 @@ NS3_DIR="${SCRIPT_DIR:?}"/../../extern/network_backend/ns-3
 
 # Functions
 function setup {
-    protoc et_def.proto\
-        --proto_path ${SCRIPT_DIR}/../../extern/graph_frontend/chakra/schema/protobuf/\
-        --cpp_out ${SCRIPT_DIR}/../../extern/graph_frontend/chakra/schema/protobuf/
+    PROTO_DIR="${SCRIPT_DIR}/../../extern/graph_frontend/chakra/schema/protobuf"
+    protoc "${PROTO_DIR}/et_def.proto" \
+        --proto_path "${PROTO_DIR}" \
+        --cpp_out "${PROTO_DIR}"
 }
 function compile {
     cd "${NS3_DIR}"

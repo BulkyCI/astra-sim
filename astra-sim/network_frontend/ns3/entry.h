@@ -1,6 +1,7 @@
 #undef PGO_TRAINING
 #define PATH_TO_PGO_CONFIG "path_to_pgo_config"
 
+#include "astra-sim/network_frontend/ns3/ExperimentConfig.hh"
 #include "common.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -11,286 +12,361 @@
 #include "ns3/packet.h"
 #include "ns3/point-to-point-helper.h"
 #include "ns3/qbb-helper.h"
+
+#include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <map>
 #include <ns3/rdma-client-helper.h>
 #include <ns3/rdma-client.h>
 #include <ns3/rdma-driver.h>
 #include <ns3/rdma.h>
 #include <ns3/sim-setting.h>
 #include <ns3/switch-node.h>
-#include <time.h>
-#include <unordered_map>
+#include <stdexcept>
+#include <utility>
 
 using namespace ns3;
 using namespace std;
 
-/*
- * This file defines the interaction between the System layer and the NS3
- * simulator (Network layer). The system layer issues send/receive events, and
- * waits until the ns3 simulates the conclusion of these events to issue the
- * next collective communication. When ns3 simulates the conclusion of an event,
- * it will call qp_finish to lookup the maps in this file and call the callback
- * handlers. Refer to below comments for further detail.
- */
-
-// MsgEvent represents a single send or receive event, issued by the system
-// layer. The system layer will wait for the ns3 backend to simulate the event
-// finishing (i.e. node 0 finishes sending message, or node 1 finishes receiving
-// the message) The callback handler 'msg_handler' signals the System layer that
-// the event has finished in ns3.
+// This bridge owns the ns-3 side of ASTRA send/receive completion. A message
+// remains logically complete only when both its sender and receiver callbacks
+// have been resolved.
 class MsgEvent {
-public:
-  int src_id;
-  int dst_id;
-  int type;
-  // Indicates the number of bytes remaining to be sent or received.
-  // Initialized with the original size of the message, and
-  // incremented/decremented depending on how many bytes were sent/received.
-  // Eventually, this value will reach 0 when the event has completed.
-  int remaining_msg_bytes;
-  void *fun_arg;
-  void (*msg_handler)(void *fun_arg);
+  public:
+    int src_id;
+    int dst_id;
+    int type;
+    uint64_t remaining_msg_bytes;
+    void* fun_arg;
+    void (*msg_handler)(void* fun_arg);
 
-  MsgEvent(int _src_id, int _dst_id, int _type, int _remaining_msg_bytes,
-           void *_fun_arg, void (*_msg_handler)(void *fun_arg))
-      : src_id(_src_id), dst_id(_dst_id), type(_type),
-        remaining_msg_bytes(_remaining_msg_bytes), fun_arg(_fun_arg),
-        msg_handler(_msg_handler) {}
+    MsgEvent(int source,
+             int destination,
+             int event_type,
+             uint64_t remaining_bytes,
+             void* argument,
+             void (*handler)(void*))
+        : src_id(source),
+          dst_id(destination),
+          type(event_type),
+          remaining_msg_bytes(remaining_bytes),
+          fun_arg(argument),
+          msg_handler(handler) {}
 
-  // Default constructor to prevent compile errors. When looking up MsgEvents
-  // from maps such as sim_send_waiting_hash, we should always check that a MsgEvent exists
-  // for the given key. (i.e. this default constructor should not be called in
-  // runtime.)
-  MsgEvent()
-      : src_id(0), dst_id(0), type(0), remaining_msg_bytes(0), fun_arg(nullptr),
-        msg_handler(nullptr) {}
+    MsgEvent()
+        : src_id(0),
+          dst_id(0),
+          type(0),
+          remaining_msg_bytes(0),
+          fun_arg(nullptr),
+          msg_handler(nullptr) {}
 
-  // CallHandler will call the callback handler associated with this MsgEvent.
-  void callHandler() {
-    msg_handler(fun_arg);
-    return;
-  }
+    void callHandler() {
+        if (msg_handler == nullptr) {
+            throw runtime_error("Missing ASTRA message completion callback");
+        }
+        msg_handler(fun_arg);
+    }
 };
 
-// MsgEventKey is a key to uniquely identify each MsgEvent.
-//  - Pair <Tag, Pair <src_id, dst_id>>
-typedef pair<int, pair<int, int>> MsgEventKey;
+using MsgEventKey = pair<int, pair<int, int>>;
+using SenderKey = pair<int, pair<int, int>>;
+using FlowKey = pair<uint16_t, pair<int, int>>;
 
-// The ns3 RdmaClient structure cannot hold the 'tag' information, which is a
-// Astra-sim specific implementation. We use a mapping with the source port
-// number (another unique value) to hold tag information.
-//   - key: Pair <port_id, Pair <src_id, dst_id>>
-//   - value: tag
-// TODO: It seems we *can* obtain the tag through q->GetTag() at qp_finish.
-// Verify & Simplify.
-map<pair<int, pair<int, int>>, int> sender_src_port_map;
-
-// NodeHash is used to count how many bytes were sent/received by this node.
-// Refer to sim_finish().
-//   - key: Pair <node_id, send/receive>. Where 'send/receive' indicates if the
-//   value is for send or receive
-//   - value: Number of bytes this node has sent (if send/receive is 0) and
-//   received (if send/receive is 1)
-map<pair<int, int>, int> node_to_bytes_sent_map;
-
-// SentHash stores a MsgEvent for sim_send events and its callback handler.
-//   - key: A pair of <MsgEventKey, port_id>. 
-//          A single collective phase can be split into multiple sim_send messages, which all have the same MsgEventKey. 
-//          TODO: Adding port_id as key is a hacky solution. The real solution would be to split this map, similar to sim_recv_waiting_hash and received_msg_standby_hash.
-//   - value: A MsgEvent instance that indicates that Sys layer is waiting for a
-//   send event to finish
+map<SenderKey, int> sender_src_port_map;
+map<pair<int, int>, uint64_t> node_to_bytes_sent_map;
 map<pair<MsgEventKey, int>, MsgEvent> sim_send_waiting_hash;
-
-// While ns3 cannot send packets before System layer calls sim_send, it
-// is possible for ns3 to simulate Incoming messages before System layer calls
-// sim_recv to 'reap' the messages. Therefore, we maintain two maps:
-//   - sim_recv_waiting_hash holds messages where sim_recv has been called but ns3 has
-//   not yet simulated the message arriving,
-//   - received_msg_standby_hash holds messages which ns3 has simulated the arrival, but sim_recv
-//   has not yet been called.
-
-//   - key: A MsgEventKey isntance.
-//   - value: A MsgEvent instance that indicates that Sys layer is waiting for a
-//   receive event to finish
 map<MsgEventKey, MsgEvent> sim_recv_waiting_hash;
+map<MsgEventKey, uint64_t> received_msg_standby_hash;
+map<FlowKey, AstraSimNs3::FlowRecord> active_flow_registry;
+uint64_t pending_background_flows = 0;
 
-//   - key: A MsgEventKey isntance.
-//   - value: The number of bytes that ns3 has simulated completed, but the
-//   System layer has not yet called sim_recv
-map<MsgEventKey, int> received_msg_standby_hash;
-
-// send_flow commands the ns3 simulator to schedule a RDMA message to be sent
-// between two pair of nodes. send_flow is triggered by sim_send.
-void send_flow(int src_id, int dst, int maxPacketCount,
-               void (*msg_handler)(void *fun_arg), void *fun_arg, int tag) {
-  // Get a new port number.
-  uint32_t port = portNumber[src_id][dst]++;
-  sender_src_port_map[make_pair(port, make_pair(src_id, dst))] = tag;
-  int pg = 3, dport = 100;
-  flow_input.idx++;
-
-  // Create a MsgEvent instance and register callback function.
-  MsgEvent send_event =
-      MsgEvent(src_id, dst, 0, maxPacketCount, fun_arg, msg_handler);
-  pair<MsgEventKey, int> send_event_key =
-      make_pair(make_pair(tag, make_pair(send_event.src_id, send_event.dst_id)),port) ;
-  sim_send_waiting_hash[send_event_key] = send_event;
-
-  // Create a queue pair and schedule within the ns3 simulator.
-  RdmaClientHelper clientHelper(
-      pg, serverAddress[src_id], serverAddress[dst], port, dport,
-      maxPacketCount,
-      has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(src_id)][n.Get(dst)])
-              : 0,
-      global_t == 1 ? maxRtt : pairRtt[src_id][dst], msg_handler, fun_arg, tag,
-      src_id, dst);
-  ApplicationContainer appCon = clientHelper.Install(n.Get(src_id));
-  appCon.Start(Time(0));
+FlowKey make_flow_key(uint16_t source_port, int src_id, int dst_id) {
+    return make_pair(source_port, make_pair(src_id, dst_id));
 }
 
-// notify_receiver_receive_data looks at whether the System layer has issued
-// sim_recv for this message. If the system layer is waiting for this message,
-// call the callback handler for the MsgEvent. If the system layer is not *yet*
-// waiting for this message, register that this message has arrived,
-// so that the system layer can later call the callback handler when sim_recv
-// is called.
-void notify_receiver_receive_data(int src_id, int dst_id, int message_size,
-                                  int tag) {
-
-  MsgEventKey recv_expect_event_key = make_pair(tag, make_pair(src_id, dst_id));
-
-  if (sim_recv_waiting_hash.find(recv_expect_event_key) != sim_recv_waiting_hash.end()) {
-    // The Sys object is waiting for packets to arrive.
-    MsgEvent recv_expect_event = sim_recv_waiting_hash[recv_expect_event_key];
-    if (message_size == recv_expect_event.remaining_msg_bytes) {
-      // We received exactly the amount of data what Sys object was expecting.
-      sim_recv_waiting_hash.erase(recv_expect_event_key);
-      recv_expect_event.callHandler();
-    } else if (message_size > recv_expect_event.remaining_msg_bytes) {
-      // We received more packets than the Sys object is expecting.
-      // Place task in received_msg_standby_hash and wait for Sys object to issue more sim_recv
-      // calls. Call callback handler for the amount Sys object was waiting for.
-      received_msg_standby_hash[recv_expect_event_key] =
-          message_size - recv_expect_event.remaining_msg_bytes;
-      sim_recv_waiting_hash.erase(recv_expect_event_key);
-      recv_expect_event.callHandler();
-    } else {
-      // There are still packets to arrive.
-      // Reduce the number of packets we are waiting for. Do not call callback
-      // handler.
-      recv_expect_event.remaining_msg_bytes -= message_size;
-      sim_recv_waiting_hash[recv_expect_event_key] = recv_expect_event;
-    }
-  } else {
-    // The Sys object is not yet waiting for packets to arrive.
-    if (received_msg_standby_hash.find(recv_expect_event_key) == received_msg_standby_hash.end()) {
-      // Place task in received_msg_standby_hash and wait for Sys object to issue more sim_recv
-      // calls.
-      received_msg_standby_hash[recv_expect_event_key] = message_size;
-    } else {
-      // Sys object is still waiting. Add number of bytes we are waiting for.
-      received_msg_standby_hash[recv_expect_event_key] += message_size;
-    }
-  }
-
-  // Add to the number of total bytes received.
-  if (node_to_bytes_sent_map.find(make_pair(dst_id, 1)) == node_to_bytes_sent_map.end()) {
-    node_to_bytes_sent_map[make_pair(dst_id, 1)] = message_size;
-  } else {
-    node_to_bytes_sent_map[make_pair(dst_id, 1)] += message_size;
-  }
+void account_physical_bytes(int src_id, int dst_id, uint64_t bytes) {
+    node_to_bytes_sent_map[make_pair(src_id, 0)] += bytes;
+    node_to_bytes_sent_map[make_pair(dst_id, 1)] += bytes;
 }
 
-void notify_sender_sending_finished(int src_id, int dst_id, int message_size,
-                                    int tag, int src_port) {
-  // Lookup the send_event registered at send_flow().
-  pair<MsgEventKey, int> send_event_key = make_pair(make_pair(tag, make_pair(src_id, dst_id)), src_port);
-  if (sim_send_waiting_hash.find(send_event_key) == sim_send_waiting_hash.end()) {
-    cerr << "Cannot find send_event in sent_hash. Something is wrong."
-         << "tag, src_id, dst_id: " << tag << " " << src_id << " " << dst_id
-         << "\n";
-    exit(1);
-  }
+bool has_pending_background_traffic() {
+    return pending_background_flows != 0;
+}
 
-  // Verify that the (ns3 identified) sent message size matches what was
-  // expected by the system layer.
-  MsgEvent send_event = sim_send_waiting_hash[send_event_key];
-  if (send_event.remaining_msg_bytes != message_size) {
-    cerr << "The message size does not match what is expected. Something is "
-            "wrong."
-         << "tag, src_id, dst_id, expected msg_bytes, actual msg_bytes: " << tag
-         << " " << src_id << " " << dst_id << " "
-         << send_event.remaining_msg_bytes << " " << message_size << "\n";
-    exit(1);
-  }
-  sim_send_waiting_hash.erase(send_event_key);
+void register_logical_send_event(int src_id,
+                                 int dst_id,
+                                 uint64_t bytes,
+                                 void (*handler)(void*),
+                                 void* argument,
+                                 int tag,
+                                 uint16_t source_port) {
+    const auto key = make_pair(make_pair(tag, make_pair(src_id, dst_id)),
+                               static_cast<int>(source_port));
+    if (!sim_send_waiting_hash.emplace(
+             key, MsgEvent(src_id, dst_id, 0, bytes, argument, handler))
+             .second) {
+        throw runtime_error("Duplicate logical ASTRA send event");
+    }
+}
 
-  // Add to the number of total bytes sent.
-  if (node_to_bytes_sent_map.find(make_pair(src_id, 0)) == node_to_bytes_sent_map.end()) {
-    node_to_bytes_sent_map[make_pair(src_id, 0)] = message_size;
-  } else {
+void start_rdma_flow(AstraSimNs3::FlowRecord flow,
+                     void (*msg_handler)(void*) = nullptr,
+                     void* fun_arg = nullptr) {
+    if (flow.src < 0 || flow.dst < 0 ||
+        static_cast<size_t>(flow.src) >= serverAddress.size() ||
+        static_cast<size_t>(flow.dst) >= serverAddress.size()) {
+        throw runtime_error("Flow endpoints are outside the physical topology");
+    }
+    AstraSimNs3::validate_priority_group(flow.priority_group,
+                                         "flow priority group");
+    if (portNumber[flow.src][flow.dst] == numeric_limits<uint16_t>::max()) {
+        throw runtime_error("Source-port space exhausted for host pair");
+    }
+
+    const uint16_t port = portNumber[flow.src][flow.dst]++;
+    flow.source_port = port;
+    flow.start_time_ns = Simulator::Now().GetNanoSeconds();
+    if (flow.kind != AstraSimNs3::FlowKind::BackgroundMicroburst) {
+        sender_src_port_map.emplace(make_pair(port, make_pair(flow.src, flow.dst)),
+                                    flow.tag);
+        register_logical_send_event(flow.src, flow.dst, flow.logical_bytes,
+                                    msg_handler, fun_arg, flow.tag, port);
+    }
+
+    const FlowKey key = make_flow_key(port, flow.src, flow.dst);
+    if (!active_flow_registry.emplace(key, flow).second) {
+        throw runtime_error("Duplicate active RDMA flow key");
+    }
+    flow_input.idx++;
+
+    RdmaClientHelper client_helper(
+        flow.priority_group, serverAddress[flow.src], serverAddress[flow.dst],
+        port, 100, flow.physical_bytes,
+        has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(flow.src)][n.Get(flow.dst)])
+                : 0,
+        global_t == 1 ? maxRtt : pairRtt[flow.src][flow.dst], msg_handler,
+        fun_arg, flow.tag, flow.src, flow.dst);
+    ApplicationContainer applications = client_helper.Install(n.Get(flow.src));
+    applications.Start(Simulator::Now());
+}
+
+void start_background_flow(AstraSimNs3::MicroburstFlow* background) {
+    try {
+        AstraSimNs3::FlowRecord flow;
+        flow.kind = AstraSimNs3::FlowKind::BackgroundMicroburst;
+        flow.operation.transport_role = AstraSim::TransportRole::BackgroundTraffic;
+        flow.origin_transport_role = AstraSim::TransportRole::BackgroundTraffic;
+        flow.operation.training_step =
+            AstraSimNs3::experiment_config.microburst_trigger_step;
+        flow.src = static_cast<int>(background->src);
+        flow.dst = static_cast<int>(background->dst);
+        flow.priority_group = background->priority_group;
+        flow.logical_bytes = background->size_bytes;
+        flow.physical_bytes = background->size_bytes;
+        start_rdma_flow(flow);
+    } catch (const exception& error) {
+        cerr << "Unable to start background microburst flow: " << error.what()
+             << "\n";
+        exit(EXIT_FAILURE);
+    }
+    delete background;
+}
+
+void maybe_trigger_microburst(const AstraSim::sim_request& request) {
+    const auto& config = AstraSimNs3::experiment_config;
+    if (!config.enabled || !config.microburst_enabled ||
+        config.microburst_triggered ||
+        !AstraSim::is_dp_all_reduce_payload(request.operation) ||
+        request.operation.training_step != config.microburst_trigger_step) {
+        return;
+    }
+
+    AstraSimNs3::experiment_config.microburst_triggered = true;
+    for (const auto& flow : config.microburst_flows) {
+        ++pending_background_flows;
+        Simulator::Schedule(NanoSeconds(flow.offset_ns), &start_background_flow,
+                            new AstraSimNs3::MicroburstFlow(flow));
+    }
+}
+
+// Called by the ASTRA network API to start one reliable ns-3 RDMA QP.
+void send_flow(int src_id,
+               int dst_id,
+               uint64_t message_size,
+               void (*msg_handler)(void*),
+               void* fun_arg,
+               int tag,
+               const AstraSim::sim_request& request) {
+    maybe_trigger_microburst(request);
+    const auto decision =
+        AstraSimNs3::evaluate_shedding(request, src_id, dst_id, tag);
+
+    AstraSimNs3::FlowRecord flow;
+    flow.operation = request.operation;
+    flow.origin_transport_role = request.operation.transport_role;
+    flow.admission_eligible = decision.eligible;
+    flow.decision_hash = decision.decision_hash;
+    flow.src = src_id;
+    flow.dst = dst_id;
+    flow.tag = tag;
+    flow.logical_bytes = message_size;
+    flow.shed = decision.shed;
+
+    if (decision.shed) {
+        flow.kind = AstraSimNs3::FlowKind::ProvenanceControl;
+        flow.operation.transport_role = AstraSim::TransportRole::ProvenanceControl;
+        flow.priority_group =
+            AstraSimNs3::experiment_config.provenance_priority_group;
+        flow.physical_bytes =
+            AstraSimNs3::experiment_config.provenance_control_bytes;
+    } else {
+        flow.kind = AstraSimNs3::FlowKind::ForegroundPayload;
+        flow.priority_group = AstraSimNs3::priority_group_for_vnet(request.vnet);
+        flow.physical_bytes = message_size;
+    }
+    start_rdma_flow(flow, msg_handler, fun_arg);
+}
+
+void notify_receiver_receive_data(int src_id,
+                                  int dst_id,
+                                  uint64_t message_size,
+                                  int tag,
+                                  bool count_physical_bytes = true) {
+    const MsgEventKey key = make_pair(tag, make_pair(src_id, dst_id));
+    const auto expected = sim_recv_waiting_hash.find(key);
+    if (expected != sim_recv_waiting_hash.end()) {
+        MsgEvent event = expected->second;
+        if (message_size == event.remaining_msg_bytes) {
+            sim_recv_waiting_hash.erase(expected);
+            event.callHandler();
+        } else if (message_size > event.remaining_msg_bytes) {
+            received_msg_standby_hash[key] =
+                message_size - event.remaining_msg_bytes;
+            sim_recv_waiting_hash.erase(expected);
+            event.callHandler();
+        } else {
+            event.remaining_msg_bytes -= message_size;
+            expected->second = event;
+        }
+    } else {
+        received_msg_standby_hash[key] += message_size;
+    }
+    if (count_physical_bytes) {
+        node_to_bytes_sent_map[make_pair(dst_id, 1)] += message_size;
+    }
+}
+
+void notify_sender_sending_finished(int src_id,
+                                    int dst_id,
+                                    uint64_t message_size,
+                                    int tag,
+                                    uint16_t source_port) {
+    const auto key = make_pair(make_pair(tag, make_pair(src_id, dst_id)),
+                               static_cast<int>(source_port));
+    const auto waiting = sim_send_waiting_hash.find(key);
+    if (waiting == sim_send_waiting_hash.end()) {
+        throw runtime_error("Cannot find the completed ASTRA send event");
+    }
+    if (waiting->second.remaining_msg_bytes != message_size) {
+        throw runtime_error("Completed RDMA payload size does not match ASTRA");
+    }
+    MsgEvent event = waiting->second;
+    sim_send_waiting_hash.erase(waiting);
     node_to_bytes_sent_map[make_pair(src_id, 0)] += message_size;
-  }
-  send_event.callHandler();
+    event.callHandler();
 }
 
-void qp_finish_print_log(FILE *fout, Ptr<RdmaQueuePair> q) {
-  uint32_t sid = ip_to_node_id(q->sip), did = ip_to_node_id(q->dip);
-  uint64_t base_rtt = pairRtt[sid][did], b = pairBw[sid][did];
-  uint32_t total_bytes =
-      q->m_size +
-      ((q->m_size - 1) / packet_payload_size + 1) *
-          (CustomHeader::GetStaticWholeHeaderSize() -
-           IntHeader::GetStaticSize()); // translate to the minimum bytes
-                                        // required (with header but no INT)
-  uint64_t standalone_fct = base_rtt + total_bytes * 8000000000lu / b;
-  // sip, dip, sport, dport, size (B), start_time, fct (ns), standalone_fct (ns)
-  fprintf(fout, "%08x %08x %u %u %lu %lu %lu %lu\n", q->sip.Get(), q->dip.Get(),
-          q->sport, q->dport, q->m_size, q->startTime.GetTimeStep(),
-          (Simulator::Now() - q->startTime).GetTimeStep(), standalone_fct);
-  fflush(fout);
+void complete_logical_shed_sender(const AstraSimNs3::FlowRecord& flow) {
+    const auto key = make_pair(make_pair(flow.tag, make_pair(flow.src, flow.dst)),
+                               static_cast<int>(flow.source_port));
+    const auto waiting = sim_send_waiting_hash.find(key);
+    if (waiting == sim_send_waiting_hash.end()) {
+        throw runtime_error("Cannot find provenance-controlled ASTRA send");
+    }
+    if (waiting->second.remaining_msg_bytes != flow.logical_bytes) {
+        throw runtime_error("Provenance completion does not match logical size");
+    }
+    MsgEvent event = waiting->second;
+    sim_send_waiting_hash.erase(waiting);
+    event.callHandler();
 }
 
-// qp_finish is triggered by NS3 to indicate that an RDMA queue pair has
-// finished. qp_finish is registered as the callback handlerto the RdmaClient
-// instance created at send_flow. This registration is done at
-// common.h::SetupNetwork().
-void qp_finish(FILE *fout, Ptr<RdmaQueuePair> q) {
-  uint32_t sid = ip_to_node_id(q->sip), did = ip_to_node_id(q->dip);
-  qp_finish_print_log(fout, q);
+void qp_finish_print_log(FILE* fout, Ptr<RdmaQueuePair> q) {
+    const uint32_t sid = ip_to_node_id(q->sip);
+    const uint32_t did = ip_to_node_id(q->dip);
+    const uint64_t base_rtt = pairRtt[sid][did];
+    const uint64_t bandwidth = pairBw[sid][did];
+    const uint64_t total_bytes =
+        q->m_size + ((q->m_size - 1) / packet_payload_size + 1) *
+                        (CustomHeader::GetStaticWholeHeaderSize() -
+                         IntHeader::GetStaticSize());
+    const uint64_t standalone_fct =
+        base_rtt + total_bytes * 8000000000ULL / bandwidth;
+    fprintf(fout, "%08x %08x %u %u %llu %llu %llu %llu\n", q->sip.Get(),
+            q->dip.Get(), q->sport, q->dport,
+            static_cast<unsigned long long>(q->m_size),
+            static_cast<unsigned long long>(q->startTime.GetTimeStep()),
+            static_cast<unsigned long long>(
+                (Simulator::Now() - q->startTime).GetTimeStep()),
+            static_cast<unsigned long long>(standalone_fct));
+    fflush(fout);
+}
 
-  // remove rxQp from the receiver.
-  Ptr<Node> dstNode = n.Get(did);
-  Ptr<RdmaDriver> rdma = dstNode->GetObject<RdmaDriver>();
-  rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
+// Registered by common.h::SetupNetwork and invoked for every completed QP.
+void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
+    const uint32_t sid = ip_to_node_id(q->sip);
+    const uint32_t did = ip_to_node_id(q->dip);
+    qp_finish_print_log(fout, q);
 
-  // Identify the tag of this message.
-  if (sender_src_port_map.find(make_pair(q->sport, make_pair(sid, did))) ==
-      sender_src_port_map.end()) {
-    cout << "could not find the tag, there must be something wrong" << endl;
-    exit(-1);
-  }
-  int tag = sender_src_port_map[make_pair(q->sport, make_pair(sid, did))];
-  sender_src_port_map.erase(make_pair(q->sport, make_pair(sid, did)));
+    Ptr<Node> dst_node = n.Get(did);
+    Ptr<RdmaDriver> rdma = dst_node->GetObject<RdmaDriver>();
+    rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
 
-  // Let sender knows that the flow has finished.
-  notify_sender_sending_finished(sid, did, q->m_size, tag, q->sport);
+    const FlowKey key = make_flow_key(q->sport, sid, did);
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        throw runtime_error("Completed QP has no active flow record");
+    }
+    AstraSimNs3::FlowRecord flow = active->second;
+    flow.physical_bytes = q->m_size;
+    flow.end_time_ns = Simulator::Now().GetNanoSeconds();
+    flow.terminal = true;
 
-  // Let receiver knows that it has received packets.
-  notify_receiver_receive_data(sid, did, q->m_size, tag);
+    if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
+        account_physical_bytes(sid, did, q->m_size);
+        if (pending_background_flows == 0) {
+            throw runtime_error("Background flow completion accounting underflow");
+        }
+        --pending_background_flows;
+    } else {
+        const SenderKey sender_key =
+            make_pair(static_cast<int>(q->sport), make_pair(sid, did));
+        if (sender_src_port_map.erase(sender_key) != 1) {
+            throw runtime_error("Completed QP has no logical sender tag");
+        }
+        if (flow.kind == AstraSimNs3::FlowKind::ProvenanceControl) {
+            complete_logical_shed_sender(flow);
+            notify_receiver_receive_data(sid, did, flow.logical_bytes,
+                                         flow.tag, false);
+            account_physical_bytes(sid, did, q->m_size);
+        } else {
+            notify_sender_sending_finished(sid, did, q->m_size, flow.tag,
+                                           q->sport);
+            notify_receiver_receive_data(sid, did, q->m_size, flow.tag);
+        }
+    }
+    AstraSimNs3::experiment_telemetry.record_flow(flow);
+    active_flow_registry.erase(active);
 }
 
 int setup_ns3_simulation(string network_configuration) {
-  if (!ReadConf(network_configuration))
-    return -1;
-
-  SetConfig();
-
-  if (!SetupNetwork(qp_finish)) {
-    return -1;
-  }
-
-  return 0;
-
+    if (!ReadConf(network_configuration)) {
+        return -1;
+    }
+    SetConfig();
+    return SetupNetwork(qp_finish) ? 0 : -1;
 }

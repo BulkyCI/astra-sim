@@ -3,8 +3,8 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 *******************************************************************************/
 
-#ifndef __COMMON_HH__
-#define __COMMON_HH__
+#ifndef ASTRA_SIM_SYSTEM_COMMON_HH_
+#define ASTRA_SIM_SYSTEM_COMMON_HH_
 
 #include <cstdint>
 #include <string>
@@ -150,4 +150,4 @@ enum class EventType {
 
 }  // namespace AstraSim
 
-#endif /* __COMMON_HH__ */
+#endif  // ASTRA_SIM_SYSTEM_COMMON_HH_

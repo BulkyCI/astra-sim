@@ -313,7 +313,7 @@ OperationContext Workload::make_operation_context(
 
     if (node->has_attr("parallelism_domain")) {
         const auto& attr = node->get_attr_msg("parallelism_domain");
-        if (!attr.has_string_val()) {
+        if (attr.value_case() != ChakraProtoMsg::AttributeProto::kStringVal) {
             throw runtime_error(
                 "parallelism_domain must be a Chakra string attribute");
         }
@@ -333,7 +333,8 @@ OperationContext Workload::make_operation_context(
 
     if (node->has_attr("training_step")) {
         const auto& attr = node->get_attr_msg("training_step");
-        if (!attr.has_uint64_val() || attr.uint64_val() == 0 ||
+        if (attr.value_case() != ChakraProtoMsg::AttributeProto::kUint64Val ||
+            attr.uint64_val() == 0 ||
             attr.uint64_val() > numeric_limits<uint32_t>::max()) {
             throw runtime_error(
                 "training_step must be a nonzero uint64 Chakra attribute");

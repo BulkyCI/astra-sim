@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 try:
-    from .generate import materialize
+    from .generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
 except ImportError:
-    from generate import materialize
+    from generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -28,17 +28,31 @@ def find_default_binary() -> Path:
     return matches[-1]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable")
-    parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
-    parser.add_argument("--skip-analysis", action="store_true")
-    arguments = parser.parse_args()
+def lossless_drop_probabilities() -> dict[str, float]:
+    """Return the enabled-policy baseline with zero logical suppression."""
+    return {step: 0.0 for step in DEFAULT_DROP_PROBABILITY_BY_STEP}
 
-    manifest = materialize(arguments.profile.resolve(), arguments.output.resolve(), arguments.clean)
-    binary = (arguments.binary.resolve() if arguments.binary else find_default_binary())
+
+def run_experiment(
+    profile: Path,
+    output: Path,
+    *,
+    binary: Path | None = None,
+    clean: bool = False,
+    seed: int | None = None,
+    drop_probabilities: dict[str, float] | None = None,
+    skip_analysis: bool = False,
+) -> dict[str, str]:
+    """Materialize, execute, and analyze one reproducible policy invocation."""
+    output = output.resolve()
+    manifest = materialize(
+        profile.resolve(),
+        output,
+        clean,
+        seed_override=seed,
+        drop_probabilities=drop_probabilities,
+    )
+    binary = binary.resolve() if binary else find_default_binary()
     if not binary.is_file() or not binary.stat().st_mode & 0o111:
         raise FileNotFoundError(f"ns-3 executable is unavailable or not executable: {binary}")
 
@@ -55,7 +69,7 @@ def main() -> int:
     ]
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)
 
-    if not arguments.skip_analysis:
+    if not skip_analysis:
         analysis = REPOSITORY_ROOT / "experiments/ring_3d/analyze.py"
         subprocess.run(
             [
@@ -63,12 +77,43 @@ def main() -> int:
                 str(analysis),
                 "--telemetry-dir",
                 manifest["telemetry_dir"],
+                "--fct-file",
+                str(output / "ns3" / "fct.txt"),
+                "--ns3-dir",
+                str(output / "ns3"),
                 "--output",
-                str(arguments.output.resolve() / "summary.json"),
+                str(output / "summary.json"),
             ],
             cwd=REPOSITORY_ROOT,
             check=True,
         )
+    return manifest
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable")
+    parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
+    parser.add_argument("--seed", type=int, help="override the profile seed")
+    parser.add_argument(
+        "--lossless-baseline",
+        action="store_true",
+        help="keep the policy and microbursts enabled while setting every suppression threshold to zero",
+    )
+    parser.add_argument("--skip-analysis", action="store_true")
+    arguments = parser.parse_args()
+
+    manifest = run_experiment(
+        arguments.profile,
+        arguments.output,
+        binary=arguments.binary,
+        clean=arguments.clean,
+        seed=arguments.seed,
+        drop_probabilities=(lossless_drop_probabilities() if arguments.lossless_baseline else None),
+        skip_analysis=arguments.skip_analysis,
+    )
     print(json.dumps(manifest, indent=2))
     return 0
 

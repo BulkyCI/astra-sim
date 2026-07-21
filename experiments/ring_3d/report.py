@@ -61,6 +61,10 @@ def _format_duration_ns(value: int) -> str:
     return f"{value / 1_000_000_000:.2f} s"
 
 
+def _format_optional_duration_ns(value: Any) -> str:
+    return _format_duration_ns(value) if isinstance(value, int) else "not available"
+
+
 def _format_probability(value: Any) -> str:
     try:
         return f"{float(value) * 100:.2f}%"
@@ -93,6 +97,19 @@ def _aggregate_by(rows: list[dict[str, str]], field: str) -> dict[str, dict[str,
         bucket["logical_bytes"] += _as_int(row.get("logical_bytes"), "logical_bytes")
         bucket["physical_bytes"] += _as_int(row.get("physical_bytes"), "physical_bytes")
     return dict(sorted(aggregates.items()))
+
+
+def _timing_table_row(label: str, values: Any) -> list[Any] | None:
+    if not isinstance(values, dict) or not values.get("count"):
+        return None
+    return [
+        label,
+        values["count"],
+        _format_optional_duration_ns(values.get("p50_ns")),
+        _format_optional_duration_ns(values.get("p95_ns")),
+        _format_optional_duration_ns(values.get("p99_ns")),
+        _format_optional_duration_ns(values.get("max_ns")),
+    ]
 
 
 def _dp_decisions_by_step(rows: list[dict[str, str]]) -> dict[str, dict[str, int]]:
@@ -189,6 +206,14 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     else:
         provenance = policy.get("provenance", {})
         microburst = policy.get("microburst", {})
+        microburst_flows = microburst.get("flows", [])
+        if not isinstance(microburst_flows, list):
+            microburst_flows = []
+        microburst_bytes = sum(
+            _as_int(flow.get("size_bytes", 0), "microburst.size_bytes")
+            for flow in microburst_flows
+            if isinstance(flow, dict)
+        )
         lines.extend(
             _markdown_table(
                 ["Field", "Configured value"],
@@ -198,6 +223,8 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     ["Protected provenance control", f"{provenance.get('control_bytes', 'unknown')} B on priority group {provenance.get('priority_group', 'unknown')}"],
                     ["Background microburst", "enabled" if microburst.get("enabled") else "disabled"],
                     ["Microburst trigger step", microburst.get("trigger_step", "not applicable")],
+                    ["Microburst flows", len(microburst_flows) if microburst.get("enabled") else "not applicable"],
+                    ["Total microburst bytes", _format_bytes(microburst_bytes) if microburst.get("enabled") else "not applicable"],
                 ],
             )
         )
@@ -221,13 +248,38 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     else:
         completed_ranks = {_as_int(row.get("rank"), "rank") for row in completions}
         complete = len(completed_ranks) == expected_ranks and len(completions) == expected_ranks
+        fct_join = summary.get("fct_join")
+        if isinstance(fct_join, dict) and fct_join.get("status") == "verified":
+            fct_join_status = (
+                "VERIFIED — "
+                f"{fct_join.get('telemetry_flow_count', 'unknown')} telemetry flows / "
+                f"{fct_join.get('fct_record_count', 'unknown')} ns-3 FCT records"
+            )
+        else:
+            fct_join_status = "not available"
         integrity_rows = [
             ["Telemetry analyzer", "PASS — DP-only shedding and nonzero provenance control were validated before this report was written"],
             ["Rank completion", f"{len(completed_ranks)} unique / {expected_ranks} expected ({'complete' if complete else 'incomplete'})"],
             ["Flow telemetry", f"{len(flows)} rows / {summary.get('flow_count', 'unknown')} summarized"],
+            ["Telemetry ↔ ns-3 FCT join", fct_join_status],
             ["Maximum rank completion time", _format_duration_ns(_as_int(summary.get("completion_time_ns_max", 0), "completion_time_ns_max"))],
         ]
         lines.extend(_markdown_table(["Check", "Result"], integrity_rows))
+
+        rank_timing = summary.get("rank_completion_time_ns")
+        rank_timing_row = _timing_table_row("Rank completion", rank_timing)
+        if rank_timing_row is not None:
+            lines.extend(["", "### Simulated rank-completion distribution", ""])
+            lines.append(
+                "> The maximum is the simulated workload makespan; it is not a measured application JCT."
+            )
+            lines.append("")
+            lines.extend(
+                _markdown_table(
+                    ["Population", "Ranks", "P50", "P95", "P99", "Makespan"],
+                    [rank_timing_row],
+                )
+            )
 
         lines.extend(["", "## Measured traffic", ""])
         lines.extend(
@@ -338,6 +390,82 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     kind_rows,
                 )
             )
+
+        flow_timing = summary.get("flow_completion_time_ns")
+        if isinstance(flow_timing, dict):
+            timing_rows: list[list[Any]] = []
+            for label, values in [("All QPs", flow_timing.get("all"))]:
+                if (row := _timing_table_row(label, values)) is not None:
+                    timing_rows.append(row)
+            by_kind = flow_timing.get("by_flow_kind")
+            if isinstance(by_kind, dict):
+                for kind, values in by_kind.items():
+                    if (row := _timing_table_row(kind, values)) is not None:
+                        timing_rows.append(row)
+            by_domain_and_kind = flow_timing.get(
+                "by_parallelism_domain_and_flow_kind"
+            )
+            if isinstance(by_domain_and_kind, dict):
+                dp_timing = by_domain_and_kind.get("dp")
+                if isinstance(dp_timing, dict):
+                    for kind, values in dp_timing.items():
+                        if (row := _timing_table_row(f"dp / {kind}", values)) is not None:
+                            timing_rows.append(row)
+            if timing_rows:
+                lines.extend(["", "## Per-QP flow-completion time", ""])
+                lines.append(
+                    "> FCT is `end_time_ns - start_time_ns` for one simulated RDMA QP. It is not a whole-collective latency measurement."
+                )
+                lines.append("")
+                lines.extend(
+                    _markdown_table(
+                        ["Traffic class", "QPs", "P50", "P95", "P99", "Max"],
+                        timing_rows,
+                    )
+                )
+
+            by_step = flow_timing.get("by_training_step")
+            if isinstance(by_step, dict):
+                step_timing_rows = [
+                    row
+                    for step, values in sorted(by_step.items(), key=lambda item: int(item[0]))
+                    if (row := _timing_table_row(f"Step {step}", values)) is not None
+                ]
+                if step_timing_rows:
+                    lines.extend(["", "### Per-QP FCT by training step", ""])
+                    lines.extend(
+                        _markdown_table(
+                            ["Traffic class", "QPs", "P50", "P95", "P99", "Max"],
+                            step_timing_rows,
+                        )
+                    )
+
+        observability = summary.get("ns3_observability")
+        if isinstance(observability, dict):
+            queue = observability.get("queue")
+            pfc = observability.get("pfc")
+            if isinstance(queue, dict) or isinstance(pfc, dict):
+                queue_status = queue.get("status", "not available") if isinstance(queue, dict) else "not available"
+                pfc_status = pfc.get("status", "not available") if isinstance(pfc, dict) else "not available"
+                queue_value = (
+                    f"{queue.get('sample_count', 0)} samples; "
+                    f"{queue.get('observed_queue_count', 0)} queues; peak "
+                    f"{_format_bytes(_as_int(queue.get('max_queue_bytes', 0), 'max_queue_bytes'))}"
+                    if queue_status == "available"
+                    else "not available"
+                )
+                pfc_value = (
+                    f"{pfc.get('event_count', 0)} nonempty trace records"
+                    if pfc_status == "available"
+                    else "not available"
+                )
+                lines.extend(["", "## ns-3 congestion observability", ""])
+                lines.extend(
+                    _markdown_table(
+                        ["Signal", "Observed value"],
+                        [["Queue telemetry", queue_value], ["PFC trace", pfc_value]],
+                    )
+                )
 
     lines.extend(["", "## Reproducibility", ""])
     lines.append(f"- Profile source: `{_display_path(profile_path)}`")

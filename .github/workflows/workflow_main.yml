@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ "master", "dev" ]
   workflow_dispatch:
+    inputs:
+      run_paired_incast:
+        description: Run the five-seed paired incast evaluation after native build
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -96,5 +102,53 @@ jobs:
       with:
         name: ring-3d-smoke-results-${{ github.run_id }}
         path: runs/ring_3d/smoke_8
+        if-no-files-found: ignore
+
+  paired-incast-evaluation:
+    name: Five-seed paired incast evaluation
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_paired_incast }}
+    needs: python-quality
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: "0.11.28"
+        enable-cache: true
+
+    - name: Install native build dependencies
+      run: ./.github/workflows/setup.sh
+
+    - name: Build analytical and ns-3 backends
+      run: bash ./.github/workflows/build.sh
+
+    - name: Run five-seed paired incast comparison
+      run: |
+        timeout --foreground 75m uv run --locked python experiments/ring_3d/compare.py \
+          --profile experiments/ring_3d/profiles/incast_8.json \
+          --output runs/ring_3d/incast_8_comparison --clean
+
+    - name: Publish paired comparison report
+      if: always()
+      run: |
+        if [[ -f runs/ring_3d/incast_8_comparison/comparison_report.md ]]; then
+          cat runs/ring_3d/incast_8_comparison/comparison_report.md >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "Paired incast comparison did not produce a report; inspect retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload paired incast reproducibility bundle
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ring-3d-incast-comparison-${{ github.run_id }}
+        path: runs/ring_3d/incast_8_comparison
         if-no-files-found: ignore
 

@@ -67,6 +67,34 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(policy["provenance"]["priority_group"], 1)
             self.assertEqual(manifest["ranks"], 8)
 
+    def test_incast_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
+        profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/incast_8.json"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output)
+
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            flows = policy["microburst"]["flows"]
+            self.assertEqual(len(flows), 7)
+            self.assertEqual({flow["dst"] for flow in flows}, {4})
+            self.assertEqual({flow["src"] for flow in flows}, {0, 1, 2, 3, 5, 6, 7})
+            self.assertEqual({flow["size_bytes"] for flow in flows}, {8 * 1024 * 1024})
+            self.assertEqual({flow["offset_ns"] for flow in flows}, {0})
+
+    def test_lossless_override_preserves_enabled_microburst(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(
+                self.profile_path,
+                output,
+                drop_probabilities={"1": 0.0, "2": 0.0, "3": 0.0},
+            )
+
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertTrue(policy["enabled"])
+            self.assertTrue(policy["microburst"]["enabled"])
+            self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.0, "3": 0.0})
+
     def test_trace_has_explicit_domains_and_overlap_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"

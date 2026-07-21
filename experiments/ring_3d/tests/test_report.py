@@ -67,6 +67,62 @@ class Ring3DReportTests(unittest.TestCase):
                     "shed_logical_bytes": 131_072,
                     "completion_rank_count": 8,
                     "completion_time_ns_max": 2_500,
+                    "rank_completion_time_ns": {
+                        "count": 8,
+                        "min_ns": 2_000,
+                        "p50_ns": 2_200,
+                        "p95_ns": 2_500,
+                        "p99_ns": 2_500,
+                        "max_ns": 2_500,
+                    },
+                    "flow_completion_time_ns": {
+                        "all": {
+                            "count": 2,
+                            "min_ns": 99,
+                            "p50_ns": 99,
+                            "p95_ns": 100,
+                            "p99_ns": 100,
+                            "max_ns": 100,
+                        },
+                        "by_training_step": {},
+                        "by_parallelism_domain": {},
+                        "by_flow_kind": {
+                            "foreground_payload": {
+                                "count": 1,
+                                "min_ns": 100,
+                                "p50_ns": 100,
+                                "p95_ns": 100,
+                                "p99_ns": 100,
+                                "max_ns": 100,
+                            }
+                        },
+                        "by_parallelism_domain_and_flow_kind": {
+                            "dp": {
+                                "foreground_payload": {
+                                    "count": 1,
+                                    "min_ns": 100,
+                                    "p50_ns": 100,
+                                    "p95_ns": 100,
+                                    "p99_ns": 100,
+                                    "max_ns": 100,
+                                }
+                            }
+                        },
+                    },
+                    "fct_join": {
+                        "status": "verified",
+                        "telemetry_flow_count": 2,
+                        "fct_record_count": 2,
+                    },
+                    "ns3_observability": {
+                        "queue": {
+                            "status": "available",
+                            "sample_count": 3,
+                            "observed_queue_count": 2,
+                            "max_queue_bytes": 4_096,
+                        },
+                        "pfc": {"status": "available", "event_count": 1},
+                    },
                     "by_training_step": {
                         "1": {
                             "flows": 1,
@@ -158,6 +214,10 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("Observed rate", report)
             self.assertIn("By parallelism domain", report)
             self.assertIn("provenance_control", report)
+            self.assertIn("Telemetry ↔ ns-3 FCT join", report)
+            self.assertIn("Per-QP flow-completion time", report)
+            self.assertIn("Simulated rank-completion distribution", report)
+            self.assertIn("ns-3 congestion observability", report)
 
     def test_report_explains_missing_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

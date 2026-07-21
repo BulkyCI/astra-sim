@@ -12,7 +12,7 @@ import argparse
 import json
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -36,7 +36,7 @@ from chakra.src.third_party.utils.protolib import (  # noqa: E402
 )
 
 
-EXPECTED_PROFILE_KEYS = {
+REQUIRED_PROFILE_KEYS = {
     "schema_version",
     "name",
     "parallelism",
@@ -49,7 +49,14 @@ EXPECTED_PROFILE_KEYS = {
     "network",
     "microburst_bytes",
 }
+OPTIONAL_PROFILE_KEYS = {
+    "microburst_flow_count",
+    "microburst_destination_rank",
+    "microburst_offset_spacing_ns",
+}
+EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
 EXPECTED_NETWORK_KEYS = {"hosts_per_leaf", "spine_count", "link_rate"}
+DEFAULT_DROP_PROBABILITY_BY_STEP = {"1": 0.0, "2": 0.1, "3": 0.1}
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,9 @@ class Profile:
     spine_count: int
     link_rate: str
     microburst_bytes: int
+    microburst_flow_count: int
+    microburst_destination_rank: int | None
+    microburst_offset_spacing_ns: int
 
     @property
     def ranks(self) -> int:
@@ -80,6 +90,12 @@ def _require_positive_int(value: Any, field: str) -> int:
     return value
 
 
+def _require_nonnegative_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a nonnegative integer")
+    return value
+
+
 def load_profile(profile_path: Path) -> Profile:
     with profile_path.open(encoding="utf-8") as handle:
         document = json.load(handle)
@@ -88,6 +104,9 @@ def load_profile(profile_path: Path) -> Profile:
     unknown_keys = set(document) - EXPECTED_PROFILE_KEYS
     if unknown_keys:
         raise ValueError(f"unknown profile keys: {sorted(unknown_keys)}")
+    missing_keys = REQUIRED_PROFILE_KEYS - set(document)
+    if missing_keys:
+        raise ValueError(f"missing profile keys: {sorted(missing_keys)}")
     if document.get("schema_version") != 1:
         raise ValueError("profile schema_version must be 1")
 
@@ -107,11 +126,31 @@ def load_profile(profile_path: Path) -> Profile:
     if not isinstance(link_rate, str) or not link_rate.endswith("Gbps"):
         raise ValueError("network.link_rate must be a rate such as 200Gbps")
 
+    tp = _require_positive_int(parallelism["tp"], "parallelism.tp")
+    pp = _require_positive_int(parallelism["pp"], "parallelism.pp")
+    dp = _require_positive_int(parallelism["dp"], "parallelism.dp")
+    ranks = tp * pp * dp
+    microburst_flow_count = _require_positive_int(
+        document.get("microburst_flow_count", min(2, ranks // 2)),
+        "microburst_flow_count",
+    )
+    if microburst_flow_count >= ranks:
+        raise ValueError("microburst_flow_count must leave at least one destination rank")
+    destination_value = document.get("microburst_destination_rank")
+    if destination_value is None:
+        microburst_destination_rank = None
+    else:
+        microburst_destination_rank = _require_nonnegative_int(
+            destination_value, "microburst_destination_rank"
+        )
+        if microburst_destination_rank >= ranks:
+            raise ValueError("microburst_destination_rank is outside the profile")
+
     profile = Profile(
         name=name,
-        tp=_require_positive_int(parallelism["tp"], "parallelism.tp"),
-        pp=_require_positive_int(parallelism["pp"], "parallelism.pp"),
-        dp=_require_positive_int(parallelism["dp"], "parallelism.dp"),
+        tp=tp,
+        pp=pp,
+        dp=dp,
         steps=3,
         compute_duration_us=_require_positive_int(
             document.get("compute_duration_us"), "compute_duration_us"
@@ -131,6 +170,12 @@ def load_profile(profile_path: Path) -> Profile:
         link_rate=link_rate,
         microburst_bytes=_require_positive_int(
             document.get("microburst_bytes"), "microburst_bytes"
+        ),
+        microburst_flow_count=microburst_flow_count,
+        microburst_destination_rank=microburst_destination_rank,
+        microburst_offset_spacing_ns=_require_nonnegative_int(
+            document.get("microburst_offset_spacing_ns", 1_000),
+            "microburst_offset_spacing_ns",
         ),
     )
     if profile.ranks % profile.hosts_per_leaf:
@@ -400,26 +445,59 @@ def write_network_config(path: Path, topology: Path, output_dir: Path) -> None:
         )
 
 
-def write_experiment_config(path: Path, profile: Profile) -> None:
-    cross_rack_base = profile.ranks // 2
-    flow_count = min(2, profile.ranks // 2)
-    microburst_flows = [
+def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
+    if profile.microburst_destination_rank is None:
+        cross_rack_base = profile.ranks // 2
+        destinations = [cross_rack_base + index for index in range(profile.microburst_flow_count)]
+        if any(destination >= profile.ranks for destination in destinations):
+            raise ValueError(
+                "microburst_flow_count requires microburst_destination_rank "
+                "when one-to-one cross-rack destinations exceed the profile"
+            )
+        endpoints = list(zip(range(profile.microburst_flow_count), destinations))
+    else:
+        destination = profile.microburst_destination_rank
+        sources = [rank for rank in range(profile.ranks) if rank != destination]
+        endpoints = [(source, destination) for source in sources[: profile.microburst_flow_count]]
+    return [
         {
-            "src": index,
-            "dst": cross_rack_base + index,
+            "src": source,
+            "dst": destination,
             "size_bytes": profile.microburst_bytes,
-            "offset_ns": index * 1_000,
+            "offset_ns": index * profile.microburst_offset_spacing_ns,
             "priority_group": 3,
         }
-        for index in range(flow_count)
+        for index, (source, destination) in enumerate(endpoints)
     ]
+
+
+def _validated_drop_probabilities(
+    probabilities: dict[str, float] | None,
+) -> dict[str, float]:
+    result = dict(DEFAULT_DROP_PROBABILITY_BY_STEP if probabilities is None else probabilities)
+    if set(result) != set(DEFAULT_DROP_PROBABILITY_BY_STEP):
+        raise ValueError("drop probabilities must define exactly training steps 1, 2, and 3")
+    for step, probability in result.items():
+        if isinstance(probability, bool) or not isinstance(probability, (int, float)):
+            raise ValueError(f"drop probability for step {step} must be numeric")
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(f"drop probability for step {step} must be in [0, 1]")
+    return {step: float(probability) for step, probability in result.items()}
+
+
+def write_experiment_config(
+    path: Path,
+    profile: Profile,
+    drop_probabilities: dict[str, float] | None = None,
+) -> None:
+    microburst_flows = _microburst_flows(profile)
     policy = {
         "schema_version": 1,
         "enabled": True,
         "seed": profile.seed,
         "run_id": profile.name,
         "eligibility": "dp_all_reduce_only",
-        "drop_probability_by_step": {"1": 0.0, "2": 0.1, "3": 0.1},
+        "drop_probability_by_step": _validated_drop_probabilities(drop_probabilities),
         "default_priority_group": 3,
         "provenance": {"control_bytes": 64, "priority_group": 1},
         "vnet_to_priority_group": {"0": 3},
@@ -451,8 +529,17 @@ def write_system_config(path: Path) -> None:
     path.write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
 
 
-def materialize(profile_path: Path, output_dir: Path, clean: bool = False) -> dict[str, str]:
+def materialize(
+    profile_path: Path,
+    output_dir: Path,
+    clean: bool = False,
+    *,
+    seed_override: int | None = None,
+    drop_probabilities: dict[str, float] | None = None,
+) -> dict[str, str]:
     profile = load_profile(profile_path)
+    if seed_override is not None:
+        profile = replace(profile, seed=_require_positive_int(seed_override, "seed_override"))
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -474,7 +561,7 @@ def materialize(profile_path: Path, output_dir: Path, clean: bool = False) -> di
     network_config = output_dir / "network_config.txt"
     write_network_config(network_config, topology.resolve(), output_dir / "ns3")
     experiment_config = output_dir / "experiment.json"
-    write_experiment_config(experiment_config, profile)
+    write_experiment_config(experiment_config, profile, drop_probabilities)
     system_config = output_dir / "system.json"
     write_system_config(system_config)
     (output_dir / "communicator_groups.json").write_text(
@@ -491,6 +578,7 @@ def materialize(profile_path: Path, output_dir: Path, clean: bool = False) -> di
 
     manifest = {
         "profile": profile.name,
+        "seed": profile.seed,
         "ranks": profile.ranks,
         "parallelism": {"tp": profile.tp, "pp": profile.pp, "dp": profile.dp},
         "workload_prefix": str((workload_dir / "ring_3d").resolve()),
@@ -513,8 +601,14 @@ def main() -> int:
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
+    parser.add_argument("--seed", type=int, help="override the profile seed")
     arguments = parser.parse_args()
-    manifest = materialize(arguments.profile.resolve(), arguments.output.resolve(), arguments.clean)
+    manifest = materialize(
+        arguments.profile.resolve(),
+        arguments.output.resolve(),
+        arguments.clean,
+        seed_override=arguments.seed,
+    )
     print(json.dumps(manifest, indent=2))
     return 0
 

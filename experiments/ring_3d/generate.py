@@ -53,10 +53,40 @@ OPTIONAL_PROFILE_KEYS = {
     "microburst_flow_count",
     "microburst_destination_rank",
     "microburst_offset_spacing_ns",
+    "microburst_source_ranks",
+    "model",
 }
 EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
 EXPECTED_NETWORK_KEYS = {"hosts_per_leaf", "spine_count", "link_rate"}
+EXPECTED_MODEL_KEYS = {
+    "parameter_count",
+    "parameter_dtype_bytes",
+    "transformer_layers",
+    "gradient_bucket_count",
+    "hidden_size",
+    "sequence_length",
+    "microbatch_size",
+    "activation_dtype_bytes",
+    "tensor_parallel_all_reduces_per_layer",
+    "pipeline_microbatches",
+}
 DEFAULT_DROP_PROBABILITY_BY_STEP = {"1": 0.0, "2": 0.1, "3": 0.1}
+
+
+@dataclass(frozen=True)
+class ModelTrace:
+    """Structural transformer workload quantities used to derive ET nodes."""
+
+    parameter_count: int
+    parameter_dtype_bytes: int
+    transformer_layers: int
+    gradient_bucket_count: int
+    hidden_size: int
+    sequence_length: int
+    microbatch_size: int
+    activation_dtype_bytes: int
+    tensor_parallel_all_reduces_per_layer: int
+    pipeline_microbatches: int
 
 
 @dataclass(frozen=True)
@@ -78,6 +108,8 @@ class Profile:
     microburst_flow_count: int
     microburst_destination_rank: int | None
     microburst_offset_spacing_ns: int
+    microburst_source_ranks: tuple[int, ...] | None
+    model: ModelTrace | None
 
     @property
     def ranks(self) -> int:
@@ -94,6 +126,59 @@ def _require_nonnegative_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{field} must be a nonnegative integer")
     return value
+
+
+def _load_model_trace(document: dict[str, Any], tp: int, pp: int) -> ModelTrace | None:
+    value = document.get("model")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != EXPECTED_MODEL_KEYS:
+        raise ValueError(
+            "model must contain exactly "
+            f"{sorted(EXPECTED_MODEL_KEYS)}"
+        )
+    model = ModelTrace(
+        parameter_count=_require_positive_int(value["parameter_count"], "model.parameter_count"),
+        parameter_dtype_bytes=_require_positive_int(
+            value["parameter_dtype_bytes"], "model.parameter_dtype_bytes"
+        ),
+        transformer_layers=_require_positive_int(
+            value["transformer_layers"], "model.transformer_layers"
+        ),
+        gradient_bucket_count=_require_positive_int(
+            value["gradient_bucket_count"], "model.gradient_bucket_count"
+        ),
+        hidden_size=_require_positive_int(value["hidden_size"], "model.hidden_size"),
+        sequence_length=_require_positive_int(
+            value["sequence_length"], "model.sequence_length"
+        ),
+        microbatch_size=_require_positive_int(
+            value["microbatch_size"], "model.microbatch_size"
+        ),
+        activation_dtype_bytes=_require_positive_int(
+            value["activation_dtype_bytes"], "model.activation_dtype_bytes"
+        ),
+        tensor_parallel_all_reduces_per_layer=_require_positive_int(
+            value["tensor_parallel_all_reduces_per_layer"],
+            "model.tensor_parallel_all_reduces_per_layer",
+        ),
+        pipeline_microbatches=_require_positive_int(
+            value["pipeline_microbatches"], "model.pipeline_microbatches"
+        ),
+    )
+    if model.transformer_layers % pp:
+        raise ValueError("model.transformer_layers must be divisible by PP")
+    if model.gradient_bucket_count > model.transformer_layers // pp:
+        raise ValueError(
+            "model.gradient_bucket_count must not exceed transformer layers per PP stage"
+        )
+    total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
+    shard_count = tp * pp
+    if total_gradient_bytes % shard_count:
+        raise ValueError("model gradient bytes must divide evenly across TP × PP")
+    if (total_gradient_bytes // shard_count) % model.gradient_bucket_count:
+        raise ValueError("per-rank gradient bytes must divide evenly across buckets")
+    return model
 
 
 def load_profile(profile_path: Path) -> Profile:
@@ -145,6 +230,28 @@ def load_profile(profile_path: Path) -> Profile:
         )
         if microburst_destination_rank >= ranks:
             raise ValueError("microburst_destination_rank is outside the profile")
+    source_values = document.get("microburst_source_ranks")
+    if source_values is None:
+        microburst_source_ranks = None
+    else:
+        if not isinstance(source_values, list) or not source_values:
+            raise ValueError("microburst_source_ranks must be a nonempty array")
+        microburst_source_ranks = tuple(
+            _require_nonnegative_int(source, "microburst_source_ranks entry")
+            for source in source_values
+        )
+        if len(set(microburst_source_ranks)) != len(microburst_source_ranks):
+            raise ValueError("microburst_source_ranks must not contain duplicates")
+        if any(source >= ranks for source in microburst_source_ranks):
+            raise ValueError("microburst_source_ranks contains a rank outside the profile")
+        if microburst_destination_rank is None:
+            raise ValueError(
+                "microburst_source_ranks requires microburst_destination_rank"
+            )
+        if microburst_destination_rank in microburst_source_ranks:
+            raise ValueError("microburst source and destination ranks must differ")
+        microburst_flow_count = len(microburst_source_ranks)
+    model = _load_model_trace(document, tp, pp)
 
     profile = Profile(
         name=name,
@@ -177,11 +284,35 @@ def load_profile(profile_path: Path) -> Profile:
             document.get("microburst_offset_spacing_ns", 1_000),
             "microburst_offset_spacing_ns",
         ),
+        microburst_source_ranks=microburst_source_ranks,
+        model=model,
     )
     if profile.ranks % profile.hosts_per_leaf:
         raise ValueError("parallelism product must be divisible by network.hosts_per_leaf")
     if profile.spine_count > 255:
         raise ValueError("network.spine_count must not exceed 255")
+    if profile.model is not None:
+        activation_bytes = (
+            profile.model.microbatch_size
+            * profile.model.sequence_length
+            * profile.model.hidden_size
+            * profile.model.activation_dtype_bytes
+        )
+        if profile.tp_all_reduce_bytes != activation_bytes:
+            raise ValueError(
+                "tp_all_reduce_bytes must equal the model activation tensor bytes"
+            )
+        if profile.pp_bytes != activation_bytes:
+            raise ValueError("pp_bytes must equal the model activation tensor bytes")
+        gradient_bucket_bytes = (
+            profile.model.parameter_count
+            * profile.model.parameter_dtype_bytes
+            // (profile.tp * profile.pp * profile.model.gradient_bucket_count)
+        )
+        if profile.dp_all_reduce_bytes != gradient_bucket_bytes:
+            raise ValueError(
+                "dp_all_reduce_bytes must equal the model-derived per-rank gradient bucket bytes"
+            )
     return profile
 
 
@@ -296,7 +427,7 @@ class TraceWriter:
         )
         return node.id
 
-    def build(self) -> None:
+    def _build_smoke_trace(self) -> None:
         _, tp_groups, _, dp_groups = self.groups
         tp_rank, pp_rank, dp_rank = self.coords
         predecessor: int | None = None
@@ -373,6 +504,166 @@ class TraceWriter:
                 f"step_{step}_optimizer",
                 [dp_reduce_zero, dp_reduce_one],
             )
+
+    def _build_model_trace(self, model: ModelTrace) -> None:
+        """Emit a structural transformer step with exact model-derived DP bytes.
+
+        The profile is a workload specification rather than a framework replay:
+        it partitions parameters evenly across TP and PP, then emits one DP
+        All-Reduce bucket per specified gradient bucket. The sum of bucket
+        sizes on every rank is therefore the local model-gradient shard.
+        """
+        _, tp_groups, _, dp_groups = self.groups
+        tp_rank, pp_rank, dp_rank = self.coords
+        local_layers = model.transformer_layers // self.profile.pp
+        gradient_bucket_bytes = self.profile.dp_all_reduce_bytes
+        forward_tp_collectives = max(
+            1, model.tensor_parallel_all_reduces_per_layer // 2
+        )
+        backward_tp_collectives = (
+            model.tensor_parallel_all_reduces_per_layer - forward_tp_collectives
+        )
+        predecessor: int | None = None
+
+        for step in range(1, self.profile.steps + 1):
+            forward_tail = predecessor
+            for layer in range(local_layers):
+                forward = self.compute(
+                    f"step_{step}_layer_{layer}_forward_compute",
+                    [] if forward_tail is None else [forward_tail],
+                )
+                forward_tail = forward
+                for collective in range(forward_tp_collectives):
+                    forward_tail = self.all_reduce(
+                        f"step_{step}_layer_{layer}_tp_forward_{collective}",
+                        [forward_tail],
+                        "tp",
+                        tp_groups[str(self.rank)],
+                        self.profile.tp_all_reduce_bytes,
+                        step,
+                    )
+
+            forward_pipeline: list[int] = []
+            for microbatch in range(model.pipeline_microbatches):
+                pipeline_tag = (
+                    step * 10_000_000
+                    + microbatch * 100_000
+                    + dp_rank * 1_000
+                    + tp_rank
+                )
+                dependencies = [forward_tail] if forward_tail is not None else []
+                if pp_rank > 0:
+                    source = rank_for(tp_rank, pp_rank - 1, dp_rank, self.profile)
+                    forward_pipeline.append(
+                        self.pipeline_node(
+                            f"step_{step}_microbatch_{microbatch}_pp_forward_recv",
+                            COMM_RECV_NODE,
+                            dependencies,
+                            source,
+                            self.rank,
+                            pipeline_tag,
+                            step,
+                        )
+                    )
+                if pp_rank < self.profile.pp - 1:
+                    destination = rank_for(
+                        tp_rank, pp_rank + 1, dp_rank, self.profile
+                    )
+                    forward_pipeline.append(
+                        self.pipeline_node(
+                            f"step_{step}_microbatch_{microbatch}_pp_forward_send",
+                            COMM_SEND_NODE,
+                            dependencies,
+                            self.rank,
+                            destination,
+                            pipeline_tag,
+                            step,
+                        )
+                    )
+
+            backward_tail = self.compute(
+                f"step_{step}_backward_start",
+                [forward_tail, *forward_pipeline] if forward_tail else forward_pipeline,
+            )
+            dp_reductions: list[int] = []
+            emitted_buckets = 0
+            for layer_offset, layer in enumerate(reversed(range(local_layers))):
+                backward_tail = self.compute(
+                    f"step_{step}_layer_{layer}_backward_compute",
+                    [backward_tail],
+                )
+                for collective in range(backward_tp_collectives):
+                    backward_tail = self.all_reduce(
+                        f"step_{step}_layer_{layer}_tp_backward_{collective}",
+                        [backward_tail],
+                        "tp",
+                        tp_groups[str(self.rank)],
+                        self.profile.tp_all_reduce_bytes,
+                        step,
+                    )
+                target_buckets = (
+                    (layer_offset + 1) * model.gradient_bucket_count // local_layers
+                )
+                while emitted_buckets < target_buckets:
+                    dp_reductions.append(
+                        self.all_reduce(
+                            f"step_{step}_dp_all_reduce_bucket_{emitted_buckets}",
+                            [backward_tail],
+                            "dp",
+                            dp_groups[str(self.rank)],
+                            gradient_bucket_bytes,
+                            step,
+                        )
+                    )
+                    emitted_buckets += 1
+
+            backward_pipeline: list[int] = []
+            for microbatch in range(model.pipeline_microbatches):
+                pipeline_tag = (
+                    50_000_000
+                    + step * 10_000_000
+                    + microbatch * 100_000
+                    + dp_rank * 1_000
+                    + tp_rank
+                )
+                if pp_rank < self.profile.pp - 1:
+                    source = rank_for(tp_rank, pp_rank + 1, dp_rank, self.profile)
+                    backward_pipeline.append(
+                        self.pipeline_node(
+                            f"step_{step}_microbatch_{microbatch}_pp_backward_recv",
+                            COMM_RECV_NODE,
+                            [backward_tail],
+                            source,
+                            self.rank,
+                            pipeline_tag,
+                            step,
+                        )
+                    )
+                if pp_rank > 0:
+                    destination = rank_for(
+                        tp_rank, pp_rank - 1, dp_rank, self.profile
+                    )
+                    backward_pipeline.append(
+                        self.pipeline_node(
+                            f"step_{step}_microbatch_{microbatch}_pp_backward_send",
+                            COMM_SEND_NODE,
+                            [backward_tail],
+                            self.rank,
+                            destination,
+                            pipeline_tag,
+                            step,
+                        )
+                    )
+            predecessor = self.compute(
+                f"step_{step}_optimizer",
+                [*dp_reductions, *backward_pipeline],
+            )
+
+    def build(self) -> None:
+        if self.profile.model is None:
+            self._build_smoke_trace()
+        else:
+            self._build_model_trace(self.profile.model)
 
     def write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -457,7 +748,11 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
         endpoints = list(zip(range(profile.microburst_flow_count), destinations))
     else:
         destination = profile.microburst_destination_rank
-        sources = [rank for rank in range(profile.ranks) if rank != destination]
+        sources = (
+            list(profile.microburst_source_ranks)
+            if profile.microburst_source_ranks is not None
+            else [rank for rank in range(profile.ranks) if rank != destination]
+        )
         endpoints = [(source, destination) for source in sources[: profile.microburst_flow_count]]
     return [
         {
@@ -529,6 +824,27 @@ def write_system_config(path: Path) -> None:
     path.write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
 
 
+def model_trace_metadata(profile: Profile) -> dict[str, int] | None:
+    if profile.model is None:
+        return None
+    model = profile.model
+    total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
+    gradient_bytes_per_rank = total_gradient_bytes // (profile.tp * profile.pp)
+    return {
+        "parameter_count": model.parameter_count,
+        "parameter_dtype_bytes": model.parameter_dtype_bytes,
+        "total_gradient_bytes_per_data_parallel_replica": total_gradient_bytes,
+        "gradient_bytes_per_rank": gradient_bytes_per_rank,
+        "gradient_bucket_count": model.gradient_bucket_count,
+        "gradient_bucket_bytes": profile.dp_all_reduce_bytes,
+        "transformer_layers": model.transformer_layers,
+        "transformer_layers_per_pipeline_stage": model.transformer_layers // profile.pp,
+        "activation_bytes_per_microbatch": profile.pp_bytes,
+        "pipeline_microbatches": model.pipeline_microbatches,
+        "tensor_parallel_all_reduces_per_layer": model.tensor_parallel_all_reduces_per_layer,
+    }
+
+
 def materialize(
     profile_path: Path,
     output_dir: Path,
@@ -575,6 +891,11 @@ def materialize(
         json.dumps({"memory-type": "NO_MEMORY_EXPANSION"}, indent=2) + "\n",
         encoding="utf-8",
     )
+    model_metadata = model_trace_metadata(profile)
+    if model_metadata is not None:
+        (output_dir / "model_trace.json").write_text(
+            json.dumps(model_metadata, indent=2) + "\n", encoding="utf-8"
+        )
 
     manifest = {
         "profile": profile.name,
@@ -590,6 +911,8 @@ def materialize(
         "experiment_config": str(experiment_config.resolve()),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
     }
+    if model_metadata is not None:
+        manifest["model_trace"] = model_metadata
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )

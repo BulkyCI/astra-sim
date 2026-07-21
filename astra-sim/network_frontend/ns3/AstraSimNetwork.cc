@@ -14,6 +14,7 @@
 #include "ns3/csma-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/network-module.h"
+#include "ns3/rng-seed-manager.h"
 
 #undef NS3_LOG_COMPAT_UNDEF_SYSLOG
 #include "astra-sim/network_frontend/ns3/ns3_log_monkey_patch.h"
@@ -222,6 +223,8 @@ int num_queues_per_dim = 1;
 double comm_scale = 1;
 double injection_scale = 1;
 bool rendezvous_protocol = false;
+uint32_t ns3_rng_seed = 1;
+uint64_t ns3_rng_run = 1;
 auto logical_dims = vector<int>();
 int num_npus = 1;
 auto queues_per_dim = vector<int>();
@@ -282,6 +285,8 @@ void parse_args(int argc, char* argv[]) {
     cmd.AddValue("experiment-output-dir",
                  "Directory for experiment flow and completion telemetry",
                  experiment_output_dir);
+    cmd.AddValue("ns3-rng-seed", "Seed for ns-3 random streams", ns3_rng_seed);
+    cmd.AddValue("ns3-rng-run", "Run number for ns-3 random streams", ns3_rng_run);
 
     cmd.AddValue("num-queues-per-dim", "Number of queues per each dimension",
                  num_queues_per_dim);
@@ -301,6 +306,12 @@ int main(int argc, char* argv[]) {
 
     // Read network config and find logical dims.
     parse_args(argc, argv);
+    if (ns3_rng_seed == 0 || ns3_rng_run == 0) {
+        cerr << "ns3-rng-seed and ns3-rng-run must be nonzero\n";
+        return 1;
+    }
+    RngSeedManager::SetSeed(ns3_rng_seed);
+    RngSeedManager::SetRun(ns3_rng_run);
     AstraSim::LoggerFactory::init(logging_configuration);
     read_logical_topo_config(logical_topology_configuration, logical_dims);
 

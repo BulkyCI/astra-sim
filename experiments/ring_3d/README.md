@@ -11,8 +11,9 @@ The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
-- [profiles/incast_8.json](profiles/incast_8.json): an eight-host stress-calibration profile that sends seven simultaneous 8 MiB RDMA microbursts to host 4.
+- [profiles/incast_8.json](profiles/incast_8.json): an eight-host stress-calibration profile that sends seven simultaneous 32 MiB RDMA microbursts to host 4.
 - [profiles/canonical_256.json](profiles/canonical_256.json): $TP=8$, $PP=4$, $DP=8$, with a 256-host, 16-leaf, 16-spine Clos topology.
+- [profiles/model_100b_256.json](profiles/model_100b_256.json): a structural $100$B-parameter, $TP=8$, $PP=4$, $DP=8$ transformer trace. It partitions $100$B BF16 gradients across $TP\times PP=32$ ranks, so every rank emits $6.25$ GB of DP gradient buckets per optimizer step.
 
 ## Generate and run
 
@@ -48,6 +49,22 @@ uv run --locked python experiments/ring_3d/compare.py \
 ```
 
 The comparison reports paired deltas for simulated makespan and all/foreground/DP-foreground P99 per-QP FCT. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. The incast profile is a calibration workload, not a claim that PFC or buffer exhaustion has occurred: inspect the retained queue and PFC telemetry before using it for any latency claim.
+
+The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs.
+
+## 100B structural model trace
+
+Generate the reviewer-facing ET workload and its auditable `model_trace.json` ledger with:
+
+```sh
+uv run --locked python experiments/ring_3d/generate.py \
+  --profile experiments/ring_3d/profiles/model_100b_256.json \
+  --output runs/ring_3d/model_100b_256 --clean
+```
+
+The profile models 80 transformer layers, 20 gradient buckets per PP stage, 8 pipeline microbatches, two TP All-Reduces per local layer, and 50 MB simultaneous DP-peer incast flows toward rank 4. Each DP bucket is 312.5 MB; the 20 buckets sum exactly to the $6.25$ GB BF16 gradient shard held by one $TP\times PP$ rank. `model_trace.json` records the derivation and the generated ET traces retain the typed TP/PP/DP metadata.
+
+This is a **structural model trace**, not an exact Megatron or PyTorch replay. Full-resolution ns-3 execution of all $256$ ranks at the default 1 KB RDMA payload would create billions of simulated packets per step. It is deliberately generated and retained in CI, while the packet-level PFC experiment remains the eight-rank, 32 MiB incast calibration. Do not replace the full-resolution workload with an oversized pseudo-MTU or report a coarsened run as packet-accurate evidence.
 
 ## Researcher-facing CI results
 

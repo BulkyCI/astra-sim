@@ -166,7 +166,8 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 		"# Paired DBLP comparison",
 		"",
 		"> Each seed uses identical traces, topology, microburst configuration, and seed. "
-		"The lossless baseline keeps the policy enabled but sets every admission-suppression threshold to zero.",
+		"The lossless baseline keeps the policy enabled but sets every admission-suppression threshold to zero. "
+		"Baseline and policy share an ns-3 random-stream seed/run within each pair; successive pairs use distinct runs.",
 		"",
 		"| Metric | Baseline mean | Policy mean | Mean reduction | 95% CI of reduction | Mean reduction % |",
 		"| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -233,6 +234,7 @@ def run_comparison(
 			binary=binary,
 			clean=True,
 			seed=seed,
+			ns3_rng_run=seed,
 			drop_probabilities=lossless_drop_probabilities(),
 		)
 		run_experiment(
@@ -241,10 +243,13 @@ def run_comparison(
 			binary=binary,
 			clean=True,
 			seed=seed,
+			ns3_rng_run=seed,
 		)
 		per_seed.append(
 			{
 				"seed": seed,
+				"ns3_rng_seed": 1,
+				"ns3_rng_run": seed,
 				"lossless_baseline_dir": baseline_dir.relative_to(output).as_posix(),
 				"dblp_policy_dir": policy_dir.relative_to(output).as_posix(),
 				"metrics": compare_summaries(

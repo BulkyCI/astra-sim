@@ -47,7 +47,7 @@ jobs:
     name: Native build, regression, and ns-3 smoke
     needs: python-quality
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
     - name: Check out source and submodules
@@ -72,6 +72,12 @@ jobs:
 
     - name: Run 3D Ring ns-3 smoke experiment
       run: timeout --foreground 5m bash ./experiments/ring_3d/smoke.sh
+
+    - name: Generate 100B structural model trace
+      run: |
+        uv run --locked python experiments/ring_3d/generate.py \
+          --profile experiments/ring_3d/profiles/model_100b_256.json \
+          --output runs/ring_3d/model_100b_256 --clean
 
     - name: Publish 3D Ring researcher report
       if: always()
@@ -98,11 +104,19 @@ jobs:
         path: runs/ring_3d/smoke_8
         if-no-files-found: ignore
 
+    - name: Upload 100B structural model trace
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ring-3d-model-100b-trace-${{ github.run_id }}
+        path: runs/ring_3d/model_100b_256
+        if-no-files-found: ignore
+
   paired-incast-evaluation:
     name: Five-seed paired incast evaluation
     needs: python-quality
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
     - name: Check out source and submodules
@@ -124,7 +138,7 @@ jobs:
 
     - name: Run five-seed paired incast comparison
       run: |
-        timeout --foreground 75m uv run --locked python experiments/ring_3d/compare.py \
+        timeout --foreground 165m uv run --locked python experiments/ring_3d/compare.py \
           --profile experiments/ring_3d/profiles/incast_8.json \
           --output runs/ring_3d/incast_8_comparison --clean
 

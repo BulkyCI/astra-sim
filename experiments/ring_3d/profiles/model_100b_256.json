@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-model-100b-256",
+  "parallelism": {
+    "tp": 8,
+    "pp": 4,
+    "dp": 8
+  },
+  "steps": 3,
+  "compute_duration_us": 250,
+  "tp_all_reduce_bytes": 50331648,
+  "pp_bytes": 50331648,
+  "dp_all_reduce_bytes": 312500000,
+  "seed": 20260721,
+  "network": {
+    "hosts_per_leaf": 16,
+    "spine_count": 16,
+    "link_rate": "200Gbps"
+  },
+  "microburst_bytes": 50000000,
+  "microburst_destination_rank": 4,
+  "microburst_source_ranks": [36, 68, 100, 132, 164, 196, 228],
+  "microburst_offset_spacing_ns": 0,
+  "model": {
+    "parameter_count": 100000000000,
+    "parameter_dtype_bytes": 2,
+    "transformer_layers": 80,
+    "gradient_bucket_count": 20,
+    "hidden_size": 12288,
+    "sequence_length": 2048,
+    "microbatch_size": 1,
+    "activation_dtype_bytes": 2,
+    "tensor_parallel_all_reduces_per_layer": 2,
+    "pipeline_microbatches": 8
+  }
+}

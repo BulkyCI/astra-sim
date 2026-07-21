@@ -42,6 +42,8 @@ After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke expe
 
 The optional data-parallel logical shedding policy is hard-whitelisted to Chakra operations marked `dp`, `CollectivePayload`, and `All_Reduce`. A selected flow is represented by a reliable 64-byte provenance-control QP on priority group 1; it is not a packet drop. The control completion resolves both the original logical send and receive while telemetry reports the original logical bytes separately from physically modeled control bytes. The default policy selects 0% of eligible flows in step 1 and 10% in steps 2 and 3. Deterministic host-originated RDMA microbursts are triggered by the first step-2 DP All-Reduce admission.
 
+The CI also materializes and retains `model_100b_256.json`: a structural 100B-parameter BF16 trace over $TP=8$, $PP=4$, and $DP=8$. It represents 6.25 GB of DP gradient data per rank and optimizer step, divided into 20 typed DP All-Reduce buckets. Its seven DP-peer background sources simultaneously send 50 MB each to rank 4. Full 256-rank execution at the bundled 1 KB packet resolution is intentionally not presented as a routine CI result because it entails billions of packet events; reviewer-facing packet-level evidence comes from the separate 32 MiB-per-source eight-rank incast experiment and its retained PFC/queue telemetry.
+
 This is an ASTRA-sim 2.0 experiment. It models ET dependencies, native collectives, and the bundled ns-3/RDMA topology; it does not claim ASTRA-sim 3.0 InfraGraph/cache-line behavior or exact Megatron runtime fidelity.
 
 

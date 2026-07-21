@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 try:
     from .generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
@@ -40,11 +41,19 @@ def run_experiment(
     binary: Path | None = None,
     clean: bool = False,
     seed: int | None = None,
+    ns3_rng_seed: int = 1,
+    ns3_rng_run: int | None = None,
     drop_probabilities: dict[str, float] | None = None,
     skip_analysis: bool = False,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Materialize, execute, and analyze one reproducible policy invocation."""
     output = output.resolve()
+    if ns3_rng_seed <= 0:
+        raise ValueError("ns3_rng_seed must be positive")
+    if ns3_rng_run is None:
+        ns3_rng_run = seed if seed is not None else 1
+    if ns3_rng_run <= 0:
+        raise ValueError("ns3_rng_run must be positive")
     manifest = materialize(
         profile.resolve(),
         output,
@@ -66,7 +75,21 @@ def run_experiment(
         f"--comm-group-configuration={manifest['communicator_groups']}",
         f"--experiment-configuration={manifest['experiment_config']}",
         f"--experiment-output-dir={manifest['telemetry_dir']}",
+        f"--ns3-rng-seed={ns3_rng_seed}",
+        f"--ns3-rng-run={ns3_rng_run}",
     ]
+    execution = {
+        "dblp_selection_seed": manifest["seed"],
+        "ns3_rng_seed": ns3_rng_seed,
+        "ns3_rng_run": ns3_rng_run,
+    }
+    (output / "execution.json").write_text(
+        json.dumps(execution, indent=2) + "\n", encoding="utf-8"
+    )
+    manifest["execution"] = execution
+    (output / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
     subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)
 
     if not skip_analysis:
@@ -96,7 +119,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable")
     parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
-    parser.add_argument("--seed", type=int, help="override the profile seed")
+    parser.add_argument("--seed", type=int, help="override the deterministic DBLP selection seed")
+    parser.add_argument("--ns3-rng-seed", type=int, default=1)
+    parser.add_argument("--ns3-rng-run", type=int, help="ns-3 random-stream run number")
     parser.add_argument(
         "--lossless-baseline",
         action="store_true",
@@ -111,6 +136,8 @@ def main() -> int:
         binary=arguments.binary,
         clean=arguments.clean,
         seed=arguments.seed,
+        ns3_rng_seed=arguments.ns3_rng_seed,
+        ns3_rng_run=arguments.ns3_rng_run,
         drop_probabilities=(lossless_drop_probabilities() if arguments.lossless_baseline else None),
         skip_analysis=arguments.skip_analysis,
     )

@@ -78,7 +78,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(len(flows), 7)
             self.assertEqual({flow["dst"] for flow in flows}, {4})
             self.assertEqual({flow["src"] for flow in flows}, {0, 1, 2, 3, 5, 6, 7})
-            self.assertEqual({flow["size_bytes"] for flow in flows}, {8 * 1024 * 1024})
+            self.assertEqual({flow["size_bytes"] for flow in flows}, {32 * 1024 * 1024})
             self.assertEqual({flow["offset_ns"] for flow in flows}, {0})
 
     def test_lossless_override_preserves_enabled_microburst(self) -> None:
@@ -94,6 +94,49 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertTrue(policy["enabled"])
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.0, "3": 0.0})
+
+    def test_100b_model_profile_has_exact_gradient_shard_and_dp_peer_incast(self) -> None:
+        profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/model_100b_256.json"
+        profile = load_profile(profile_path)
+        self.assertIsNotNone(profile.model)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+
+            self.assertEqual(manifest["ranks"], 256)
+            self.assertEqual(
+                manifest["model_trace"]["parameter_count"], 100_000_000_000
+            )
+            self.assertEqual(
+                manifest["model_trace"]["gradient_bytes_per_rank"], 6_250_000_000
+            )
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [flow["src"] for flow in policy["microburst"]["flows"]],
+                [36, 68, 100, 132, 164, 196, 228],
+            )
+            self.assertEqual({flow["dst"] for flow in policy["microburst"]["flows"]}, {4})
+            self.assertEqual({flow["size_bytes"] for flow in policy["microburst"]["flows"]}, {50_000_000})
+
+            trace_path = output / "workload/ring_3d.4.et"
+            dp_bytes_by_step: dict[int, int] = {}
+            with trace_path.open("rb") as trace:
+                metadata = GlobalMetadata()
+                self.assertTrue(decodeMessage(trace, metadata))
+                while True:
+                    node = Node()
+                    if not decodeMessage(trace, node):
+                        break
+                    attributes = {attribute.name: attribute for attribute in node.attr}
+                    if (
+                        attributes.get("parallelism_domain")
+                        and attributes["parallelism_domain"].string_val == "dp"
+                    ):
+                        step = attributes["training_step"].uint64_val
+                        dp_bytes_by_step[step] = dp_bytes_by_step.get(step, 0) + attributes[
+                            "comm_size"
+                        ].uint64_val
+            self.assertEqual(dp_bytes_by_step, {1: 6_250_000_000, 2: 6_250_000_000, 3: 6_250_000_000})
 
     def test_trace_has_explicit_domains_and_overlap_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

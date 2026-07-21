@@ -17,7 +17,7 @@
     "spine_count": 4,
     "link_rate": "200Gbps"
   },
-  "microburst_bytes": 8388608,
+  "microburst_bytes": 33554432,
   "microburst_flow_count": 7,
   "microburst_destination_rank": 4,
   "microburst_offset_spacing_ns": 0

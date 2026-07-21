@@ -36,6 +36,21 @@ uv run --locked python experiments/ring_3d/analyze.py \
   --telemetry-dir runs/ring_3d/smoke_8/telemetry
 ```
 
+## Researcher-facing CI results
+
+The native CI job publishes a Markdown report in its GitHub Actions job summary and retains the same report in the `ring-3d-smoke-results-<run-id>` artifact. The reproducibility bundle contains the generated ET traces, topology, communicator groups, system and experiment policy JSON, raw ns-3 outputs, telemetry CSV files, `summary.json`, and `research_report.md`.
+
+The report records the TP/PP/DP shape, workload and network parameters, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, and tables by training step, parallelism domain, and flow kind. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
+
+Generate the same standalone Markdown record for any completed run with:
+
+```sh
+uv run --locked python experiments/ring_3d/report.py \
+  --profile experiments/ring_3d/profiles/smoke_8.json \
+  --run-dir runs/ring_3d/smoke_8 \
+  --output runs/ring_3d/smoke_8/research_report.md
+```
+
 ## Admission policy
 
 The generated policy uses deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag. Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The default thresholds are $0\%$, $10\%$, and $10\%$ for steps 1–3. A selected logical payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss.

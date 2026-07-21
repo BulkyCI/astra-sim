@@ -359,6 +359,11 @@ def write_clos_topology(path: Path, profile: Profile) -> None:
 
 def write_network_config(path: Path, topology: Path, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The bundled ns-3 setup unconditionally opens these legacy input files,
+    # even though ASTRA-sim dynamically creates the RDMA QPs after setup.
+    # A zero count is therefore the correct empty static-flow/trace workload.
+    (output_dir / "flow.txt").write_text("0\n", encoding="utf-8")
+    (output_dir / "trace.txt").write_text("0\n", encoding="utf-8")
     entries = {
         "TOPOLOGY_FILE": topology,
         "FLOW_FILE": output_dir / "flow.txt",

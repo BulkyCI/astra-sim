@@ -58,6 +58,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
             node_count, switch_count, edge_count = map(int, topology_lines[0].split())
             self.assertEqual((node_count, switch_count, edge_count), (16, 8, 24))
             self.assertEqual(len(topology_lines), edge_count + 2)
+            self.assertEqual((output / "ns3/flow.txt").read_text(encoding="utf-8"), "0\n")
+            self.assertEqual((output / "ns3/trace.txt").read_text(encoding="utf-8"), "0\n")
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")

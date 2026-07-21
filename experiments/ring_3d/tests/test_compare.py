@@ -26,12 +26,29 @@ def summary(makespan: int, fct_p99: int) -> dict[str, object]:
     }
     return {
         "rank_completion_time_ns": {**statistic, "max_ns": makespan},
+        "collective_completion": {
+            "per_rank_completion_time_ns": {
+                "by_parallelism_domain_and_collective_type": {
+                    "dp": {"all_reduce": statistic}
+                }
+            },
+            "all_rank_operation_span_ns": {
+                "by_parallelism_domain_and_collective_type": {
+                    "dp": {"all_reduce": statistic}
+                }
+            },
+        },
         "flow_completion_time_ns": {
             "all": statistic,
             "by_flow_kind": {"foreground_payload": statistic},
             "by_parallelism_domain_and_flow_kind": {
                 "dp": {"foreground_payload": statistic}
             },
+        },
+        "physical_traffic_bytes": {
+            "foreground_logical_operations": {"physical_bytes": 10_000},
+            "dp_all_reduce": {"physical_bytes": 8_000},
+            "total": {"physical_bytes": 20_000},
         },
     }
 
@@ -42,7 +59,11 @@ class Ring3DComparisonTests(unittest.TestCase):
 
         self.assertEqual(results["makespan_ns"]["reduction_ns"], 100)
         self.assertEqual(results["makespan_ns"]["reduction_percent"], 10.0)
-        self.assertEqual(results["dp_foreground_qp_fct_p99_ns"]["reduction_ns"], 10)
+        self.assertEqual(
+            results["dp_all_reduce_collective_operation_span_p99_ns"]["reduction_ns"],
+            10,
+        )
+        self.assertEqual(results["dp_all_reduce_physical_bytes"]["reduction_ns"], 0)
 
     def test_aggregate_and_report_include_paired_uncertainty(self) -> None:
         per_seed = [

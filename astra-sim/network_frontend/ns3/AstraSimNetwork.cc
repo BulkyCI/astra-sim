@@ -122,6 +122,15 @@ class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
         return timeSpec;
     }
 
+    void sim_record_collective_completion(
+        const AstraSim::OperationContext& operation,
+        uint64_t logical_bytes,
+        uint64_t start_time_ns,
+        uint64_t end_time_ns) override {
+        AstraSimNs3::experiment_telemetry.record_collective_completion(
+            rank, operation, logical_bytes, start_time_ns, end_time_ns);
+    }
+
     virtual void sim_schedule(AstraSim::timespec_t delta,
                               void (*fun_ptr)(void* fun_arg),
                               void* fun_arg) {

@@ -38,7 +38,7 @@ uv run --locked python experiments/ring_3d/generate.py \
 	--output runs/ring_3d/smoke_8 --clean
 ```
 
-After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke experiment with `bash experiments/ring_3d/smoke.sh`. The runner writes generated inputs, ns-3 output, `flow_events.csv`, `rank_completion.csv`, and `summary.json` under `runs/ring_3d/smoke_8`. The generated topology is an eight-host Clos for smoke runs; the canonical profile materializes a 256-host, 16-leaf, 16-spine Clos topology.
+After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke experiment with `bash experiments/ring_3d/smoke.sh`. The runner writes generated inputs, ns-3 output, `flow_events.csv`, `collective_events.csv`, `rank_completion.csv`, and `summary.json` under `runs/ring_3d/smoke_8`. `collective_events.csv` records native issue-to-completion timing once per rank and logical collective, so it is the source for whole-collective latency rather than individual-QP FCT. The generated topology is an eight-host Clos for smoke runs; the canonical profile materializes a 256-host, 16-leaf, 16-spine Clos topology.
 
 The optional data-parallel logical shedding policy is hard-whitelisted to Chakra operations marked `dp`, `CollectivePayload`, and `All_Reduce`. A selected flow is represented by a reliable 64-byte provenance-control QP on priority group 1; it is not a packet drop. The control completion resolves both the original logical send and receive while telemetry reports the original logical bytes separately from physically modeled control bytes. The default policy selects 0% of eligible flows in step 1 and 10% in steps 2 and 3. Deterministic host-originated RDMA microbursts are triggered by the first step-2 DP All-Reduce admission.
 

@@ -66,6 +66,14 @@ class Workload : public Callable {
     bool is_finished;
 
   private:
+    struct CollectiveTelemetry {
+        OperationContext operation;
+        uint64_t logical_bytes = 0;
+        uint64_t start_time_ns = 0;
+    };
+
+    std::unordered_map<int, CollectiveTelemetry> collective_telemetry_map;
+
     // From the ET node, find out the corresponding communicator group, and
     // return the pointer. If no communicator group is specified for this ET
     // node, return nullptr.
@@ -75,6 +83,10 @@ class Workload : public Callable {
       const std::shared_ptr<Chakra::ETFeederNode>& node,
       TransportRole transport_role,
       ComType collective_type) const;
+      void register_collective(DataSet* collective,
+                   uint64_t node_id,
+                   const OperationContext& operation,
+                   uint64_t logical_bytes);
 };
 
 }  // namespace AstraSim

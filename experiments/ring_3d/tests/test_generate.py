@@ -81,6 +81,19 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual({flow["size_bytes"] for flow in flows}, {32 * 1024 * 1024})
             self.assertEqual({flow["offset_ns"] for flow in flows}, {0})
 
+    def test_no_incast_profile_disables_synthetic_background_traffic(self) -> None:
+        profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/no_incast_8.json"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output)
+
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertFalse(policy["microburst"]["enabled"])
+            self.assertEqual(policy["microburst"]["flows"], [])
+            self.assertEqual(
+                policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.1}
+            )
+
     def test_lossless_override_preserves_enabled_microburst(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"

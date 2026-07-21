@@ -91,7 +91,8 @@ class ExperimentTelemetry {
         std::filesystem::create_directories(output_dir);
         flow_events.open(output_dir / "flow_events.csv", std::ios::trunc);
         rank_completion.open(output_dir / "rank_completion.csv", std::ios::trunc);
-        if (!flow_events || !rank_completion) {
+        collective_events.open(output_dir / "collective_events.csv", std::ios::trunc);
+        if (!flow_events || !rank_completion || !collective_events) {
             throw std::runtime_error("Unable to create experiment telemetry files");
         }
         flow_events
@@ -102,6 +103,9 @@ class ExperimentTelemetry {
                "logical_bytes,physical_bytes,decision_hash,start_time_ns,"
                "end_time_ns\n";
         rank_completion << "rank,completion_time_ns\n";
+        collective_events
+            << "rank,parallelism_domain,collective_type,training_step,"
+               "workload_node_id,logical_bytes,start_time_ns,end_time_ns\n";
     }
 
     bool enabled() const {
@@ -129,6 +133,26 @@ class ExperimentTelemetry {
                     << '\n';
     }
 
+    void record_collective_completion(
+        int rank,
+        const AstraSim::OperationContext& operation,
+        uint64_t logical_bytes,
+        uint64_t start_time_ns,
+        uint64_t end_time_ns) {
+        if (!collective_events.is_open()) {
+            return;
+        }
+        if (end_time_ns < start_time_ns) {
+            throw std::runtime_error("collective completion precedes its start time");
+        }
+        collective_events << rank << ','
+                          << parallelism_domain_name(operation.parallelism_domain)
+                          << ',' << collective_type_name(operation.collective_type)
+                          << ',' << operation.training_step << ','
+                          << operation.workload_node_id << ',' << logical_bytes
+                          << ',' << start_time_ns << ',' << end_time_ns << '\n';
+    }
+
     void record_rank_completion(int rank, uint64_t completion_time_ns) {
         if (rank_completion.is_open()) {
             rank_completion << rank << ',' << completion_time_ns << '\n';
@@ -141,6 +165,9 @@ class ExperimentTelemetry {
         }
         if (rank_completion.is_open()) {
             rank_completion.flush();
+        }
+        if (collective_events.is_open()) {
+            collective_events.flush();
         }
     }
 
@@ -210,6 +237,7 @@ class ExperimentTelemetry {
 
     std::ofstream flow_events;
     std::ofstream rank_completion;
+    std::ofstream collective_events;
 };
 
 inline ExperimentTelemetry experiment_telemetry;

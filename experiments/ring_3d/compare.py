@@ -64,20 +64,40 @@ def _metric(summary: dict[str, Any], path: tuple[str, ...]) -> int:
 
 METRICS = {
 	"makespan_ns": ("rank_completion_time_ns", "max_ns"),
-	"all_qp_fct_p99_ns": ("flow_completion_time_ns", "all", "p99_ns"),
-	"foreground_qp_fct_p99_ns": (
-		"flow_completion_time_ns",
-		"by_flow_kind",
-		"foreground_payload",
-		"p99_ns",
-	),
-	"dp_foreground_qp_fct_p99_ns": (
-		"flow_completion_time_ns",
-		"by_parallelism_domain_and_flow_kind",
+	"dp_all_reduce_collective_per_rank_p99_ns": (
+		"collective_completion",
+		"per_rank_completion_time_ns",
+		"by_parallelism_domain_and_collective_type",
 		"dp",
-		"foreground_payload",
+		"all_reduce",
 		"p99_ns",
 	),
+	"dp_all_reduce_collective_operation_span_p99_ns": (
+		"collective_completion",
+		"all_rank_operation_span_ns",
+		"by_parallelism_domain_and_collective_type",
+		"dp",
+		"all_reduce",
+		"p99_ns",
+	),
+	"all_qp_fct_p99_ns": ("flow_completion_time_ns", "all", "p99_ns"),
+	"foreground_logical_operation_physical_bytes": (
+		"physical_traffic_bytes",
+		"foreground_logical_operations",
+		"physical_bytes",
+	),
+	"dp_all_reduce_physical_bytes": (
+		"physical_traffic_bytes",
+		"dp_all_reduce",
+		"physical_bytes",
+	),
+	"total_physical_bytes": ("physical_traffic_bytes", "total", "physical_bytes"),
+}
+
+BYTE_METRICS = {
+	"foreground_logical_operation_physical_bytes",
+	"dp_all_reduce_physical_bytes",
+	"total_physical_bytes",
 }
 
 
@@ -89,6 +109,8 @@ def compare_summaries(
 	for name, path in METRICS.items():
 		baseline_value = _metric(baseline, path)
 		policy_value = _metric(policy, path)
+		if baseline_value == 0:
+			raise ValueError(f"comparison baseline metric {name} must be nonzero")
 		reduction = baseline_value - policy_value
 		comparisons[name] = {
 			"baseline_ns": baseline_value,
@@ -160,6 +182,15 @@ def _format_duration_ns(value: float) -> str:
 	return f"{value / 1_000_000:.2f} ms"
 
 
+def _format_bytes(value: float) -> str:
+	units = ("B", "KiB", "MiB", "GiB", "TiB")
+	for unit in units:
+		if value < 1024 or unit == units[-1]:
+			return f"{value:.2f} {unit}" if unit != "B" else f"{value:.0f} B"
+		value /= 1024
+	raise AssertionError("unreachable")
+
+
 def render_comparison_report(comparison: dict[str, Any]) -> str:
 	"""Render a self-contained Markdown record of the paired comparison."""
 	lines = [
@@ -173,9 +204,10 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 		"| --- | ---: | ---: | ---: | ---: | ---: |",
 	]
 	for metric, values in comparison["aggregate"].items():
+		format_value = _format_bytes if metric in BYTE_METRICS else _format_duration_ns
 		ci = values["reduction_ci95_ns"]
 		ci_text = (
-			f"[{_format_duration_ns(ci[0])}, {_format_duration_ns(ci[1])}]"
+			f"[{format_value(ci[0])}, {format_value(ci[1])}]"
 			if isinstance(ci, list)
 			else "not available (one seed)"
 		)
@@ -184,9 +216,9 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 			+ " | ".join(
 				[
 					metric,
-					_format_duration_ns(float(values["baseline_mean_ns"])),
-					_format_duration_ns(float(values["policy_mean_ns"])),
-					_format_duration_ns(float(values["mean_reduction_ns"])),
+					format_value(float(values["baseline_mean_ns"])),
+					format_value(float(values["policy_mean_ns"])),
+					format_value(float(values["mean_reduction_ns"])),
 					ci_text,
 					f"{float(values['mean_reduction_percent']):.2f}%",
 				]
@@ -196,9 +228,11 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 	lines.extend(
 		[
 			"",
-			"Positive reductions favor the DBLP policy. The FCT metrics are per-QP tail latency; "
-			"makespan is the maximum simulated rank-completion time. Do not interpret a single seed "
-			"or a confidence interval spanning zero as evidence of a performance benefit.",
+			"Positive reductions favor the DBLP policy. Logical collective metrics include every completed "
+			"DP All-Reduce regardless of whether its payload used provenance control; all-QP FCT is a "
+			"secondary transport diagnostic. Physical-byte reductions are reported against foreground, DP, "
+			"and total offered traffic. Do not interpret a single seed or a confidence interval spanning zero "
+			"as evidence of a performance benefit.",
 			"",
 		]
 	)

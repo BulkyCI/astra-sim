@@ -75,6 +75,37 @@ class Ring3DReportTests(unittest.TestCase):
                         "p99_ns": 2_500,
                         "max_ns": 2_500,
                     },
+                    "collective_completion": {
+                        "status": "available",
+                        "per_rank_completion_time_ns": {
+                            "by_parallelism_domain_and_collective_type": {
+                                "dp": {
+                                    "all_reduce": {
+                                        "count": 8,
+                                        "min_ns": 100,
+                                        "p50_ns": 120,
+                                        "p95_ns": 150,
+                                        "p99_ns": 150,
+                                        "max_ns": 150,
+                                    }
+                                }
+                            },
+                        },
+                        "all_rank_operation_span_ns": {
+                            "by_parallelism_domain_and_collective_type": {
+                                "dp": {
+                                    "all_reduce": {
+                                        "count": 1,
+                                        "min_ns": 160,
+                                        "p50_ns": 160,
+                                        "p95_ns": 160,
+                                        "p99_ns": 160,
+                                        "max_ns": 160,
+                                    }
+                                }
+                            },
+                        },
+                    },
                     "flow_completion_time_ns": {
                         "all": {
                             "count": 2,
@@ -122,6 +153,32 @@ class Ring3DReportTests(unittest.TestCase):
                             "max_queue_bytes": 4_096,
                         },
                         "pfc": {"status": "available", "event_count": 1},
+                    },
+                    "physical_traffic_bytes": {
+                        "foreground_logical_operations": {
+                            "flow_count": 2,
+                            "logical_bytes": 262_208,
+                            "physical_bytes": 131_136,
+                        },
+                        "dp_all_reduce": {
+                            "flow_count": 2,
+                            "logical_bytes": 262_208,
+                            "physical_bytes": 131_136,
+                        },
+                        "total": {
+                            "flow_count": 2,
+                            "logical_bytes": 262_208,
+                            "physical_bytes": 131_136,
+                        },
+                    },
+                    "background_microburst_timeline": {
+                        "status": "available",
+                        "flow_count": 7,
+                        "logical_bytes": 234_881_024,
+                        "physical_bytes": 234_881_024,
+                        "start_time_ns": 1_000,
+                        "end_time_ns": 2_000,
+                        "span_ns": 1_000,
                     },
                     "by_training_step": {
                         "1": {
@@ -218,6 +275,8 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("Per-QP flow-completion time", report)
             self.assertIn("Simulated rank-completion distribution", report)
             self.assertIn("ns-3 congestion observability", report)
+            self.assertIn("Logical collective-completion latency", report)
+            self.assertIn("Causal traffic mix", report)
 
     def test_report_explains_missing_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -54,6 +54,7 @@ OPTIONAL_PROFILE_KEYS = {
     "microburst_destination_rank",
     "microburst_offset_spacing_ns",
     "microburst_source_ranks",
+    "microburst_enabled",
     "model",
 }
 EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
@@ -109,6 +110,7 @@ class Profile:
     microburst_destination_rank: int | None
     microburst_offset_spacing_ns: int
     microburst_source_ranks: tuple[int, ...] | None
+    microburst_enabled: bool
     model: ModelTrace | None
 
     @property
@@ -251,6 +253,9 @@ def load_profile(profile_path: Path) -> Profile:
         if microburst_destination_rank in microburst_source_ranks:
             raise ValueError("microburst source and destination ranks must differ")
         microburst_flow_count = len(microburst_source_ranks)
+    microburst_enabled = document.get("microburst_enabled", True)
+    if not isinstance(microburst_enabled, bool):
+        raise ValueError("microburst_enabled must be a boolean")
     model = _load_model_trace(document, tp, pp)
 
     profile = Profile(
@@ -285,6 +290,7 @@ def load_profile(profile_path: Path) -> Profile:
             "microburst_offset_spacing_ns",
         ),
         microburst_source_ranks=microburst_source_ranks,
+        microburst_enabled=microburst_enabled,
         model=model,
     )
     if profile.ranks % profile.hosts_per_leaf:
@@ -737,6 +743,8 @@ def write_network_config(path: Path, topology: Path, output_dir: Path) -> None:
 
 
 def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
+    if not profile.microburst_enabled:
+        return []
     if profile.microburst_destination_rank is None:
         cross_rack_base = profile.ranks // 2
         destinations = [cross_rack_base + index for index in range(profile.microburst_flow_count)]
@@ -797,7 +805,7 @@ def write_experiment_config(
         "provenance": {"control_bytes": 64, "priority_group": 1},
         "vnet_to_priority_group": {"0": 3},
         "microburst": {
-            "enabled": True,
+            "enabled": profile.microburst_enabled,
             "trigger_step": 2,
             "flows": microburst_flows,
         },

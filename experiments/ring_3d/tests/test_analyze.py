@@ -36,6 +36,17 @@ FLOW_FIELDS = [
     "end_time_ns",
 ]
 
+COLLECTIVE_FIELDS = [
+    "rank",
+    "parallelism_domain",
+    "collective_type",
+    "training_step",
+    "workload_node_id",
+    "logical_bytes",
+    "start_time_ns",
+    "end_time_ns",
+]
+
 
 class Ring3DAnalysisTests(unittest.TestCase):
     def write_telemetry(
@@ -43,6 +54,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
         directory: Path,
         flows: dict[str, str] | list[dict[str, str]],
         completions: list[tuple[int, int]] | None = None,
+        collectives: list[dict[str, str]] | None = None,
     ) -> None:
         directory.mkdir(parents=True)
         if isinstance(flows, dict):
@@ -59,6 +71,13 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        if collectives is not None:
+            with (directory / "collective_events.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=COLLECTIVE_FIELDS)
+                writer.writeheader()
+                writer.writerows(collectives)
 
     def write_fct(self, directory: Path, flows: list[dict[str, str]]) -> Path:
         directory.mkdir(parents=True)
@@ -149,7 +168,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
                 "time 10 8 j 3 120 j 4 240\ntime 20 8 j 3 180\n",
                 encoding="utf-8",
             )
-            (ns3 / "pfc.txt").write_text("pause\nresume\n", encoding="utf-8")
+            (ns3 / "pfc.txt").write_text(
+                "10 8 1 3 3 1\n20 8 1 3 3 0\n", encoding="utf-8"
+            )
 
             summary = summarize(telemetry, fct, ns3)
 
@@ -161,6 +182,99 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(summary["rank_completion_time_ns"]["max_ns"], 140)
             self.assertEqual(summary["ns3_observability"]["queue"]["max_queue_bytes"], 240)
             self.assertEqual(summary["ns3_observability"]["pfc"]["event_count"], 2)
+            self.assertEqual(summary["ns3_observability"]["pfc"]["total_paused_ns"], 10)
+            self.assertEqual(
+                summary["ns3_observability"]["pfc"]["affected_switch_port_queues"],
+                [{"switch": 8, "port": 3, "queue": 3}],
+            )
+
+    def test_summary_uses_native_collective_events_for_logical_latency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            collectives = [
+                {
+                    "rank": "0",
+                    "parallelism_domain": "dp",
+                    "collective_type": "all_reduce",
+                    "training_step": "2",
+                    "workload_node_id": "7",
+                    "logical_bytes": "1048576",
+                    "start_time_ns": "100",
+                    "end_time_ns": "160",
+                },
+                {
+                    "rank": "1",
+                    "parallelism_domain": "dp",
+                    "collective_type": "all_reduce",
+                    "training_step": "2",
+                    "workload_node_id": "7",
+                    "logical_bytes": "1048576",
+                    "start_time_ns": "110",
+                    "end_time_ns": "180",
+                },
+            ]
+            self.write_telemetry(telemetry, self.valid_shed_flow(), collectives=collectives)
+
+            summary = summarize(telemetry)
+
+            collective = summary["collective_completion"]
+            self.assertEqual(collective["status"], "available")
+            self.assertEqual(collective["rank_event_count"], 2)
+            self.assertEqual(collective["logical_collective_count"], 1)
+            per_rank = collective["per_rank_completion_time_ns"]
+            self.assertEqual(per_rank["all"]["p50_ns"], 60)
+            operation_span = collective["all_rank_operation_span_ns"]
+            self.assertEqual(operation_span["all"]["p99_ns"], 80)
+            self.assertEqual(operation_span["by_training_step"]["2"]["max_ns"], 80)
+
+    def test_summary_rejects_duplicate_or_reversed_collective_events(self) -> None:
+        collective = {
+            "rank": "0",
+            "parallelism_domain": "dp",
+            "collective_type": "all_reduce",
+            "training_step": "2",
+            "workload_node_id": "7",
+            "logical_bytes": "1048576",
+            "start_time_ns": "100",
+            "end_time_ns": "160",
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "duplicate"
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), collectives=[collective, dict(collective)]
+            )
+            with self.assertRaisesRegex(ValueError, "duplicate rank completion"):
+                summarize(telemetry)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "reversed"
+            reversed_collective = dict(collective, start_time_ns="161", end_time_ns="160")
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), collectives=[reversed_collective]
+            )
+            with self.assertRaisesRegex(ValueError, "must not be negative"):
+                summarize(telemetry)
+
+    def test_summary_labels_queue_unattributed_pfc_durations_as_estimates(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "pfc.txt").write_text(
+                "10 8 1 3 1\n12 8 1 3 1\n20 8 1 3 0\n24 8 1 3 0\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+            pfc = summary["ns3_observability"]["pfc"]
+            self.assertEqual(pfc["queue_identity_status"], "not_available")
+            self.assertEqual(
+                pfc["pause_duration_status"], "estimated_without_queue_identity"
+            )
+            self.assertEqual(pfc["completed_pause_interval_count"], 2)
 
     def test_summary_rejects_fct_physical_byte_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

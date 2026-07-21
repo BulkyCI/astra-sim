@@ -281,6 +281,66 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 )
             )
 
+        collective_completion = summary.get("collective_completion")
+        if isinstance(collective_completion, dict):
+            if collective_completion.get("status") != "available":
+                lines.extend(
+                    [
+                        "",
+                        "## Logical collective-completion latency",
+                        "",
+                        "Native collective completion telemetry is unavailable for this run. "
+                        "Per-QP FCT must not be substituted for whole-collective latency.",
+                    ]
+                )
+            else:
+                per_rank = collective_completion.get("per_rank_completion_time_ns")
+                operation_span = collective_completion.get("all_rank_operation_span_ns")
+                collective_rows: list[list[Any]] = []
+                if isinstance(per_rank, dict):
+                    by_domain_and_type = per_rank.get(
+                        "by_parallelism_domain_and_collective_type"
+                    )
+                    if isinstance(by_domain_and_type, dict):
+                        for domain, types in sorted(by_domain_and_type.items()):
+                            if not isinstance(types, dict):
+                                continue
+                            for collective_type, values in sorted(types.items()):
+                                if (row := _timing_table_row(
+                                    f"{domain} / {collective_type} per-rank",
+                                    values,
+                                )) is not None:
+                                    collective_rows.append(row)
+                if isinstance(operation_span, dict):
+                    by_domain_and_type = operation_span.get(
+                        "by_parallelism_domain_and_collective_type"
+                    )
+                    if isinstance(by_domain_and_type, dict):
+                        for domain, types in sorted(by_domain_and_type.items()):
+                            if not isinstance(types, dict):
+                                continue
+                            for collective_type, values in sorted(types.items()):
+                                if (row := _timing_table_row(
+                                    f"{domain} / {collective_type} all-rank span",
+                                    values,
+                                )) is not None:
+                                    collective_rows.append(row)
+                lines.extend(["", "## Logical collective-completion latency", ""])
+                lines.append(
+                    "> Per-rank latency is measured from native collective issue to native completion. "
+                    "All-rank span is $\\max(end)-\\min(start)$ for one logical collective across ranks."
+                )
+                lines.append("")
+                if collective_rows:
+                    lines.extend(
+                        _markdown_table(
+                            ["Population", "Events", "P50", "P95", "P99", "Max"],
+                            collective_rows,
+                        )
+                    )
+                else:
+                    lines.append("No completed logical collective events were observed.")
+
         lines.extend(["", "## Measured traffic", ""])
         lines.extend(
             _markdown_table(
@@ -455,7 +515,11 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     else "not available"
                 )
                 pfc_value = (
-                    f"{pfc.get('event_count', 0)} nonempty trace records"
+                    f"{pfc.get('pause_count', 0)} pauses / {pfc.get('resume_count', 0)} resumes; "
+                    f"{pfc.get('completed_pause_interval_count', 0)} completed intervals; total "
+                    f"{_format_duration_ns(_as_int(pfc.get('total_paused_ns', 0), 'total_paused_ns'))}; "
+                    f"max {_format_duration_ns(_as_int(pfc.get('max_paused_ns', 0), 'max_paused_ns'))} "
+                    f"({pfc.get('pause_duration_status', 'unavailable')})"
                     if pfc_status == "available"
                     else "not available"
                 )
@@ -466,6 +530,75 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         [["Queue telemetry", queue_value], ["PFC trace", pfc_value]],
                     )
                 )
+                if isinstance(queue, dict) and queue.get("status") == "available":
+                    peak_locations = queue.get("peak_switch_ports")
+                    if isinstance(peak_locations, list) and peak_locations:
+                        lines.append(
+                            "Peak queue locations: "
+                            + ", ".join(
+                                f"switch {location.get('switch')} port {location.get('port')}"
+                                for location in peak_locations
+                                if isinstance(location, dict)
+                            )
+                            + "."
+                        )
+                if isinstance(pfc, dict) and pfc.get("status") == "available":
+                    affected_locations = pfc.get("affected_switch_port_queues")
+                    if isinstance(affected_locations, list) and affected_locations:
+                        lines.append(
+                            "PFC-affected switch port/queue locations: "
+                            + ", ".join(
+                                f"switch {location.get('switch')} port {location.get('port')} "
+                                f"queue {location.get('queue')}"
+                                for location in affected_locations
+                                if isinstance(location, dict)
+                            )
+                            + "."
+                        )
+
+        background_timeline = summary.get("background_microburst_timeline")
+        traffic_bytes = summary.get("physical_traffic_bytes")
+        if isinstance(background_timeline, dict) or isinstance(traffic_bytes, dict):
+            lines.extend(["", "## Causal traffic mix", ""])
+            mix_rows: list[list[Any]] = []
+            if isinstance(traffic_bytes, dict):
+                for label, key in [
+                    ("Foreground logical operations", "foreground_logical_operations"),
+                    ("DP All-Reduce", "dp_all_reduce"),
+                    ("Total offered traffic", "total"),
+                ]:
+                    values = traffic_bytes.get(key)
+                    if isinstance(values, dict):
+                        mix_rows.append(
+                            [
+                                label,
+                                values.get("flow_count", "unknown"),
+                                _format_bytes(_as_int(values.get("logical_bytes", 0), "logical_bytes")),
+                                _format_bytes(_as_int(values.get("physical_bytes", 0), "physical_bytes")),
+                            ]
+                        )
+            if mix_rows:
+                lines.extend(
+                    _markdown_table(
+                        ["Traffic population", "Flows", "Logical bytes", "Physical bytes"],
+                        mix_rows,
+                    )
+                )
+            if isinstance(background_timeline, dict):
+                if background_timeline.get("status") == "available":
+                    lines.extend(
+                        [
+                            "",
+                            "Background incast: "
+                            f"{background_timeline.get('flow_count', 'unknown')} flows / "
+                            f"{_format_bytes(_as_int(background_timeline.get('physical_bytes', 0), 'physical_bytes'))} "
+                            f"physical bytes from {_format_duration_ns(_as_int(background_timeline.get('start_time_ns', 0), 'start_time_ns'))} "
+                            f"to {_format_duration_ns(_as_int(background_timeline.get('end_time_ns', 0), 'end_time_ns'))} "
+                            f"(span {_format_duration_ns(_as_int(background_timeline.get('span_ns', 0), 'span_ns'))}).",
+                        ]
+                    )
+                else:
+                    lines.extend(["", "No background microburst flow was observed."])
 
     lines.extend(["", "## Reproducibility", ""])
     lines.append(f"- Profile source: `{_display_path(profile_path)}`")

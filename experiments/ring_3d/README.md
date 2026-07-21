@@ -11,6 +11,7 @@ The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
+- [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
 - [profiles/incast_8.json](profiles/incast_8.json): an eight-host stress-calibration profile that sends seven simultaneous 32 MiB RDMA microbursts to host 4.
 - [profiles/canonical_256.json](profiles/canonical_256.json): $TP=8$, $PP=4$, $DP=8$, with a 256-host, 16-leaf, 16-spine Clos topology.
 - [profiles/model_100b_256.json](profiles/model_100b_256.json): a structural $100$B-parameter, $TP=8$, $PP=4$, $DP=8$ transformer trace. It partitions $100$B BF16 gradients across $TP\times PP=32$ ranks, so every rank emits $6.25$ GB of DP gradient buckets per optimizer step.
@@ -31,7 +32,7 @@ Build the ns-3 frontend, then execute the complete smoke run:
 bash experiments/ring_3d/smoke.sh
 ```
 
-The runner locates the default ns-3 binary. Pass `--binary /path/to/AstraSimNetwork` to [run.py](run.py) when using another build profile. It emits `telemetry/flow_events.csv`, `telemetry/rank_completion.csv`, and `summary.json`. The analyzer verifies a one-to-one telemetry-to-ns-3 FCT join by `(src, dst, source_port)`, including start time, duration, and physical bytes. It then reports per-QP FCT quantiles, rank-completion distribution, queue peak, and PFC trace count. To analyze an already completed run:
+The runner locates the default ns-3 binary. Pass `--binary /path/to/AstraSimNetwork` to [run.py](run.py) when using another build profile. It emits `telemetry/flow_events.csv`, `telemetry/collective_events.csv`, `telemetry/rank_completion.csv`, and `summary.json`. The analyzer verifies a one-to-one telemetry-to-ns-3 FCT join by `(src, dst, source_port)`, including start time, duration, and physical bytes. Native `collective_events.csv` records exactly one issue-to-completion event per rank and logical collective; it supports per-rank completion and all-rank span $\max(end)-\min(start)$ metrics. The analyzer also reports per-QP FCT diagnostics, rank-completion distribution, queue peak locations, and paired PFC pause/resume burden. To analyze an already completed run:
 
 ```sh
 uv run --locked python experiments/ring_3d/analyze.py \
@@ -48,9 +49,13 @@ uv run --locked python experiments/ring_3d/compare.py \
   --output runs/ring_3d/incast_8_comparison --clean
 ```
 
-The comparison reports paired deltas for simulated makespan and all/foreground/DP-foreground P99 per-QP FCT. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. The incast profile is a calibration workload, not a claim that PFC or buffer exhaustion has occurred: inspect the retained queue and PFC telemetry before using it for any latency claim.
+The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. The incast profile is a calibration workload, not a claim that PFC or buffer exhaustion has occurred: inspect the retained queue and PFC telemetry before using it for any latency claim.
 
 The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs.
+
+## Empirical-validation protocol
+
+[VALIDATION_PROTOCOL.md](VALIDATION_PROTOCOL.md) pre-registers the primary logical-collective estimands, raw-signal gates, negative and congestion controls, payload/incast/policy-rate grid, causal-load criterion, and decision rules. The current 32 MiB × 7 background incast establishes real congestion only when raw queue/PFC gates pass; it cannot by itself establish a DBLP benefit when the selected DP bytes are negligible beside the independent background offered load.
 
 ## 100B structural model trace
 
@@ -70,7 +75,7 @@ This is a **structural model trace**, not an exact Megatron or PyTorch replay. F
 
 The native CI job publishes a Markdown report in its GitHub Actions job summary and uploads it as the standalone `ring-3d-research-report-<run-id>` artifact. It also retains the report in the `ring-3d-smoke-results-<run-id>` reproducibility bundle, alongside generated ET traces, topology, communicator groups, system and experiment policy JSON, raw ns-3 outputs, telemetry CSV files, and `summary.json`.
 
-The report records the TP/PP/DP shape, workload and network parameters, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, per-QP FCT quantiles, simulated makespan distribution, and queue/PFC observations. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
+The report records the TP/PP/DP shape, workload and network parameters, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, native logical-collective latency, per-QP FCT diagnostics, simulated makespan distribution, and queue/PFC pause observations. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
 
 Generate the same standalone Markdown record for any completed run with:
 

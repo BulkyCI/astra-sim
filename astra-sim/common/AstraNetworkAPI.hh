@@ -61,6 +61,17 @@ class AstraNetworkAPI {
 
     virtual timespec_t sim_get_time() = 0;
 
+    // Reports the completion of one logical collective at this rank. Network
+    // backends that do not collect experiment telemetry retain the no-op
+    // default; ns-3 records this separately from per-QP transport telemetry.
+    virtual void sim_record_collective_completion(
+        const OperationContext& operation,
+        uint64_t logical_bytes,
+        uint64_t start_time_ns,
+        uint64_t end_time_ns) {
+        return;
+    }
+
     virtual double get_BW_at_dimension(int dim) {
         return -1;
     };

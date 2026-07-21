@@ -35,6 +35,10 @@ def load_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _load_optional_csv(path: Path) -> list[dict[str, str]] | None:
+    return load_csv(path) if path.is_file() else None
+
+
 def _training_step_sort_key(value: str) -> tuple[int, int | str]:
     try:
         return (0, int(value))
@@ -73,6 +77,108 @@ def _flow_duration_ns(row: dict[str, str]) -> int:
     if duration < 0:
         raise ValueError("flow completion time must not be negative")
     return duration
+
+
+def _collective_duration_ns(row: dict[str, str]) -> int:
+    duration = _as_int(row, "end_time_ns") - _as_int(row, "start_time_ns")
+    if duration < 0:
+        raise ValueError("collective completion time must not be negative")
+    return duration
+
+
+def _summarize_collectives(
+    collective_rows: list[dict[str, str]] | None,
+) -> dict[str, Any]:
+    if collective_rows is None:
+        return {"status": "not_available"}
+
+    per_rank_durations: list[int] = []
+    per_rank_by_domain: dict[str, list[int]] = defaultdict(list)
+    per_rank_by_domain_and_type: dict[str, dict[str, list[int]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    operations: dict[tuple[str, str, int, int], list[dict[str, str]]] = defaultdict(list)
+    seen_rank_events: set[tuple[str, str, int, int, int]] = set()
+
+    for row in collective_rows:
+        domain = row.get("parallelism_domain") or "unknown"
+        collective_type = row.get("collective_type") or "unknown"
+        training_step = _as_int(row, "training_step")
+        node_id = _as_int(row, "workload_node_id")
+        rank = _as_int(row, "rank")
+        if rank < 0 or _as_int(row, "logical_bytes") < 0:
+            raise ValueError("collective telemetry rank and logical bytes must be nonnegative")
+        duration = _collective_duration_ns(row)
+        event_key = (domain, collective_type, training_step, node_id, rank)
+        if event_key in seen_rank_events:
+            raise ValueError("collective telemetry contains a duplicate rank completion")
+        seen_rank_events.add(event_key)
+        per_rank_durations.append(duration)
+        per_rank_by_domain[domain].append(duration)
+        per_rank_by_domain_and_type[domain][collective_type].append(duration)
+        operations[(domain, collective_type, training_step, node_id)].append(row)
+
+    operation_spans: list[int] = []
+    operation_spans_by_domain: dict[str, list[int]] = defaultdict(list)
+    operation_spans_by_domain_and_type: dict[str, dict[str, list[int]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    operation_spans_by_step: dict[str, list[int]] = defaultdict(list)
+    rank_counts: list[int] = []
+    for (domain, collective_type, training_step, _node_id), rows in operations.items():
+        start_time_ns = min(_as_int(row, "start_time_ns") for row in rows)
+        end_time_ns = max(_as_int(row, "end_time_ns") for row in rows)
+        span = end_time_ns - start_time_ns
+        operation_spans.append(span)
+        operation_spans_by_domain[domain].append(span)
+        operation_spans_by_domain_and_type[domain][collective_type].append(span)
+        operation_spans_by_step[str(training_step)].append(span)
+        rank_counts.append(len(rows))
+
+    def by_domain_and_type(
+        durations: dict[str, dict[str, list[int]]],
+    ) -> dict[str, dict[str, dict[str, int | None]]]:
+        return {
+            domain: {
+                collective_type: _timing_statistics(values)
+                for collective_type, values in sorted(types.items())
+            }
+            for domain, types in sorted(durations.items())
+        }
+
+    return {
+        "status": "available",
+        "rank_event_count": len(collective_rows),
+        "logical_collective_count": len(operations),
+        "operation_rank_count": _timing_statistics(rank_counts),
+        "per_rank_completion_time_ns": {
+            "all": _timing_statistics(per_rank_durations),
+            "by_parallelism_domain": {
+                domain: _timing_statistics(values)
+                for domain, values in sorted(per_rank_by_domain.items())
+            },
+            "by_parallelism_domain_and_collective_type": by_domain_and_type(
+                per_rank_by_domain_and_type
+            ),
+        },
+        "all_rank_operation_span_ns": {
+            "all": _timing_statistics(operation_spans),
+            "by_parallelism_domain": {
+                domain: _timing_statistics(values)
+                for domain, values in sorted(operation_spans_by_domain.items())
+            },
+            "by_parallelism_domain_and_collective_type": by_domain_and_type(
+                operation_spans_by_domain_and_type
+            ),
+            "by_training_step": {
+                step: _timing_statistics(values)
+                for step, values in sorted(
+                    operation_spans_by_step.items(),
+                    key=lambda entry: _training_step_sort_key(entry[0]),
+                )
+            },
+        },
+    }
 
 
 def _timing_by_field(
@@ -173,12 +279,13 @@ def _verify_fct_join(
     }
 
 
-def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, dict[str, int | str]]:
+def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
     queue_path = ns3_dir / "qlen.txt"
     if queue_path.is_file():
         queue_rows = 0
         queues: set[tuple[int, int]] = set()
         max_queue_bytes = 0
+        peak_queue_locations: set[tuple[int, int]] = set()
         for line_number, line in enumerate(
             queue_path.read_text(encoding="utf-8").splitlines(), start=1
         ):
@@ -197,7 +304,11 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, dict[str, int | str
                     if queue_bytes < 0:
                         raise ValueError
                     queues.add((switch, port))
-                    max_queue_bytes = max(max_queue_bytes, queue_bytes)
+                    if queue_bytes > max_queue_bytes:
+                        max_queue_bytes = queue_bytes
+                        peak_queue_locations = {(switch, port)}
+                    elif queue_bytes == max_queue_bytes:
+                        peak_queue_locations.add((switch, port))
             except ValueError as error:
                 raise ValueError(
                     f"invalid queue telemetry at {queue_path}:{line_number}"
@@ -208,22 +319,128 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, dict[str, int | str
             "sample_count": queue_rows,
             "observed_queue_count": len(queues),
             "max_queue_bytes": max_queue_bytes,
+            "peak_switch_ports": [
+                {"switch": switch, "port": port}
+                for switch, port in sorted(peak_queue_locations)
+            ],
         }
     else:
         queue = {"status": "not_available"}
 
     pfc_path = ns3_dir / "pfc.txt"
     if pfc_path.is_file():
+        active_pauses: dict[tuple[int, int, int | None], list[int]] = defaultdict(list)
+        intervals: list[int] = []
+        pause_count = 0
+        resume_count = 0
+        unmatched_resumes = 0
+        affected: dict[tuple[int, int, int | None], int] = {}
+        event_count = 0
+        uses_queue_identity = True
+        for line_number, line in enumerate(
+            pfc_path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
+            fields = line.split()
+            if len(fields) == 6:
+                timestamp, node, node_type, port, queue_field, event_type = fields
+                queue_id: int | None = int(queue_field)
+            elif len(fields) == 5:
+                # Artifacts emitted before queue-aware PFC telemetry cannot
+                # attribute pauses to a priority queue, but remain analyzable.
+                timestamp, node, node_type, port, event_type = fields
+                queue_id = None
+                uses_queue_identity = False
+            else:
+                raise ValueError(f"invalid PFC telemetry at {pfc_path}:{line_number}")
+            try:
+                timestamp_ns = int(timestamp)
+                node_id = int(node)
+                node_kind = int(node_type)
+                port_id = int(port)
+                event = int(event_type)
+            except ValueError as error:
+                raise ValueError(
+                    f"invalid PFC telemetry at {pfc_path}:{line_number}"
+                ) from error
+            if min(timestamp_ns, node_id, node_kind, port_id) < 0 or event not in (0, 1):
+                raise ValueError(f"invalid PFC telemetry at {pfc_path}:{line_number}")
+            key = (node_id, port_id, queue_id)
+            affected[key] = node_kind
+            event_count += 1
+            if event == 1:
+                pause_count += 1
+                if queue_id is not None and active_pauses[key]:
+                    raise ValueError("PFC pause was received before the previous resume")
+                active_pauses[key].append(timestamp_ns)
+            else:
+                resume_count += 1
+                if not active_pauses[key]:
+                    unmatched_resumes += 1
+                    continue
+                # Queue-unattributed historical traces cannot distinguish
+                # overlapping pauses on one port. Pairing is deterministic but
+                # explicitly labeled as an estimate below.
+                start_time_ns = active_pauses[key].pop()
+                if timestamp_ns < start_time_ns:
+                    raise ValueError("PFC resume precedes its pause")
+                intervals.append(timestamp_ns - start_time_ns)
+        affected_switch_port_queues = [
+            {
+                "switch": node_id,
+                "port": port_id,
+                "queue": queue_id if queue_id is not None else "unknown",
+            }
+            for (node_id, port_id, queue_id), node_kind in sorted(affected.items())
+            if node_kind == 1
+        ]
         pfc = {
             "status": "available",
-            "event_count": sum(
-                bool(line.strip())
-                for line in pfc_path.read_text(encoding="utf-8").splitlines()
+            "event_count": event_count,
+            "pause_count": pause_count,
+            "resume_count": resume_count,
+            "completed_pause_interval_count": len(intervals),
+            "total_paused_ns": sum(intervals),
+            "max_paused_ns": max(intervals, default=0),
+            "unmatched_resume_count": unmatched_resumes,
+            "active_pause_count_at_end": sum(
+                len(starts) for starts in active_pauses.values()
             ),
+            "queue_identity_status": "available" if uses_queue_identity else "not_available",
+            "pause_duration_status": (
+                "exact" if uses_queue_identity else "estimated_without_queue_identity"
+            ),
+            "affected_switch_port_queues": affected_switch_port_queues,
         }
     else:
         pfc = {"status": "not_available"}
     return {"queue": queue, "pfc": pfc}
+
+
+def _traffic_bytes(rows: list[dict[str, str]]) -> dict[str, int]:
+    return {
+        "flow_count": len(rows),
+        "logical_bytes": sum(_as_int(row, "logical_bytes") for row in rows),
+        "physical_bytes": sum(_as_int(row, "physical_bytes") for row in rows),
+    }
+
+
+def _background_timeline(rows: list[dict[str, str]]) -> dict[str, int | str]:
+    background_rows = [
+        row for row in rows if row.get("flow_kind") == "background_microburst"
+    ]
+    if not background_rows:
+        return {"status": "no_background_microburst"}
+    start_time_ns = min(_as_int(row, "start_time_ns") for row in background_rows)
+    end_time_ns = max(_as_int(row, "end_time_ns") for row in background_rows)
+    return {
+        "status": "available",
+        **_traffic_bytes(background_rows),
+        "start_time_ns": start_time_ns,
+        "end_time_ns": end_time_ns,
+        "span_ns": end_time_ns - start_time_ns,
+    }
 
 
 def summarize(
@@ -234,6 +451,7 @@ def summarize(
     telemetry_dir = telemetry_dir.resolve()
     flow_rows = load_csv(telemetry_dir / "flow_events.csv")
     completion_rows = load_csv(telemetry_dir / "rank_completion.csv")
+    collective_rows = _load_optional_csv(telemetry_dir / "collective_events.csv")
     if fct_path is None:
         fct_path = telemetry_dir.parent / "ns3" / "fct.txt"
     if ns3_dir is None:
@@ -280,6 +498,19 @@ def summarize(
     completion_times = [_as_int(row, "completion_time_ns") for row in completion_rows]
     flow_completion = _timing_statistics([_flow_duration_ns(row) for row in flow_rows])
     rank_completion = _timing_statistics(completion_times)
+    foreground_logical_rows = [
+        row
+        for row in flow_rows
+        if row.get("flow_kind")
+        in ("foreground_payload", "provenance_control")
+    ]
+    dp_all_reduce_rows = [
+        row
+        for row in flow_rows
+        if row.get("parallelism_domain") == "dp"
+        and row.get("origin_transport_role") == "collective_payload"
+        and row.get("collective_type") == "all_reduce"
+    ]
     return {
         "flow_count": len(flow_rows),
         "shed_flow_count": len(shed_rows),
@@ -300,6 +531,13 @@ def summarize(
                 flow_rows
             ),
         },
+        "collective_completion": _summarize_collectives(collective_rows),
+        "physical_traffic_bytes": {
+            "total": _traffic_bytes(flow_rows),
+            "foreground_logical_operations": _traffic_bytes(foreground_logical_rows),
+            "dp_all_reduce": _traffic_bytes(dp_all_reduce_rows),
+        },
+        "background_microburst_timeline": _background_timeline(flow_rows),
         "fct_join": _verify_fct_join(flow_rows, fct_path.resolve()),
         "ns3_observability": _summarize_ns3_observability(ns3_dir.resolve()),
         "by_training_step": dict(

@@ -345,6 +345,17 @@ OperationContext Workload::make_operation_context(
     return context;
 }
 
+void Workload::register_collective(DataSet* collective,
+                                   uint64_t node_id,
+                                   const OperationContext& operation,
+                                   uint64_t logical_bytes) {
+    collective_comm_node_id_map[collective->my_id] = node_id;
+    collective_comm_wrapper_map[collective->my_id] = collective;
+    collective_telemetry_map[collective->my_id] = {
+        operation, logical_bytes, Sys::boostedTick()};
+    collective->set_notifier(this, EventType::CollectiveCommunicationFinished);
+}
+
 void Workload::issue_coll_comm(
     shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
     std::vector<bool> involved_dims;
@@ -395,36 +406,28 @@ void Workload::issue_coll_comm(
         DataSet* fp = sys->generate_all_reduce(comm_size, involved_dims,
                                                comm_group, comm_priority,
                                                node->id(), context);
-        collective_comm_node_id_map[fp->my_id] = node->id();
-        collective_comm_wrapper_map[fp->my_id] = fp;
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
+        register_collective(fp, node->id(), context, comm_size);
     } else if (comm_type == ChakraCollectiveCommType::ALL_TO_ALL) {
         auto context = operation_context;
         context.collective_type = ComType::All_to_All;
         DataSet* fp = sys->generate_all_to_all(comm_size, involved_dims,
                                                comm_group, comm_priority,
                                                node->id(), context);
-        collective_comm_node_id_map[fp->my_id] = node->id();
-        collective_comm_wrapper_map[fp->my_id] = fp;
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
+        register_collective(fp, node->id(), context, comm_size);
     } else if (comm_type == ChakraCollectiveCommType::ALL_GATHER) {
         auto context = operation_context;
         context.collective_type = ComType::All_Gather;
         DataSet* fp = sys->generate_all_gather(comm_size, involved_dims,
                                                comm_group, comm_priority,
                                                node->id(), context);
-        collective_comm_node_id_map[fp->my_id] = node->id();
-        collective_comm_wrapper_map[fp->my_id] = fp;
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
+        register_collective(fp, node->id(), context, comm_size);
     } else if (comm_type == ChakraCollectiveCommType::REDUCE_SCATTER) {
         auto context = operation_context;
         context.collective_type = ComType::Reduce_Scatter;
         DataSet* fp = sys->generate_reduce_scatter(comm_size, involved_dims,
                                                    comm_group, comm_priority,
                                                    node->id(), context);
-        collective_comm_node_id_map[fp->my_id] = node->id();
-        collective_comm_wrapper_map[fp->my_id] = fp;
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
+        register_collective(fp, node->id(), context, comm_size);
     } else if (comm_type == ChakraCollectiveCommType::BROADCAST) {
         // TODO: implement broadcast, for now just replay
         uint64_t runtime = 1ul;
@@ -434,14 +437,11 @@ void Workload::issue_coll_comm(
             runtime = node->runtime() * 1000;
         }
         DataSet* fp = new DataSet(1);
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
-        collective_comm_node_id_map[fp->my_id] = node->id();
-        collective_comm_wrapper_map[fp->my_id] = fp;
+        register_collective(fp, node->id(), operation_context, comm_size);
         sys->register_event(fp, EventType::General, nullptr,
                             // chakra runtimes are in microseconds and we
                             // should convert it into nanoseconds
                             runtime);
-        fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
     } else {
         throw std::runtime_error("Unsupported collective comm type");
     }
@@ -533,7 +533,7 @@ void Workload::call(EventType event, CallData* data) {
         uint64_t coll_comm_id = int_data->data;
 
         hw_resource->tics_gpu_comms += int_data->execution_time;
-        uint64_t node_id = collective_comm_node_id_map[coll_comm_id];
+        const uint64_t node_id = collective_comm_node_id_map.at(coll_comm_id);
         shared_ptr<Chakra::FeederV3::ETFeederNode> node =
             et_feeder->lookupNode(node_id);
 
@@ -561,6 +561,15 @@ void Workload::call(EventType event, CallData* data) {
             this->local_mem_usage_tracker->recordEnd(node, Sys::boostedTick());
         }
 
+        const auto telemetry = collective_telemetry_map.at(coll_comm_id);
+        const uint64_t end_time_ns = Sys::boostedTick();
+        if (end_time_ns < telemetry.start_time_ns) {
+            throw runtime_error("Collective completion precedes its issue time");
+        }
+        sys->comm_NI->sim_record_collective_completion(
+            telemetry.operation, telemetry.logical_bytes,
+            telemetry.start_time_ns, end_time_ns);
+
         this->et_feeder->getDependancyResolver().finish_node(node_id);
 
         issue_dep_free_nodes();
@@ -569,6 +578,8 @@ void Workload::call(EventType event, CallData* data) {
         // dump more statistics in the workload layer
         delete collective_comm_wrapper_map[coll_comm_id];
         collective_comm_wrapper_map.erase(coll_comm_id);
+        collective_comm_node_id_map.erase(coll_comm_id);
+        collective_telemetry_map.erase(coll_comm_id);
 
     } else {
         if (data == nullptr) {

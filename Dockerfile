@@ -5,6 +5,9 @@
 ## Copyright (c) 2024 Georgia Institute of Technology
 ## ******************************************************************************
 
+ARG UV_VERSION=0.11.28
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 ## Use Ubuntu
 FROM ubuntu:22.04
 LABEL maintainer="Will Won <william.won@gatech.edu>"
@@ -14,26 +17,16 @@ LABEL maintainer="Jinsun Yoo <jinsun@gatech.edu>"
 ### ================== System Setups ======================
 ## Install System Dependencies
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt -y update
-RUN apt -y install \
-    coreutils wget vim git \
+RUN apt-get update && apt-get install --yes --no-install-recommends \
+    ca-certificates coreutils wget vim git \
     gcc g++ clang-format \
     make cmake \
     libboost-dev libboost-program-options-dev \
     openmpi-bin openmpi-doc libopenmpi-dev \
-    python3.11 python3-pip python3-venv \
-    graphviz
+    graphviz \
+    && rm -rf /var/lib/apt/lists/*
 
-## Create Python venv: Required for Python 3.11
-RUN python3 -m venv /opt/venv/astra-sim
-ENV PATH="/opt/venv/astra-sim/bin:$PATH"
-RUN pip3 install --upgrade pip
-
-## Add astra-sim to PYTHONPATH
-ENV PYTHONPATH="/app/astra-sim"
-
-# STG dependencies
-RUN pip3 install numpy sympy graphviz pandas
+COPY --from=uv /uv /uvx /usr/local/bin/
 ### ======================================================
 
 
@@ -59,7 +52,7 @@ ENV absl_DIR="/opt/abseil-cpp-${ABSL_VER}/install"
 
 
 ### ============= Protobuf Installation ==================
-## Download Protobuf 29.0 (=v5.29.0, latest stable version as of Feb/01/2025)
+## Download Protobuf C++ release 29.0.
 ARG PROTOBUF_VER=29.0
 
 # Download source
@@ -80,15 +73,22 @@ RUN cmake --build . --target install --config Release --parallel $(nproc)
 ENV PATH="/opt/protobuf-${PROTOBUF_VER}/install/bin:$PATH"
 ENV protobuf_DIR="/opt/protobuf-${PROTOBUF_VER}/install"
 
-# Also, install Python protobuf package
-RUN pip3 install protobuf==5.${PROTOBUF_VER}
-
 # Set the environment variable
 ENV PROTOBUF_FROM_SOURCE=True
 ### ======================================================
 
 
 ### ================== Finalize ==========================
-## Move to the application directory
+## Create the reproducible Python environment. Keep it outside the worktree so
+## it remains available when a host checkout is bind-mounted into the container.
 WORKDIR /app/astra-sim
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv/astra-sim
+ENV VIRTUAL_ENV=/opt/venv/astra-sim
+ENV PATH="/opt/venv/astra-sim/bin:$PATH"
+ENV PYTHONPATH="/app/astra-sim"
+
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --locked
+
+COPY . ./
 ### ======================================================

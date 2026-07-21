@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.vscode
+**/__pycache__
+**/*.py[cod]
+build/**/build
+build/**/result
+**/*.log
+runs

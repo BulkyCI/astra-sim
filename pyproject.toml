@@ -1,0 +1,24 @@
+[project]
+name = "astra-sim-environment"
+version = "2.0.0"
+description = "Reproducible Python environment for ASTRA-sim tooling"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "chakra @ git+https://github.com/astra-sim/chakra.git@0e3cd40c569f0a4cacb6d961bb56be53407abd2f",
+    # Chakra's trace-link module imports et_replay but does not declare it.
+    "et-replay @ git+https://github.com/facebookresearch/param.git@7b19f586dd8b267333114992833a0d7e0d601630#subdirectory=et_replay",
+    # Keep the Python runtime aligned with the Protobuf 29.0 C++ toolchain.
+    "protobuf==5.29.6",
+]
+
+[tool.uv]
+# This repository owns an environment, not a distributable Python package.
+package = false
+required-version = ">=0.11.28,<0.12"
+# Chakra 0.0.4 requires legacy setuptools command-entrypoint behavior and must
+# generate code with the Protobuf 5 toolchain used by this project.
+build-constraint-dependencies = [
+    "setuptools==69.5.1",
+    "grpcio-tools==1.68.1",
+]

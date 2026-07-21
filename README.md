@@ -12,6 +12,20 @@ For information on how to use ASTRA-sim, please visit our [Wiki](https://astra-s
 
 ASTRA-sim accepts MLCommons Chakra Execution Traces as workload-layer inputs. For details, please visit [Chakra Github](https://github.com/mlcommons/chakra).
 
+## Development setup
+
+The Python tooling has one supported environment path: [uv](https://docs.astral.sh/uv/). Do not use `pip`, `pip3`, manually-created virtual environments, or Python packages installed into the system interpreter. The committed `uv.lock` is the complete, reproducible dependency graph for Chakra tooling and trace conversion.
+
+Install the native build prerequisites for the selected backend (a C++17 compiler, CMake, Protobuf and Boost; MPI is needed by the ns-3 backend), then install [uv](https://docs.astral.sh/uv/getting-started/installation/). From the repository root, run:
+
+```sh
+./utils/setup.sh
+```
+
+The setup script initializes every pinned Git submodule and runs `uv sync --locked`. It uses the project-selected CPython 3.11 and creates `.venv`; no activation is necessary. Project-owned Python entry points run through uv; for example, use `./tests/rt_template/inputs/workload/gen.sh` to generate the regression traces. Dependency changes must update both `pyproject.toml` and `uv.lock` with `uv lock`; normal builds and CI reject an out-of-date lock.
+
+The legacy `utils/install_chakra.sh` entry point remains as a compatibility wrapper and delegates to the same uv workflow. The Docker image also synchronizes this exact lockfile with uv; build it through `./utils/build_docker_image.sh`.
+
 
 ### Releases and Contributions
 

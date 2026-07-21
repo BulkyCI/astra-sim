@@ -14,16 +14,22 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
-    
-    - name: Setup 
-      run: sudo ${{github.workspace}}/.github/workflows/setup.sh
-      
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: "0.11.28"
+        enable-cache: true
+
+    - name: Setup
+      run: ${{github.workspace}}/.github/workflows/setup.sh
+
     - name: Build
       run: ${{github.workspace}}/.github/workflows/build.sh
-      
+
     - name: Test
       run: ${{github.workspace}}/.github/workflows/test.sh
 

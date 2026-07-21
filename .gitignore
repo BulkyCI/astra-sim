@@ -24,6 +24,9 @@ build/astra_htsim/build/
 # vscode
 .vscode
 
+# uv
+.venv/
+
 # logs
 **/*.log
 

@@ -38,7 +38,7 @@ uv run --locked python experiments/ring_3d/analyze.py \
 
 ## Researcher-facing CI results
 
-The native CI job publishes a Markdown report in its GitHub Actions job summary and retains the same report in the `ring-3d-smoke-results-<run-id>` artifact. The reproducibility bundle contains the generated ET traces, topology, communicator groups, system and experiment policy JSON, raw ns-3 outputs, telemetry CSV files, `summary.json`, and `research_report.md`.
+The native CI job publishes a Markdown report in its GitHub Actions job summary and uploads it as the standalone `ring-3d-research-report-<run-id>` artifact. It also retains the report in the `ring-3d-smoke-results-<run-id>` reproducibility bundle, alongside generated ET traces, topology, communicator groups, system and experiment policy JSON, raw ns-3 outputs, telemetry CSV files, and `summary.json`.
 
 The report records the TP/PP/DP shape, workload and network parameters, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, and tables by training step, parallelism domain, and flow kind. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
 

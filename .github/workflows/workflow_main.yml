@@ -82,6 +82,14 @@ jobs:
           --output runs/ring_3d/smoke_8/research_report.md
         cat runs/ring_3d/smoke_8/research_report.md >> "$GITHUB_STEP_SUMMARY"
 
+    - name: Upload 3D Ring researcher report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ring-3d-research-report-${{ github.run_id }}
+        path: runs/ring_3d/smoke_8/research_report.md
+        if-no-files-found: error
+
     - name: Upload 3D Ring reproducibility bundle
       if: always()
       uses: actions/upload-artifact@v4

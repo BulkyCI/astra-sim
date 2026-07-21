@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: [ "master", "dev" ]
   workflow_dispatch:
-    inputs:
-      run_paired_incast:
-        description: Run the five-seed paired incast evaluation after native build
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -106,7 +100,6 @@ jobs:
 
   paired-incast-evaluation:
     name: Five-seed paired incast evaluation
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_paired_incast }}
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 90

@@ -68,6 +68,8 @@ checks that are intentionally not run, especially costly simulator runs.
   [docs/agents/ring-3d-known-flaws.md](docs/agents/ring-3d-known-flaws.md)
 - Adopted loss-tolerant RDMA transport direction and model-level gates:
   [docs/agents/loss-tolerant-rdma-decision.md](docs/agents/loss-tolerant-rdma-decision.md)
+- Verified current ns-3/QBB/RDMA implementation gaps for that direction:
+  [docs/agents/loss-tolerant-rdma-audit.md](docs/agents/loss-tolerant-rdma-audit.md)
 - Ring-3D generator, policy, telemetry, or profile changes:
   [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
 - Agent-context index:

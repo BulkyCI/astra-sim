@@ -101,6 +101,11 @@ solution to this gap. It models logical payload substitution and has a priority
 setting, but it is not a general transport-control classifier and does not
 shield ACK/NACK/CNP/PFC from the receive error model.
 
+The repository-verified packet path, existing queue/recovery foundations, and
+granular configuration, telemetry, liveness, and test gaps are recorded in the
+[loss-tolerant RDMA implementation-gap audit](loss-tolerant-rdma-audit.md).
+That audit describes current state; it does not choose an implementation.
+
 ## Scope and claim boundaries
 
 This decision enables research questions such as:
@@ -183,6 +188,7 @@ these model-level gates pass.
 ## Related context
 
 - [Current backend limits and valid claims](ring-3d-research-context.md)
+- [Verified transport implementation-gap audit](loss-tolerant-rdma-audit.md)
 - [DBLP known flaws and validity threats](ring-3d-known-flaws.md)
 - [Ring-3D configuration vocabulary](../../experiments/ring_3d/GLOSSARY.md)
 - [Current policy implementation map](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)

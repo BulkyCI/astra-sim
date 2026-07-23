@@ -7,10 +7,11 @@ telemetry:
 1. [DBLP paper brief](../../docs/agents/ring-3d-paper-brief.md)
 2. [DBLP known flaws](../../docs/agents/ring-3d-known-flaws.md)
 3. [Loss-tolerant RDMA decision](../../docs/agents/loss-tolerant-rdma-decision.md)
-4. [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md)
-5. [Ring-3D glossary](GLOSSARY.md)
-6. [Research claim boundary](../../docs/agents/ring-3d-research-context.md)
-7. [Validation protocol](VALIDATION_PROTOCOL.md)
+4. [Loss-tolerant RDMA implementation-gap audit](../../docs/agents/loss-tolerant-rdma-audit.md)
+5. [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md)
+6. [Ring-3D glossary](GLOSSARY.md)
+7. [Research claim boundary](../../docs/agents/ring-3d-research-context.md)
+8. [Validation protocol](VALIDATION_PROTOCOL.md)
 
 For a code-path change, additionally read
 [ns-3 policy implementation](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md).
@@ -53,7 +54,7 @@ any research result.
 | --- | --- |
 | CLR schedule | It is an exogenous phase proxy. Keep it static and seed-reproducible; document empirical trace provenance or conduct schedule sensitivity analysis. See [paper brief](../../docs/agents/ring-3d-paper-brief.md#critical-learning-regime). |
 | Background microburst | It is a finite RDMA incast described by bytes, endpoints, and start offsets; observed flow duration is not a configured injection duration. See [glossary](GLOSSARY.md#background-microburst). |
-| Packet-loss experiment | Treat it as a transport-model change. Follow the pre-loss classification and control/data isolation contract, then define $q$, window duration $D$, direction/scope, recovery behavior, and retransmission telemetry. See [loss-tolerant decision](../../docs/agents/loss-tolerant-rdma-decision.md). |
+| Packet-loss experiment | Treat it as a transport-model change. Read the [loss-tolerant decision](../../docs/agents/loss-tolerant-rdma-decision.md) and [implementation-gap audit](../../docs/agents/loss-tolerant-rdma-audit.md), then define $q$, window duration $D$, direction/scope, recovery behavior, and retransmission telemetry. |
 | DBLP comparison | Separate network loss $q$ from residual-loss tolerance $P$. Use fixed-$P_\mathrm{low}$ baseline only after implementing bounded-loss semantics. See [pivot](../../docs/agents/ring-3d-astra-pivot.md#baseline-selection-is-part-of-the-claim). |
 | Policy-selection change | Update eligibility tests, logical/physical accounting, telemetry schema, analyzer/report, validation protocol, and claim boundary. See [implementation guide](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md). |
 

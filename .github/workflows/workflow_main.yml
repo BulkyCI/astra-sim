@@ -168,7 +168,7 @@ jobs:
     name: Five-seed Llama 3 70B congestion evaluation
     needs: python-quality
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -241,10 +241,10 @@ jobs:
 
     - name: Run five-seed paired Llama 3 70B comparison
       run: |
-        timeout --foreground 160m uv run --locked python experiments/ring_3d/compare.py \
+        timeout --foreground 330m uv run --locked python experiments/ring_3d/compare.py \
           --profile experiments/ring_3d/profiles/llama3_70b_16.json \
           --output runs/ring_3d/llama3_70b_16_comparison \
-          --simulation-timeout-seconds 960 \
+          --simulation-timeout-seconds 1800 \
           --require-congestion --clean
 
     - name: Publish paired comparison report

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-llama3-70b-16",
+  "parallelism": {
+    "tp": 8,
+    "pp": 1,
+    "dp": 2
+  },
+  "steps": 3,
+  "compute_duration_us": 500,
+  "tp_all_reduce_bytes": 16777216,
+  "pp_bytes": 0,
+  "dp_all_reduce_bytes": 1073741824,
+  "seed": 20260317,
+  "network": {
+    "hosts_per_leaf": 8,
+    "spine_count": 4,
+    "link_rate": "400Gbps",
+    "packet_payload_bytes": 4096,
+    "queue_monitor_start_ns": 20000000
+  },
+  "microburst_enabled": true,
+  "microburst_bytes": 134217728,
+  "microburst_flow_count": 7,
+  "microburst_destination_rank": 8,
+  "microburst_offset_spacing_ns": 0,
+  "model": {
+    "parameter_count": 70000000000,
+    "parameter_dtype_bytes": 2,
+    "gradient_bucket_count": 140
+  }
+}

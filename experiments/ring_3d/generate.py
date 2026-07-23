@@ -58,8 +58,13 @@ OPTIONAL_PROFILE_KEYS = {
     "model",
 }
 EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
-EXPECTED_NETWORK_KEYS = {"hosts_per_leaf", "spine_count", "link_rate"}
-EXPECTED_MODEL_KEYS = {
+REQUIRED_NETWORK_KEYS = {"hosts_per_leaf", "spine_count", "link_rate"}
+OPTIONAL_NETWORK_KEYS = {
+    "packet_payload_bytes",
+    "queue_monitor_start_ns",
+}
+EXPECTED_NETWORK_KEYS = REQUIRED_NETWORK_KEYS | OPTIONAL_NETWORK_KEYS
+EXPECTED_MODEL_TRACE_KEYS = {
     "parameter_count",
     "parameter_dtype_bytes",
     "transformer_layers",
@@ -70,6 +75,11 @@ EXPECTED_MODEL_KEYS = {
     "activation_dtype_bytes",
     "tensor_parallel_all_reduces_per_layer",
     "pipeline_microbatches",
+}
+GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
+    "parameter_count",
+    "parameter_dtype_bytes",
+    "gradient_bucket_count",
 }
 DEFAULT_DROP_PROBABILITY_BY_STEP = {"1": 0.0, "2": 0.1, "3": 0.1}
 
@@ -91,6 +101,15 @@ class ModelTrace:
 
 
 @dataclass(frozen=True)
+class GradientBucketSample:
+    """Model-scale metadata for a trace that contains one representative bucket."""
+
+    parameter_count: int
+    parameter_dtype_bytes: int
+    gradient_bucket_count: int
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     tp: int
@@ -105,13 +124,15 @@ class Profile:
     hosts_per_leaf: int
     spine_count: int
     link_rate: str
+    packet_payload_bytes: int
+    queue_monitor_start_ns: int
     microburst_bytes: int
     microburst_flow_count: int
     microburst_destination_rank: int | None
     microburst_offset_spacing_ns: int
     microburst_source_ranks: tuple[int, ...] | None
     microburst_enabled: bool
-    model: ModelTrace | None
+    model: ModelTrace | GradientBucketSample | None
 
     @property
     def ranks(self) -> int:
@@ -130,14 +151,37 @@ def _require_nonnegative_int(value: Any, field: str) -> int:
     return value
 
 
-def _load_model_trace(document: dict[str, Any], tp: int, pp: int) -> ModelTrace | None:
+def _load_model_workload(
+    document: dict[str, Any], tp: int, pp: int
+) -> ModelTrace | GradientBucketSample | None:
     value = document.get("model")
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != EXPECTED_MODEL_KEYS:
+    if not isinstance(value, dict):
+        raise ValueError("model must be an object")
+    if set(value) == GRADIENT_BUCKET_SAMPLE_MODEL_KEYS:
+        model = GradientBucketSample(
+            parameter_count=_require_positive_int(
+                value["parameter_count"], "model.parameter_count"
+            ),
+            parameter_dtype_bytes=_require_positive_int(
+                value["parameter_dtype_bytes"], "model.parameter_dtype_bytes"
+            ),
+            gradient_bucket_count=_require_positive_int(
+                value["gradient_bucket_count"], "model.gradient_bucket_count"
+            ),
+        )
+        total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
+        if total_gradient_bytes % model.gradient_bucket_count:
+            raise ValueError(
+                "model gradient bytes must divide evenly across nominal gradient buckets"
+            )
+        return model
+    if set(value) != EXPECTED_MODEL_TRACE_KEYS:
         raise ValueError(
-            "model must contain exactly "
-            f"{sorted(EXPECTED_MODEL_KEYS)}"
+            "model must contain exactly one of "
+            f"{sorted(GRADIENT_BUCKET_SAMPLE_MODEL_KEYS)} or "
+            f"{sorted(EXPECTED_MODEL_TRACE_KEYS)}"
         )
     model = ModelTrace(
         parameter_count=_require_positive_int(value["parameter_count"], "model.parameter_count"),
@@ -201,8 +245,13 @@ def load_profile(profile_path: Path) -> Profile:
     if not isinstance(parallelism, dict) or set(parallelism) != {"tp", "pp", "dp"}:
         raise ValueError("parallelism must contain exactly tp, pp, and dp")
     network = document.get("network")
-    if not isinstance(network, dict) or set(network) != EXPECTED_NETWORK_KEYS:
-        raise ValueError("network must contain hosts_per_leaf, spine_count, and link_rate")
+    if not isinstance(network, dict) or not REQUIRED_NETWORK_KEYS <= set(network) or set(
+        network
+    ) - EXPECTED_NETWORK_KEYS:
+        raise ValueError(
+            "network must contain hosts_per_leaf, spine_count, and link_rate, "
+            "with optional packet_payload_bytes and queue_monitor_start_ns"
+        )
 
     name = document.get("name")
     if not isinstance(name, str) or not name:
@@ -256,7 +305,7 @@ def load_profile(profile_path: Path) -> Profile:
     microburst_enabled = document.get("microburst_enabled", True)
     if not isinstance(microburst_enabled, bool):
         raise ValueError("microburst_enabled must be a boolean")
-    model = _load_model_trace(document, tp, pp)
+    model = _load_model_workload(document, tp, pp)
 
     profile = Profile(
         name=name,
@@ -270,7 +319,7 @@ def load_profile(profile_path: Path) -> Profile:
         tp_all_reduce_bytes=_require_positive_int(
             document.get("tp_all_reduce_bytes"), "tp_all_reduce_bytes"
         ),
-        pp_bytes=_require_positive_int(document.get("pp_bytes"), "pp_bytes"),
+        pp_bytes=_require_nonnegative_int(document.get("pp_bytes"), "pp_bytes"),
         dp_all_reduce_bytes=_require_positive_int(
             document.get("dp_all_reduce_bytes"), "dp_all_reduce_bytes"
         ),
@@ -280,6 +329,14 @@ def load_profile(profile_path: Path) -> Profile:
         ),
         spine_count=_require_positive_int(network["spine_count"], "network.spine_count"),
         link_rate=link_rate,
+        packet_payload_bytes=_require_positive_int(
+            network.get("packet_payload_bytes", 1_000),
+            "network.packet_payload_bytes",
+        ),
+        queue_monitor_start_ns=_require_nonnegative_int(
+            network.get("queue_monitor_start_ns", 0),
+            "network.queue_monitor_start_ns",
+        ),
         microburst_bytes=_require_positive_int(
             document.get("microburst_bytes"), "microburst_bytes"
         ),
@@ -297,7 +354,11 @@ def load_profile(profile_path: Path) -> Profile:
         raise ValueError("parallelism product must be divisible by network.hosts_per_leaf")
     if profile.spine_count > 255:
         raise ValueError("network.spine_count must not exceed 255")
-    if profile.model is not None:
+    if profile.packet_payload_bytes > 9_000:
+        raise ValueError("network.packet_payload_bytes must not exceed 9000")
+    if profile.pp > 1 and profile.pp_bytes == 0:
+        raise ValueError("pp_bytes must be positive when PP is greater than one")
+    if isinstance(profile.model, ModelTrace):
         activation_bytes = (
             profile.model.microbatch_size
             * profile.model.sequence_length
@@ -511,6 +572,35 @@ class TraceWriter:
                 [dp_reduce_zero, dp_reduce_one],
             )
 
+    def _build_gradient_bucket_sample_trace(self) -> None:
+        """Emit a packet-accurate representative DP bucket, not a full-model replay."""
+        _, tp_groups, _, dp_groups = self.groups
+        predecessor: int | None = None
+
+        for step in range(1, self.profile.steps + 1):
+            forward = self.compute(
+                f"step_{step}_forward_compute",
+                [] if predecessor is None else [predecessor],
+            )
+            tp_reduce = self.all_reduce(
+                f"step_{step}_tp_all_reduce",
+                [forward],
+                "tp",
+                tp_groups[str(self.rank)],
+                self.profile.tp_all_reduce_bytes,
+                step,
+            )
+            backward = self.compute(f"step_{step}_backward_bucket_0", [tp_reduce])
+            dp_reduce = self.all_reduce(
+                f"step_{step}_dp_all_reduce_bucket_0",
+                [backward],
+                "dp",
+                dp_groups[str(self.rank)],
+                self.profile.dp_all_reduce_bytes,
+                step,
+            )
+            predecessor = self.compute(f"step_{step}_optimizer", [dp_reduce])
+
     def _build_model_trace(self, model: ModelTrace) -> None:
         """Emit a structural transformer step with exact model-derived DP bytes.
 
@@ -668,6 +758,8 @@ class TraceWriter:
     def build(self) -> None:
         if self.profile.model is None:
             self._build_smoke_trace()
+        elif isinstance(self.profile.model, GradientBucketSample):
+            self._build_gradient_bucket_sample_trace()
         else:
             self._build_model_trace(self.profile.model)
 
@@ -699,7 +791,13 @@ def write_clos_topology(path: Path, profile: Profile) -> None:
                 topology.write(f"{leaf} {spine} {profile.link_rate} 0.0125ms 0\n")
 
 
-def write_network_config(path: Path, topology: Path, output_dir: Path) -> None:
+def write_network_config(
+    path: Path,
+    topology: Path,
+    output_dir: Path,
+    packet_payload_bytes: int,
+    queue_monitor_start_ns: int,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     # The bundled ns-3 setup unconditionally opens these legacy input files,
     # even though ASTRA-sim dynamically creates the RDMA QPs after setup.
@@ -716,11 +814,15 @@ def write_network_config(path: Path, topology: Path, output_dir: Path) -> None:
         "QLEN_MON_FILE": output_dir / "qlen.txt",
     }
     with path.open("w", encoding="utf-8") as config:
-        config.write("ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\nPACKET_PAYLOAD_SIZE 1000\n\n")
+        config.write(
+            "ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\n"
+            f"PACKET_PAYLOAD_SIZE {packet_payload_bytes}\n\n"
+        )
         for key, value in entries.items():
             config.write(f"{key} {value}\n")
         config.write(
-            "QLEN_MON_START 0\nQLEN_MON_END 20000\n\n"
+            f"QLEN_MON_START {queue_monitor_start_ns}\n"
+            "QLEN_MON_END 20000\n\n"
             "SIMULATOR_STOP_TIME 40000000000000.00\n\n"
             "CC_MODE 12\nALPHA_RESUME_INTERVAL 1\nRATE_DECREASE_INTERVAL 4\n"
             "CLAMP_TARGET_RATE 0\nRP_TIMER 900\nEWMA_GAIN 0.00390625\n"
@@ -832,13 +934,30 @@ def write_system_config(path: Path) -> None:
     path.write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
 
 
-def model_trace_metadata(profile: Profile) -> dict[str, int] | None:
+def model_trace_metadata(profile: Profile) -> dict[str, int | float | str] | None:
     if profile.model is None:
         return None
     model = profile.model
     total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
+    if isinstance(model, GradientBucketSample):
+        return {
+            "workload_kind": "representative_gradient_bucket",
+            "parameter_count": model.parameter_count,
+            "parameter_dtype_bytes": model.parameter_dtype_bytes,
+            "total_gradient_bytes_per_data_parallel_replica": total_gradient_bytes,
+            "gradient_bucket_count": model.gradient_bucket_count,
+            "nominal_model_gradient_bucket_bytes": (
+                total_gradient_bytes // model.gradient_bucket_count
+            ),
+            "gradient_bytes_per_rank": total_gradient_bytes // (profile.tp * profile.pp),
+            "simulated_gradient_bucket_bytes": profile.dp_all_reduce_bytes,
+            "simulated_gradient_buckets_per_step": 1,
+            "packet_payload_bytes": profile.packet_payload_bytes,
+            "queue_monitor_start_ns": profile.queue_monitor_start_ns,
+        }
     gradient_bytes_per_rank = total_gradient_bytes // (profile.tp * profile.pp)
     return {
+        "workload_kind": "structural_transformer_trace",
         "parameter_count": model.parameter_count,
         "parameter_dtype_bytes": model.parameter_dtype_bytes,
         "total_gradient_bytes_per_data_parallel_replica": total_gradient_bytes,
@@ -883,7 +1002,13 @@ def materialize(
     topology = output_dir / "topology.txt"
     write_clos_topology(topology, profile)
     network_config = output_dir / "network_config.txt"
-    write_network_config(network_config, topology.resolve(), output_dir / "ns3")
+    write_network_config(
+        network_config,
+        topology.resolve(),
+        output_dir / "ns3",
+        profile.packet_payload_bytes,
+        profile.queue_monitor_start_ns,
+    )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(experiment_config, profile, drop_probabilities)
     system_config = output_dir / "system.json"

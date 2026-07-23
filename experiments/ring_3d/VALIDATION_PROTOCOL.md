@@ -4,7 +4,7 @@ This protocol determines whether the DBLP provenance policy has an empirically s
 
 ## Scope and claim boundary
 
-The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte protected provenance-control QP; it is not a packet drop. The results do not claim an exact framework replay, hardware measurement, or a performance benefit at 256-rank, full-resolution ns-3 scale.
+The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte protected provenance-control QP; it is not a packet drop. The Llama 3 70B-class condition is a single-gradient-bucket microbenchmark, not an exact framework replay, hardware measurement, or a full-model synchronization result.
 
 ## Pre-registered primary estimands
 
@@ -38,12 +38,12 @@ Run every condition with the five fixed paired seeds currently used by `compare.
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |
 | Negative control | `profiles/no_incast_8.json`, policy 0% versus policy | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
-| Congested baseline | `profiles/incast_8.json`, 0% selection | Establish congestion | Require queue peak and at least one completed PFC pause interval. |
-| Congested policy | `profiles/incast_8.json`, 5%, 10%, and 20% selection | Measure dose response under identical congestion input | Report the primary estimands and physical byte reductions at every rate; do not select a rate after looking at outcomes. |
-| DP payload scale | 128 KiB, 1 MiB, 8 MiB, and 32 MiB DP All-Reduce payloads | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |
-| Incast-load scale | 0, 2, 4, and 7 simultaneous sources; fixed 32 MiB source payload | Identify onset and severity of congestion | Report queue/PFC and primary outcomes at every point, including controls with no PFC. |
+| Congested baseline | `profiles/llama3_70b_16.json`, 0% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
+| Congested policy | `profiles/llama3_70b_16.json`, the predeclared 10% selection in steps 2 and 3 | Measure DBLP under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
+| DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |
+| Incast-load scale | 0, 2, 4, and 7 simultaneous sources; fixed 128 MiB source payload | Identify onset and severity of congestion | Report queue/PFC and primary outcomes at every point, including controls with no PFC. |
 
-The checked-in no-incast profile is the executable negative-control configuration. The remaining grid must be materialized as explicitly named profile files or an immutable generated profile manifest before execution, and that manifest must be retained with the run artifacts.
+The checked-in no-incast profile is the executable negative-control configuration. The checked-in Llama 3 70B-class profile is the always-on congested CI condition. The remaining grid must be materialized as explicitly named profile files or an immutable generated profile manifest before execution, and that manifest must be retained with the run artifacts.
 
 ## Causal-load criterion
 
@@ -54,7 +54,7 @@ $$
      {\text{background physical bytes}}.
 $$
 
-If this ratio is small at every rate, a null primary result is expected and valid. It is not evidence that the congestion generator failed. The current 32 MiB × 7 background incast is therefore a **stress-calibration** workload, not a proof that 10% global DP selection should improve tail latency.
+If this ratio is small at every rate, a null primary result is expected and valid. It is not evidence that the congestion generator failed. The CI condition's 128 MiB × 7 background incast establishes real congestion only after its raw queue/PFC gate passes; it is not, by itself, proof that 10% global DP selection improves tail latency.
 
 To establish a causal policy effect, one of the following must hold:
 

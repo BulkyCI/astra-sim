@@ -174,6 +174,70 @@ def _read_summary(run_dir: Path) -> dict[str, Any]:
 	return value
 
 
+def _mapping(value: Any, field: str) -> dict[str, Any]:
+	if not isinstance(value, dict):
+		raise ValueError(f"summary is missing object {field}")
+	return value
+
+
+def _nonnegative_int(value: Any, field: str, *, default: int = 0) -> int:
+	if value is None:
+		return default
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		raise ValueError(f"summary field {field} must be a nonnegative integer")
+	return value
+
+
+def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
+	"""Extract the raw queue/PFC signals required for a congestion claim."""
+	observability = _mapping(summary.get("ns3_observability"), "ns3_observability")
+	queue = _mapping(observability.get("queue"), "ns3_observability.queue")
+	pfc = _mapping(observability.get("pfc"), "ns3_observability.pfc")
+	background = _mapping(
+		summary.get("background_microburst_timeline"), "background_microburst_timeline"
+	)
+	queue_status = queue.get("status")
+	pfc_status = pfc.get("status")
+	background_status = background.get("status")
+	max_queue_bytes = _nonnegative_int(
+		queue.get("max_queue_bytes"), "ns3_observability.queue.max_queue_bytes"
+	)
+	completed_pause_intervals = _nonnegative_int(
+		pfc.get("completed_pause_interval_count"),
+		"ns3_observability.pfc.completed_pause_interval_count",
+	)
+	background_physical_bytes = _nonnegative_int(
+		background.get("physical_bytes"),
+		"background_microburst_timeline.physical_bytes",
+	)
+	return {
+		"queue_status": str(queue_status),
+		"pfc_status": str(pfc_status),
+		"background_microburst_status": str(background_status),
+		"max_queue_bytes": max_queue_bytes,
+		"completed_pause_interval_count": completed_pause_intervals,
+		"background_physical_bytes": background_physical_bytes,
+		"congestion_established": (
+			queue_status == "available"
+			and pfc_status == "available"
+			and background_status == "available"
+			and max_queue_bytes > 0
+			and completed_pause_intervals > 0
+			and background_physical_bytes > 0
+		),
+	}
+
+
+def require_congestion(summary: dict[str, Any], run_label: str) -> dict[str, bool | int | str]:
+	"""Reject runs without observed microburst traffic, queueing, and PFC recovery."""
+	evidence = congestion_evidence(summary)
+	if not evidence["congestion_established"]:
+		raise ValueError(
+			f"{run_label} did not establish required congestion: {evidence}"
+		)
+	return evidence
+
+
 def _format_duration_ns(value: float) -> str:
 	if value < 1_000:
 		return f"{value:.2f} ns"
@@ -193,12 +257,20 @@ def _format_bytes(value: float) -> str:
 
 def render_comparison_report(comparison: dict[str, Any]) -> str:
 	"""Render a self-contained Markdown record of the paired comparison."""
+	congestion_statement = (
+		"Every baseline and policy run passed the required raw-signal gate: "
+		"background microburst traffic, a nonzero queue peak, and at least one completed PFC pause interval."
+		if comparison.get("congestion_required")
+		else "Raw congestion signals were recorded but not enforced as a comparison gate."
+	)
 	lines = [
 		"# Paired DBLP comparison",
 		"",
 		"> Each seed uses identical traces, topology, microburst configuration, and seed. "
 		"The lossless baseline keeps the policy enabled but sets every admission-suppression threshold to zero. "
 		"Baseline and policy share an ns-3 random-stream seed/run within each pair; successive pairs use distinct runs.",
+		"",
+		congestion_statement,
 		"",
 		"| Metric | Baseline mean | Policy mean | Mean reduction | 95% CI of reduction | Mean reduction % |",
 		"| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -246,6 +318,7 @@ def run_comparison(
 	*,
 	binary: Path | None = None,
 	clean: bool = False,
+	require_congestion_signals: bool = False,
 ) -> dict[str, Any]:
 	"""Run the matched experiment pairs and retain their individual artifacts."""
 	if not seeds:
@@ -279,6 +352,17 @@ def run_comparison(
 			seed=seed,
 			ns3_rng_run=seed,
 		)
+		baseline_summary = _read_summary(baseline_dir)
+		policy_summary = _read_summary(policy_dir)
+		baseline_congestion = congestion_evidence(baseline_summary)
+		policy_congestion = congestion_evidence(policy_summary)
+		if require_congestion_signals:
+			baseline_congestion = require_congestion(
+				baseline_summary, f"seed {seed} lossless baseline"
+			)
+			policy_congestion = require_congestion(
+				policy_summary, f"seed {seed} DBLP policy"
+			)
 		per_seed.append(
 			{
 				"seed": seed,
@@ -286,15 +370,18 @@ def run_comparison(
 				"ns3_rng_run": seed,
 				"lossless_baseline_dir": baseline_dir.relative_to(output).as_posix(),
 				"dblp_policy_dir": policy_dir.relative_to(output).as_posix(),
-				"metrics": compare_summaries(
-					_read_summary(baseline_dir), _read_summary(policy_dir)
-				),
+				"congestion": {
+					"lossless_baseline": baseline_congestion,
+					"dblp_policy": policy_congestion,
+				},
+				"metrics": compare_summaries(baseline_summary, policy_summary),
 			}
 		)
 
 	comparison = {
 		"profile": profile.resolve().as_posix(),
 		"seeds": seeds,
+		"congestion_required": require_congestion_signals,
 		"per_seed": per_seed,
 		"aggregate": aggregate_comparisons(per_seed),
 	}
@@ -319,6 +406,11 @@ def main() -> int:
 		default=list(DEFAULT_SEEDS),
 		help="unique matched seeds; defaults to five fixed research seeds",
 	)
+	parser.add_argument(
+		"--require-congestion",
+		action="store_true",
+		help="require observed background traffic, queueing, and completed PFC pause intervals",
+	)
 	parser.add_argument("--clean", action="store_true", help="replace an existing comparison directory")
 	arguments = parser.parse_args()
 	comparison = run_comparison(
@@ -327,6 +419,7 @@ def main() -> int:
 		arguments.seeds,
 		binary=arguments.binary,
 		clean=arguments.clean,
+		require_congestion_signals=arguments.require_congestion,
 	)
 	print(json.dumps(comparison, indent=2))
 	return 0

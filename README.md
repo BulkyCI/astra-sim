@@ -28,7 +28,7 @@ The legacy `utils/install_chakra.sh` entry point remains as a compatibility wrap
 
 ## 3D Ring topology and compute-interleaving experiment
 
-The reproducible TP/PP/DP Ring experiment lives in [experiments/ring_3d](experiments/ring_3d). It generates a three-step Chakra ET workload with explicit `parallelism_domain` attributes, native Ring All-Reduce process groups, pipeline send/receive pairs, and backward bucket dependencies that permit DP communication to overlap later compute. The smoke profile is $TP=2$, $PP=2$, $DP=2$; the canonical profile is $TP=8$, $PP=4$, $DP=8$ for 256 ranks.
+The reproducible TP/PP/DP Ring experiment lives in [experiments/ring_3d](experiments/ring_3d). It generates Chakra ET workloads with explicit `parallelism_domain` attributes, native Ring All-Reduce process groups, pipeline send/receive pairs where $PP>1$, and typed DP gradient buckets. The smoke profile is $TP=2$, $PP=2$, $DP=2$; the CI-scale Llama 3 70B-class profile is $TP=8$, $PP=1$, $DP=2$ over 16 ranks.
 
 All Python entry points must use the committed uv environment. Generate inputs only:
 
@@ -38,11 +38,11 @@ uv run --locked python experiments/ring_3d/generate.py \
 	--output runs/ring_3d/smoke_8 --clean
 ```
 
-After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke experiment with `bash experiments/ring_3d/smoke.sh`. The runner writes generated inputs, ns-3 output, `flow_events.csv`, `collective_events.csv`, `rank_completion.csv`, and `summary.json` under `runs/ring_3d/smoke_8`. `collective_events.csv` records native issue-to-completion timing once per rank and logical collective, so it is the source for whole-collective latency rather than individual-QP FCT. The generated topology is an eight-host Clos for smoke runs; the canonical profile materializes a 256-host, 16-leaf, 16-spine Clos topology.
+After building the ns-3 `AstraSimNetwork` target, run and analyze the smoke experiment with `bash experiments/ring_3d/smoke.sh`. The runner writes generated inputs, ns-3 output, `flow_events.csv`, `collective_events.csv`, `rank_completion.csv`, and `summary.json` under `runs/ring_3d/smoke_8`. `collective_events.csv` records native issue-to-completion timing once per rank and logical collective, so it is the source for whole-collective latency rather than individual-QP FCT.
 
 The optional data-parallel logical shedding policy is hard-whitelisted to Chakra operations marked `dp`, `CollectivePayload`, and `All_Reduce`. A selected flow is represented by a reliable 64-byte provenance-control QP on priority group 1; it is not a packet drop. The control completion resolves both the original logical send and receive while telemetry reports the original logical bytes separately from physically modeled control bytes. The default policy selects 0% of eligible flows in step 1 and 10% in steps 2 and 3. Deterministic host-originated RDMA microbursts are triggered by the first step-2 DP All-Reduce admission.
 
-The CI also materializes and retains `model_100b_256.json`: a structural 100B-parameter BF16 trace over $TP=8$, $PP=4$, and $DP=8$. It represents 6.25 GB of DP gradient data per rank and optimizer step, divided into 20 typed DP All-Reduce buckets. Its seven DP-peer background sources simultaneously send 50 MB each to rank 4. Full 256-rank execution at the bundled 1 KB packet resolution is intentionally not presented as a routine CI result because it entails billions of packet events; reviewer-facing packet-level evidence comes from the separate 32 MiB-per-source eight-rank incast experiment and its retained PFC/queue telemetry.
+The CI also materializes and executes `llama3_70b_16.json`: a 70B-class FP16 gradient-bucket workload over $TP=8$, $PP=1$, and $DP=2$. It uses one representative 1 GiB typed DP All-Reduce bucket per rank and step, 4 KiB RoCE payloads, and seven simultaneous 128 MiB cross-rack RDMA microbursts toward rank 8. Five matched baseline/policy pairs run under a 160-minute guard. They fail closed unless every run records background traffic, a nonzero queue peak, and a completed PFC pause interval. This is packet-level evidence for one industry-relevant bucket spike, not a claim to replay a complete 70B-model gradient synchronization.
 
 This is an ASTRA-sim 2.0 experiment. It models ET dependencies, native collectives, and the bundled ns-3/RDMA topology; it does not claim ASTRA-sim 3.0 InfraGraph/cache-line behavior or exact Megatron runtime fidelity.
 

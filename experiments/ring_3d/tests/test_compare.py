@@ -11,6 +11,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from experiments.ring_3d.compare import (
     aggregate_comparisons,
     compare_summaries,
+    congestion_evidence,
+    require_congestion,
     render_comparison_report,
 )
 
@@ -53,6 +55,19 @@ def summary(makespan: int, fct_p99: int) -> dict[str, object]:
     }
 
 
+def congested_summary() -> dict[str, object]:
+    result = summary(1_000, 100)
+    result["background_microburst_timeline"] = {
+        "status": "available",
+        "physical_bytes": 128 * 1024 * 1024,
+    }
+    result["ns3_observability"] = {
+        "queue": {"status": "available", "max_queue_bytes": 32 * 1024 * 1024},
+        "pfc": {"status": "available", "completed_pause_interval_count": 1},
+    }
+    return result
+
+
 class Ring3DComparisonTests(unittest.TestCase):
     def test_pairwise_metrics_use_positive_reduction_for_faster_policy(self) -> None:
         results = compare_summaries(summary(1_000, 100), summary(900, 90))
@@ -79,6 +94,19 @@ class Ring3DComparisonTests(unittest.TestCase):
         self.assertIn("Paired DBLP comparison", report)
         self.assertIn("makespan_ns", report)
         self.assertIn("95% CI of reduction", report)
+
+    def test_congestion_gate_requires_queue_and_pfc_evidence(self) -> None:
+        evidence = congestion_evidence(congested_summary())
+        self.assertTrue(evidence["congestion_established"])
+        self.assertTrue(require_congestion(congested_summary(), "test run")["congestion_established"])
+
+        uncongested = congested_summary()
+        uncongested["ns3_observability"] = {
+            "queue": {"status": "available", "max_queue_bytes": 0},
+            "pfc": {"status": "available", "completed_pause_interval_count": 0},
+        }
+        with self.assertRaisesRegex(ValueError, "did not establish required congestion"):
+            require_congestion(uncongested, "test run")
 
 
 if __name__ == "__main__":

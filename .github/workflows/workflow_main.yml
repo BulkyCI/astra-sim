@@ -125,11 +125,11 @@ jobs:
     - name: Run 3D Ring ns-3 smoke experiment
       run: timeout --foreground 5m bash ./experiments/ring_3d/smoke.sh
 
-    - name: Generate 100B structural model trace
+    - name: Generate Llama 3 70B-class bucket trace
       run: |
         uv run --locked python experiments/ring_3d/generate.py \
-          --profile experiments/ring_3d/profiles/model_100b_256.json \
-          --output runs/ring_3d/model_100b_256 --clean
+          --profile experiments/ring_3d/profiles/llama3_70b_16.json \
+          --output runs/ring_3d/llama3_70b_16 --clean
 
     - name: Publish 3D Ring researcher report
       if: always()
@@ -156,16 +156,16 @@ jobs:
         path: runs/ring_3d/smoke_8
         if-no-files-found: ignore
 
-    - name: Upload 100B structural model trace
+    - name: Upload Llama 3 70B-class bucket trace
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: ring-3d-model-100b-trace-${{ github.run_id }}
-        path: runs/ring_3d/model_100b_256
+        name: ring-3d-llama3-70b-16-trace-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_16
         if-no-files-found: ignore
 
-  paired-incast-evaluation:
-    name: Five-seed paired incast evaluation
+  paired-llama3-evaluation:
+    name: Five-seed Llama 3 70B congestion evaluation
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -239,26 +239,27 @@ jobs:
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
 
-    - name: Run five-seed paired incast comparison
+    - name: Run five-seed paired Llama 3 70B comparison
       run: |
-        timeout --foreground 165m uv run --locked python experiments/ring_3d/compare.py \
-          --profile experiments/ring_3d/profiles/incast_8.json \
-          --output runs/ring_3d/incast_8_comparison --clean
+        timeout --foreground 160m uv run --locked python experiments/ring_3d/compare.py \
+          --profile experiments/ring_3d/profiles/llama3_70b_16.json \
+          --output runs/ring_3d/llama3_70b_16_comparison \
+          --require-congestion --clean
 
     - name: Publish paired comparison report
       if: always()
       run: |
-        if [[ -f runs/ring_3d/incast_8_comparison/comparison_report.md ]]; then
-          cat runs/ring_3d/incast_8_comparison/comparison_report.md >> "$GITHUB_STEP_SUMMARY"
+        if [[ -f runs/ring_3d/llama3_70b_16_comparison/comparison_report.md ]]; then
+          cat runs/ring_3d/llama3_70b_16_comparison/comparison_report.md >> "$GITHUB_STEP_SUMMARY"
         else
-          echo "Paired incast comparison did not produce a report; inspect retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
+          echo "Paired Llama 3 70B comparison did not produce a report; inspect retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
         fi
 
-    - name: Upload paired incast reproducibility bundle
+    - name: Upload paired Llama 3 70B reproducibility bundle
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: ring-3d-incast-comparison-${{ github.run_id }}
-        path: runs/ring_3d/incast_8_comparison
+        name: ring-3d-llama3-70b-16-comparison-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_16_comparison
         if-no-files-found: ignore
 

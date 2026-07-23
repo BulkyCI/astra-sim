@@ -6,15 +6,13 @@ $$
 rank=((dp\_rank\cdot PP)+pp\_rank)\cdot TP+tp\_rank.
 $$
 
-The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a physical Clos topology, native-Ring system configuration, and the ns-3 experiment policy. Each of the three steps contains TP All-Reduce, pipeline send/receive edges, two backward buckets, and two DP All-Reduces. The first DP reduction can overlap the second backward bucket; the optimizer waits for both DP reductions.
+The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a physical Clos topology, native-Ring system configuration, and the ns-3 experiment policy. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
 
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
 - [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
-- [profiles/incast_8.json](profiles/incast_8.json): an eight-host stress-calibration profile that sends seven simultaneous 32 MiB RDMA microbursts to host 4.
-- [profiles/canonical_256.json](profiles/canonical_256.json): $TP=8$, $PP=4$, $DP=8$, with a 256-host, 16-leaf, 16-spine Clos topology.
-- [profiles/model_100b_256.json](profiles/model_100b_256.json): a structural $100$B-parameter, $TP=8$, $PP=4$, $DP=8$ transformer trace. It partitions $100$B BF16 gradients across $TP\times PP=32$ ranks, so every rank emits $6.25$ GB of DP gradient buckets per optimizer step.
+- [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a packet-accurate Llama 3 70B-class gradient-bucket stress workload with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, and a 400 Gb/s two-leaf Clos.
 
 ## Generate and run
 
@@ -45,31 +43,34 @@ Use [compare.py](compare.py) for a matched comparison. For every fixed seed it r
 
 ```sh
 uv run --locked python experiments/ring_3d/compare.py \
-  --profile experiments/ring_3d/profiles/incast_8.json \
-  --output runs/ring_3d/incast_8_comparison --clean
+  --profile experiments/ring_3d/profiles/llama3_70b_16.json \
+  --output runs/ring_3d/llama3_70b_16_comparison \
+  --require-congestion --clean
 ```
 
-The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. The incast profile is a calibration workload, not a claim that PFC or buffer exhaustion has occurred: inspect the retained queue and PFC telemetry before using it for any latency claim.
+The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, and at least one completed PFC pause interval.
 
 The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs.
 
 ## Empirical-validation protocol
 
-[VALIDATION_PROTOCOL.md](VALIDATION_PROTOCOL.md) pre-registers the primary logical-collective estimands, raw-signal gates, negative and congestion controls, payload/incast/policy-rate grid, causal-load criterion, and decision rules. The current 32 MiB × 7 background incast establishes real congestion only when raw queue/PFC gates pass; it cannot by itself establish a DBLP benefit when the selected DP bytes are negligible beside the independent background offered load.
+[VALIDATION_PROTOCOL.md](VALIDATION_PROTOCOL.md) pre-registers the primary logical-collective estimands, raw-signal gates, negative and congestion controls, payload/incast/policy-rate grid, causal-load criterion, and decision rules. The 70B-class CI condition uses a 128 MiB × 7 background incast and fails closed unless raw queue/PFC gates pass. It cannot by itself establish a DBLP benefit: the retained paired metrics and causal-load criterion remain required.
 
-## 100B structural model trace
+## Llama 3 70B-class packet-level bucket workload
 
-Generate the reviewer-facing ET workload and its auditable `model_trace.json` ledger with:
+Generate the 16-rank packet-level workload and its auditable `model_trace.json` ledger with:
 
 ```sh
 uv run --locked python experiments/ring_3d/generate.py \
-  --profile experiments/ring_3d/profiles/model_100b_256.json \
-  --output runs/ring_3d/model_100b_256 --clean
+  --profile experiments/ring_3d/profiles/llama3_70b_16.json \
+  --output runs/ring_3d/llama3_70b_16 --clean
 ```
 
-The profile models 80 transformer layers, 20 gradient buckets per PP stage, 8 pipeline microbatches, two TP All-Reduces per local layer, and 50 MB simultaneous DP-peer incast flows toward rank 4. Each DP bucket is 312.5 MB; the 20 buckets sum exactly to the $6.25$ GB BF16 gradient shard held by one $TP\times PP$ rank. `model_trace.json` records the derivation and the generated ET traces retain the typed TP/PP/DP metadata.
+The model reference is $70$ billion FP16 parameters, or $140$ GB of gradients. Its 140 nominal model-gradient buckets are 1 GB each. With $TP=8$ and $PP=1$, a rank owns a 17.5 GB gradient shard. The emitted trace intentionally models **one** 1 GiB local DP All-Reduce bucket per step, rather than falsely replaying all 140 global buckets. A 1 GiB simulated bucket is 7.37% larger than the nominal decimal 1 GB bucket, making the packet load conservative.
 
-This is a **structural model trace**, not an exact Megatron or PyTorch replay. Full-resolution ns-3 execution of all $256$ ranks at the default 1 KB RDMA payload would create billions of simulated packets per step. It is deliberately generated and retained in CI, while the packet-level PFC experiment remains the eight-rank, 32 MiB incast calibration. Do not replace the full-resolution workload with an oversized pseudo-MTU or report a coarsened run as packet-accurate evidence.
+The physical-budget calculation uses the configured 4 KiB RoCE payload, not a fictitious super-packet. A two-rank Ring transfers 2 GiB per DP group for a 1 GiB payload; the eight DP groups therefore carry 16 GiB per step and 48 GiB across the three steps. The representative TP collectives add 1.3125 GiB and the one-shot $7\times128$ MiB incast adds 0.875 GiB, for 50.1875 GiB and 13,156,352 data packets per baseline run before protocol overhead. Queue monitoring begins at 20 ms, the predicted step-2 bucket/incast overlap, and continues to simulation completion so the raw-signal gate observes the pressure interval without emitting idle telemetry before it. Five matched baseline/policy pairs therefore remain below the 160-minute CI execution guard while retaining packet-level PFC behavior.
+
+This is a **70B-class bucket microbenchmark**, not an exact Llama, Megatron, DeepSpeed, or PyTorch replay and not a claim to simulate a complete 140 GB gradient synchronization per step. It deliberately isolates an industry-relevant 1 GiB communication spike. The CI gate requires observed queueing and PFC recovery before the paired results can be interpreted as congested-network evidence.
 
 ## Researcher-facing CI results
 

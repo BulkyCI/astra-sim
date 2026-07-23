@@ -8,6 +8,12 @@ $$
 
 The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a typed physical topology, native-Ring collective configuration, an ns-3 experiment policy, and a deterministic `clr_mask.csv`. The logical Ring collective and physical network are independent: a profile chooses either a two-stage Clos or a host-attached switch ring. The latter attaches every accelerator host to a dedicated switch and connects the switches in a bidirectional ring, preserving ns-3 switch queue and PFC observability. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
 
+Before changing semantics or interpreting a result, read the
+[DBLP paper brief](../../docs/agents/ring-3d-paper-brief.md),
+[ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md), and
+[glossary](GLOSSARY.md). The current experiment is a lossless incast plus
+logical-payload-substitution ablation, not a DBLP packet-loss reproduction.
+
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
@@ -64,7 +70,7 @@ uv run --locked python experiments/ring_3d/generate_clr_schedule.py \
 
 ## Paired baseline comparison
 
-Use [compare.py](compare.py) for a matched comparison. For every fixed seed it runs the lossless baseline first with the policy and microbursts still enabled but both CLR/stable suppression tolerances set to $0\%$, then runs the DBLP policy with the same generated workload, topology, seed, and static CLR mask. The default is five fixed seeds and it writes both individual run bundles, `comparison.json`, and `comparison_report.md`.
+Use [compare.py](compare.py) for a matched comparison. For every fixed seed it runs the lossless baseline first with the policy and microbursts still enabled but both CLR/stable selection probabilities set to $0\%$, then runs the phase-aware substitution policy with the same generated workload, topology, seed, and static CLR mask. The default is five fixed seeds and it writes both individual run bundles, `comparison.json`, and `comparison_report.md`.
 
 ```sh
 uv run --locked python experiments/ring_3d/compare.py \
@@ -73,7 +79,7 @@ uv run --locked python experiments/ring_3d/compare.py \
   --require-congestion --clean
 ```
 
-The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor DBLP, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, and at least one completed PFC pause interval.
+The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor the current policy, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, and at least one completed PFC pause interval.
 
 The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the five pairs independently and then validates and aggregates their artifacts. Each pair gets GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 150-minute cap for each of its two ns-3 processes, leaving time for build, report, and artifact publication without serializing five pairs into one job.
 
@@ -122,7 +128,7 @@ uv run --locked python experiments/ring_3d/report.py \
 
 ## Admission policy and liveness
 
-Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The static CLR mask selects a strict $0\%$ suppression tolerance during critical learning steps and a relaxed $10\%$ tolerance during stable steps. Within a selected tolerance, deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag selects the logical payloads. A selected payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss.
+Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The static CLR mask selects a $0\%$ selection probability during critical-learning steps and a $10\%$ selection probability during stable steps. Within a selected probability, deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag selects the logical payloads. A selected payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss. See [POLICY_IMPLEMENTATION.md](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md) for the runtime contract.
 
 The ns-3 frontend emits an info-level liveness checkpoint every 10 ms of simulated time while work remains. Each message reports simulated time, completed QPs, active QPs, completed ranks, and pending background flows. Simulated time is ns-3's virtual clock, not wall-clock duration: checkpoints never impose a virtual-time cutoff. The configured `--simulation-timeout-seconds` setting and CI's outer `timeout` command remain the only wall-clock guards for long-running experiments.
 

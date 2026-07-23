@@ -1,10 +1,24 @@
-# Ring-3D research context and claim boundaries
+# Ring-3D current claims and roadmap
+
+## Read this after the mechanism documents
+
+This document is the current-state boundary, not the explanation of the
+original paper or a code-path guide. Read documents in this order:
+
+1. [DBLP paper brief](ring-3d-paper-brief.md): original transport concepts.
+2. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
+  models, abstracts, or does not model.
+3. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
+  parameter names and generated artifacts.
+4. This document: claims, backend limits, controls, and future work.
+5. [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md):
+  canonical estimands and decision rules.
 
 ## Purpose
 
 This project uses ASTRA-sim 2.0, Chakra execution traces, and the bundled ns-3
 RDMA backend to study the **mechanism-level** effect of phase-aware
-communication policy on collective tail latency. It is not a framework training
+communication policy on collective tail latency. It is not a framework-training
 replay, a hardware measurement, or an accuracy/convergence experiment.
 
 The intended evidence path is:
@@ -68,13 +82,16 @@ Selected payloads use a reliable protected 64-byte provenance-control QP on
 priority group 1; its completion resolves the original logical sender and
 receiver. Telemetry records logical and physical bytes separately.
 
-Therefore the current policy is **phase-aware logical admission suppression**:
+Therefore the current policy is **phase-aware logical admission suppression**.
+Call its thresholds selection probabilities, for example
+$s_\mathrm{CLR}=0$ and $s_\mathrm{stable}=0.1$ in the 70B-class condition:
 
-- Current lossless baseline: $P_\mathrm{low}=P_\mathrm{high}=0$.
-- Current policy: $P_\mathrm{low}=0$ in CLR and
-  $P_\mathrm{high}=0.1$ in stable steps.
-- These values are whole-payload selection probabilities, not packet-loss
-  rates or DBLP residual-loss tolerances.
+- Current lossless baseline: both selection probabilities are zero.
+- Current policy: CLR selection probability is zero and stable-step selection
+  probability is 0.1.
+- These values are whole-payload selection probabilities, not packet-loss rates
+  or DBLP residual-loss tolerances $P_\mathrm{low}$ and
+  $P_\mathrm{high}$.
 
 The current study is a useful congestion-relief ablation, but it must be
 called DBLP-inspired rather than a reproduction of DBLP bounded-loss
@@ -93,6 +110,8 @@ Use distinct terms and fields for:
 
 Do not label $P$ as “loss rate” in reports. Do not infer $D$ from background
 flow bytes without stating that it is a lower bound rather than an input.
+The [glossary](../../experiments/ring_3d/GLOSSARY.md) is the canonical mapping
+from these terms to current profile/configuration fields.
 
 ## Bundled backend: what it can and cannot support now
 

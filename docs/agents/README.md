@@ -6,11 +6,27 @@ small while retaining the non-obvious project decisions.
 | Task | Read |
 | --- | --- |
 | Any code, configuration, test, or documentation change | [Development workflow](development.md) |
-| Interpreting or extending the Ring-3D/DBLP study | [Ring-3D research context](ring-3d-research-context.md) |
-| Editing files under `experiments/ring_3d/` | [experiments/ring_3d/AGENTS.md](../../experiments/ring_3d/AGENTS.md) |
+| Interpreting the original DBLP paper | [DBLP paper brief](ring-3d-paper-brief.md) |
+| Deciding whether a paper mechanism maps to ASTRA-sim | [ASTRA-sim pivot](ring-3d-astra-pivot.md) |
+| Interpreting Ring-3D claims, limits, or roadmap | [Ring-3D research context](ring-3d-research-context.md) |
+| Editing profiles, CLR, microbursts, or analysis | [Ring-3D local guide](../../experiments/ring_3d/AGENTS.md), then [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md) |
+| Editing policy selection, completion, or telemetry bridge | [ns-3 policy implementation](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md) |
+| Defining an experimental comparison or interpreting results | [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commits/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/authoring-skills/SKILL.md) |
 
 The root [AGENTS.md](../../AGENTS.md) is the authoritative short operational
 contract. Keep it concise; place domain-specific material in this directory or
 a nearer nested `AGENTS.md`.
+
+## Ring-3D reading order
+
+1. Read the [paper brief](ring-3d-paper-brief.md) for the original DBLP
+	protocol and empirical assumptions.
+2. Read the [ASTRA-sim pivot](ring-3d-astra-pivot.md) before proposing a
+	reproduction, deliberate abstraction, or claim.
+3. Load the local [glossary](../../experiments/ring_3d/GLOSSARY.md) and
+	[implementation guide](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)
+	only when changing a named parameter or code path.
+4. Treat [the validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md)
+	as the source of truth for estimands, controls, and decision rules.

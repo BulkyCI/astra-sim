@@ -1,9 +1,17 @@
 # Ring-3D experiment agent guide
 
-Read the root [AGENTS.md](../../AGENTS.md) first, then load the full research
-boundary document at
-[docs/agents/ring-3d-research-context.md](../../docs/agents/ring-3d-research-context.md)
-before changing model semantics, policy, CLR, microbursts, or telemetry.
+Read the root [AGENTS.md](../../AGENTS.md) first. For policy or research work,
+read in this order before changing model semantics, CLR, microbursts, loss, or
+telemetry:
+
+1. [DBLP paper brief](../../docs/agents/ring-3d-paper-brief.md)
+2. [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md)
+3. [Ring-3D glossary](GLOSSARY.md)
+4. [Research claim boundary](../../docs/agents/ring-3d-research-context.md)
+5. [Validation protocol](VALIDATION_PROTOCOL.md)
+
+For a code-path change, additionally read
+[ns-3 policy implementation](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md).
 
 ## Commands
 
@@ -41,11 +49,11 @@ any research result.
 
 | Requested change | Required interpretation and follow-up |
 | --- | --- |
-| CLR schedule | It is an exogenous phase proxy. Keep it static and seed-reproducible; document empirical trace provenance or conduct schedule sensitivity analysis. |
-| Background microburst | It is a finite RDMA incast described by bytes, endpoints, and start offsets; observed flow duration is not a configured injection duration. |
-| Packet-loss experiment | Treat it as a transport-model change. Define $q$, window duration $D$, affected direction/traffic classes, recovery behavior, and retransmission telemetry. |
-| DBLP comparison | Separate network loss $q$ from residual-loss tolerance $P$. Use fixed-$P_\mathrm{low}$ baseline only after implementing bounded-loss semantics. |
-| Policy-selection change | Update eligibility tests, logical/physical accounting, telemetry schema, analyzer/report, validation protocol, and claim boundary. |
+| CLR schedule | It is an exogenous phase proxy. Keep it static and seed-reproducible; document empirical trace provenance or conduct schedule sensitivity analysis. See [paper brief](../../docs/agents/ring-3d-paper-brief.md#critical-learning-regime). |
+| Background microburst | It is a finite RDMA incast described by bytes, endpoints, and start offsets; observed flow duration is not a configured injection duration. See [glossary](GLOSSARY.md#background-microburst). |
+| Packet-loss experiment | Treat it as a transport-model change. Define $q$, window duration $D$, affected direction/traffic classes, recovery behavior, and retransmission telemetry. See [pivot](../../docs/agents/ring-3d-astra-pivot.md#three-valid-study-modes). |
+| DBLP comparison | Separate network loss $q$ from residual-loss tolerance $P$. Use fixed-$P_\mathrm{low}$ baseline only after implementing bounded-loss semantics. See [pivot](../../docs/agents/ring-3d-astra-pivot.md#baseline-selection-is-part-of-the-claim). |
+| Policy-selection change | Update eligibility tests, logical/physical accounting, telemetry schema, analyzer/report, validation protocol, and claim boundary. See [implementation guide](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md). |
 
 ## Claim boundaries
 

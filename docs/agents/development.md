@@ -25,6 +25,12 @@ verify it with `uv lock --check`.
 | Dependency revision | `.gitmodules` plus the submodule pointer; do not modify submodule contents in place |
 | Agent workflow or reusable agent procedure | Root/nested `AGENTS.md`, `docs/agents/`, or an upstream skill repository; keep task-specific context out of the root guide |
 
+For Ring-3D work, read the documents in the order defined by the
+[agent-context index](README.md#ring-3d-reading-order). Do not begin from an
+implementation file when a request uses paper terms such as “loss”,
+“microburst”, or $P_\mathrm{low}$: their original-paper meaning and current
+code meaning are intentionally different.
+
 ## Change discipline
 
 1. Locate the owning layer and read its closest guidance and tests before

@@ -12,6 +12,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from experiments.ring_3d.compare import (
+    aggregate_comparison_artifacts,
     aggregate_comparisons,
     compare_summaries,
     congestion_evidence,
@@ -98,6 +99,41 @@ class Ring3DComparisonTests(unittest.TestCase):
         self.assertIn("Paired DBLP comparison", report)
         self.assertIn("makespan_ns", report)
         self.assertIn("95% CI of reduction", report)
+
+    def test_aggregate_artifacts_validates_and_combines_one_seed_results(self) -> None:
+        def one_seed_comparison(seed: int) -> dict[str, object]:
+            per_seed = [
+                {
+                    "seed": seed,
+                    "metrics": compare_summaries(
+                        summary(1_000, 100), summary(900 - seed, 90 - seed)
+                    ),
+                }
+            ]
+            return {
+                "profile": "/profiles/llama3_70b_16.json",
+                "seeds": [seed],
+                "congestion_required": True,
+                "simulation_timeout_seconds": 9_000,
+                "per_seed": per_seed,
+                "aggregate": aggregate_comparisons(per_seed),
+            }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            first = Path(temporary_directory) / "first.json"
+            second = Path(temporary_directory) / "second.json"
+            first.write_text(json.dumps(one_seed_comparison(1)), encoding="utf-8")
+            second.write_text(json.dumps(one_seed_comparison(2)), encoding="utf-8")
+
+            comparison = aggregate_comparison_artifacts([second, first])
+
+        self.assertEqual(comparison["seeds"], [1, 2])
+        self.assertEqual(
+            [entry["seed"] for entry in comparison["per_seed"]], [1, 2]
+        )
+        self.assertEqual(
+            comparison["aggregate"]["makespan_ns"]["paired_seed_count"], 2
+        )
 
     def test_congestion_gate_requires_queue_and_pfc_evidence(self) -> None:
         evidence = congestion_evidence(congested_summary())

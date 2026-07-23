@@ -34,7 +34,7 @@ Failures are reported as invalid or unavailable data; they are never silently re
 ## Conditions
 
 Run every condition with the five fixed paired seeds currently used by `compare.py`.
-The always-on CI Llama condition uses GitHub Actions' six-hour job limit, bounds each of its ten ns-3 simulator processes to 1,800 seconds, and applies a separate 330-minute guard to the complete paired comparison. The 30-minute difference reserves job time for setup, artifact upload, and failure reporting.
+The always-on CI Llama condition schedules the five matched pairs independently, then validates and aggregates their retained artifacts. Each pair uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 9,000-second cap for each of its two ns-3 simulator processes. The 30-minute difference reserves job time for setup, artifact upload, and failure reporting.
 
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |

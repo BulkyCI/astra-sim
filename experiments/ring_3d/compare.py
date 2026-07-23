@@ -311,6 +311,92 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 	return "\n".join(lines)
 
 
+def _write_comparison(output: Path, comparison: dict[str, Any]) -> None:
+	"""Persist a comparison and its Markdown report as one immutable bundle."""
+	output.mkdir(parents=True, exist_ok=True)
+	(output / "comparison.json").write_text(
+		json.dumps(comparison, indent=2) + "\n", encoding="utf-8"
+	)
+	(output / "comparison_report.md").write_text(
+		render_comparison_report(comparison), encoding="utf-8"
+	)
+
+
+def _read_comparison(path: Path) -> dict[str, Any]:
+	with path.open(encoding="utf-8") as handle:
+		value = json.load(handle)
+	if not isinstance(value, dict):
+		raise ValueError(f"expected a JSON object in {path}")
+	return value
+
+
+def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, Any]:
+	"""Combine independently executed one-seed comparisons without rerunning ns-3.
+
+	The CI matrix gives every matched pair its own full job budget. This function
+	validates that those artifacts describe one compatible experiment before
+	constructing the same aggregate and confidence interval as a serial run.
+	"""
+	if not comparison_paths:
+		raise ValueError("at least one comparison artifact is required")
+
+	profile: str | None = None
+	require_congestion: bool | None = None
+	simulation_timeout_seconds: int | None = None
+	per_seed: list[dict[str, Any]] = []
+	for path in comparison_paths:
+		comparison = _read_comparison(path)
+		artifact_profile = comparison.get("profile")
+		if not isinstance(artifact_profile, str) or not artifact_profile:
+			raise ValueError(f"comparison artifact {path} has no profile")
+		if profile is None:
+			profile = artifact_profile
+		elif artifact_profile != profile:
+			raise ValueError("comparison artifacts must use the same profile")
+
+		artifact_congestion = comparison.get("congestion_required")
+		if not isinstance(artifact_congestion, bool):
+			raise ValueError(f"comparison artifact {path} has invalid congestion setting")
+		if require_congestion is None:
+			require_congestion = artifact_congestion
+		elif artifact_congestion != require_congestion:
+			raise ValueError("comparison artifacts must use the same congestion setting")
+
+		artifact_timeout = comparison.get("simulation_timeout_seconds")
+		if isinstance(artifact_timeout, bool) or not isinstance(artifact_timeout, int):
+			raise ValueError(f"comparison artifact {path} has invalid simulator timeout")
+		if simulation_timeout_seconds is None:
+			simulation_timeout_seconds = artifact_timeout
+		elif artifact_timeout != simulation_timeout_seconds:
+			raise ValueError("comparison artifacts must use the same simulator timeout")
+
+		artifact_per_seed = comparison.get("per_seed")
+		if not isinstance(artifact_per_seed, list) or len(artifact_per_seed) != 1:
+			raise ValueError(
+				f"comparison artifact {path} must contain exactly one seed result"
+			)
+		seed_result = artifact_per_seed[0]
+		if not isinstance(seed_result, dict):
+			raise ValueError(f"comparison artifact {path} has an invalid seed result")
+		seed = seed_result.get("seed")
+		if isinstance(seed, bool) or not isinstance(seed, int):
+			raise ValueError(f"comparison artifact {path} has an invalid seed")
+		per_seed.append(seed_result)
+
+	seeds = [entry["seed"] for entry in per_seed]
+	if len(set(seeds)) != len(seeds):
+		raise ValueError("comparison artifacts must not contain duplicate seeds")
+	per_seed.sort(key=lambda entry: entry["seed"])
+	return {
+		"profile": profile,
+		"seeds": sorted(seeds),
+		"congestion_required": require_congestion,
+		"simulation_timeout_seconds": simulation_timeout_seconds,
+		"per_seed": per_seed,
+		"aggregate": aggregate_comparisons(per_seed),
+	}
+
+
 def run_comparison(
 	profile: Path,
 	output: Path,
@@ -389,19 +475,20 @@ def run_comparison(
 		"per_seed": per_seed,
 		"aggregate": aggregate_comparisons(per_seed),
 	}
-	(output / "comparison.json").write_text(
-		json.dumps(comparison, indent=2) + "\n", encoding="utf-8"
-	)
-	(output / "comparison_report.md").write_text(
-		render_comparison_report(comparison), encoding="utf-8"
-	)
+	_write_comparison(output, comparison)
 	return comparison
 
 
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
-	parser.add_argument("--profile", type=Path, required=True)
+	parser.add_argument("--profile", type=Path)
 	parser.add_argument("--output", type=Path, required=True)
+	parser.add_argument(
+		"--aggregate-inputs",
+		type=Path,
+		nargs="+",
+		help="one-seed comparison.json artifacts to validate and aggregate",
+	)
 	parser.add_argument("--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable")
 	parser.add_argument(
 		"--seeds",
@@ -422,15 +509,23 @@ def main() -> int:
 	)
 	parser.add_argument("--clean", action="store_true", help="replace an existing comparison directory")
 	arguments = parser.parse_args()
-	comparison = run_comparison(
-		arguments.profile,
-		arguments.output,
-		arguments.seeds,
-		binary=arguments.binary,
-		clean=arguments.clean,
-		require_congestion_signals=arguments.require_congestion,
-		simulation_timeout_seconds=arguments.simulation_timeout_seconds,
-	)
+	if (arguments.profile is None) == (arguments.aggregate_inputs is None):
+		parser.error("provide exactly one of --profile or --aggregate-inputs")
+	if arguments.aggregate_inputs is not None:
+		if arguments.clean and arguments.output.exists():
+			shutil.rmtree(arguments.output)
+		comparison = aggregate_comparison_artifacts(arguments.aggregate_inputs)
+		_write_comparison(arguments.output, comparison)
+	else:
+		comparison = run_comparison(
+			arguments.profile,
+			arguments.output,
+			arguments.seeds,
+			binary=arguments.binary,
+			clean=arguments.clean,
+			require_congestion_signals=arguments.require_congestion,
+			simulation_timeout_seconds=arguments.simulation_timeout_seconds,
+		)
 	print(json.dumps(comparison, indent=2))
 	return 0
 

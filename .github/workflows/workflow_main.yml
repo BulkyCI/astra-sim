@@ -165,18 +165,73 @@ jobs:
         if-no-files-found: ignore
 
   paired-llama3-evaluation:
-    name: Five-seed Llama 3 70B congestion evaluation
+    name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
     needs: python-quality
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20260317, 20260318, 20260319, 20260320, 20260321]
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
-      evaluation_name: Five-seed Llama 3 70B congestion evaluation
+      evaluation_name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
       profile: experiments/ring_3d/profiles/llama3_70b_16.json
-      run_directory: runs/ring_3d/llama3_70b_16_comparison
-      artifact_name: ring-3d-llama3-70b-16-comparison
+      run_directory: runs/ring_3d/llama3_70b_16_comparison/seed_${{ matrix.seed }}
+      artifact_name: ring-3d-llama3-70b-16-comparison-seed-${{ matrix.seed }}
       comparison: true
+      comparison_seed: ${{ matrix.seed }}
       execution_timeout_minutes: 330
-      simulation_timeout_seconds: 1800
+      simulation_timeout_seconds: 9000
       require_congestion: true
+
+  aggregate-llama3-evaluation:
+    name: Aggregate five-seed Llama 3 70B congestion evaluation
+    needs: paired-llama3-evaluation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        persist-credentials: false
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v9.0.0
+      with:
+        version: "0.11.28"
+        enable-cache: true
+
+    - name: Synchronize locked Python environment
+      run: ./utils/setup.sh
+
+    - name: Download paired seed artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ring-3d-llama3-70b-16-comparison-seed-*-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_16_comparison/artifacts
+
+    - name: Validate and aggregate paired seed results
+      run: |
+        mapfile -t comparisons < <(
+          find runs/ring_3d/llama3_70b_16_comparison/artifacts \
+            -name comparison.json -type f -print | sort
+        )
+        [[ "${#comparisons[@]}" -eq 5 ]]
+        uv run --locked python experiments/ring_3d/compare.py \
+          --aggregate-inputs "${comparisons[@]}" \
+          --output runs/ring_3d/llama3_70b_16_comparison/aggregate \
+          --clean
+        cat runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md \
+          >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload aggregate comparison report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_16_comparison/aggregate
+        if-no-files-found: ignore
 
   model-100b-256-clos-evaluation:
     name: 100B 256-card Clos structural evaluation

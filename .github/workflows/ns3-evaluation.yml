@@ -20,9 +20,14 @@ on:
         required: true
         type: string
       comparison:
-        description: Run the five-seed matched comparison instead of one structural experiment.
+        description: Run a matched comparison instead of one structural experiment.
         required: true
         type: boolean
+      comparison_seed:
+        description: Optional single seed for one independently scheduled matched pair; zero runs the default seed set.
+        required: false
+        default: 0
+        type: number
       execution_timeout_minutes:
         description: Wall-clock guard for the run or comparison command.
         required: true
@@ -138,6 +143,9 @@ jobs:
         )
         if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
           command+=(--require-congestion)
+        fi
+        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
+          command+=(--seeds ${{ inputs.comparison_seed }})
         fi
         timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
 

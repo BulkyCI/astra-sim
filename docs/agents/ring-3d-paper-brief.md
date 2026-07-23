@@ -104,4 +104,6 @@ latency while holding phase-sensitive steps to a stricter bound.
 
 Do **not** transfer unexamined implementation details or accuracy conclusions.
 Read the [ASTRA-sim pivot](ring-3d-astra-pivot.md) before deciding which paper
-semantics must be modeled and which may be abstracted.
+semantics current Ring-3D models and which it does not. Read the
+[known-flaws register](ring-3d-known-flaws.md) before treating a paper result
+as a modern-framework result.

@@ -12,6 +12,11 @@ the paper's PyTorch/UDP/TCP prototype. A deliberate deviation is valid only if
 it preserves a named causal mechanism, controls alternative explanations, and
 narrows the resulting claim to what the model actually measures.
 
+This document defines the current model boundary; it does not prescribe a
+solution for a DBLP flaw. Consult the
+[known-flaws register](ring-3d-known-flaws.md) before proposing a remedy or
+assuming that an existing abstraction resolves a paper limitation.
+
 ## Causal contract for an acceptable deviation
 
 Every new condition must state these five facts in its profile, manifest,
@@ -45,17 +50,6 @@ The current system is correctly named a **phase-aware logical admission-
 suppression under incast** experiment. It can test whether reducing selected
 DP traffic relieves modeled congestion. It cannot reproduce DBLP's bitmap,
 partial delivery, retransmission rounds, or accuracy behavior.
-
-## Three valid study modes
-
-| Mode | Required implementation | Defensible conclusion | Do not claim |
-| --- | --- | --- | --- |
-| Current incast ablation | Finite competing RDMA flows; logical payload substitution; matched paired controls | The substitution policy changes modeled tail latency/bytes under the stated incast | DBLP bounded-loss transport or accuracy preservation |
-| Lossy RDMA study | Seeded directed time window; data-only $q$; reliable control; sender timeout recovery; retransmission telemetry | Reliable RDMA tail latency under a defined transient data-loss impairment | DBLP stop-at-$P$ behavior |
-| Bounded-loss abstraction | Chunk state, round identifier, reliable probe/bitmap/stop control, residual-loss accounting, explicit logical completion at $P$ | DBLP-inspired phase-aware bounded-loss cost/latency in the specified simulator | Framework accuracy or exact production behavior |
-
-Do not combine these modes under one unqualified “microburst” label. An incast
-and a packet-loss burst are different causal interventions.
 
 ## Baseline selection is part of the claim
 
@@ -91,25 +85,9 @@ Only the phase-dependent tolerance may differ.
 
 The current 16-rank 70B-class condition belongs to step 1 and can contribute
 to step 2. It does not by itself establish performance on 256 accelerators or
-production hardware.
-
-## Implementation direction
-
-Prefer the staged path:
-
-1. Keep current incast/substitution results as a separately named ablation.
-2. Add a narrow lossy-RDMA primitive before claiming packet-loss resilience:
-   $q$, $D$, direction, affected packet classes, deterministic seed, sender
-   timeout, and loss/retransmission telemetry.
-3. Add bounded-loss round semantics only if the research question requires a
-   DBLP transport claim. Make residual loss a first-class typed/configured
-   outcome, never an implicit side effect of a 64-byte control QP.
-
-The first proof point for each step is a small smoke topology where a configured
-loss window causes measured data loss and recovery while control packets remain
-reliable. A liveness failure, missing retransmission accounting, or a benefit
-that vanishes in no-stressor controls falsifies the immediate step and blocks
-the stronger claim.
+production hardware. The unresolved issues that limit any next step are listed
+in the [known-flaws register](ring-3d-known-flaws.md); no remedy is selected by
+this document.
 
 Read the [research context](ring-3d-research-context.md) for current backend
 limits, the [glossary](../../experiments/ring_3d/GLOSSARY.md) for field names,

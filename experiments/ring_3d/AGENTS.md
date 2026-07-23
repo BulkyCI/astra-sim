@@ -5,10 +5,11 @@ read in this order before changing model semantics, CLR, microbursts, loss, or
 telemetry:
 
 1. [DBLP paper brief](../../docs/agents/ring-3d-paper-brief.md)
-2. [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md)
-3. [Ring-3D glossary](GLOSSARY.md)
-4. [Research claim boundary](../../docs/agents/ring-3d-research-context.md)
-5. [Validation protocol](VALIDATION_PROTOCOL.md)
+2. [DBLP known flaws](../../docs/agents/ring-3d-known-flaws.md)
+3. [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md)
+4. [Ring-3D glossary](GLOSSARY.md)
+5. [Research claim boundary](../../docs/agents/ring-3d-research-context.md)
+6. [Validation protocol](VALIDATION_PROTOCOL.md)
 
 For a code-path change, additionally read
 [ns-3 policy implementation](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md).

@@ -6,12 +6,14 @@ This document is the current-state boundary, not the explanation of the
 original paper or a code-path guide. Read documents in this order:
 
 1. [DBLP paper brief](ring-3d-paper-brief.md): original transport concepts.
-2. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
-  models, abstracts, or does not model.
-3. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
+2. [DBLP known flaws](ring-3d-known-flaws.md): evidence-labeled baseline,
+  transport, PFC, topology, and CLR validity threats.
+3. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
+  models, abstracts, or does not model; it selects no remedy.
+4. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
   parameter names and generated artifacts.
-4. This document: claims, backend limits, controls, and future work.
-5. [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md):
+5. This document: claims, backend limits, controls, and future work.
+6. [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md):
   canonical estimands and decision rules.
 
 ## Purpose
@@ -136,26 +138,28 @@ Do not enable $q=60\%-90\%$ by changing one global setting and report the
 result as DBLP. That can produce artifacts or liveness failures unrelated to
 the intended paper mechanism.
 
-## Roadmap to stronger empirical evidence
+## Unresolved research questions
 
-1. **Keep the current incast study as a separate ablation.** It validates the
-   queue/PFC mechanism under a controlled congestion stressor.
-2. **Add a minimal lossy-RDMA condition.** Implement a seeded, directed,
-   time-bounded, data-plane-only loss window. Keep ACK/NACK/CNP/PFC control
-   traffic lossless for this first condition.
-3. **Add sender timeout recovery and observability.** Record injected drops,
-   retransmitted packets/bytes, completion failures, queue/PFC signals, and
-   loss-window boundaries. Validate low loss before high loss.
-4. **If making a DBLP transport claim, add an explicit abstraction.** Model
-   chunk delivery state, a reliable probe/bitmap/stop control path, a round
-   identifier, and stop when missing fraction is at most $P$.
-5. **Use a paper-aligned comparison.** The baseline fixes
-   $P=P_\mathrm{low}$ for every phase; policy uses $P_\mathrm{low}$ in CLR and
-   $P_\mathrm{high}$ outside CLR. This differs from the current lossless
-   suppression baseline.
-6. **Scale only as far as completed simulations allow.** Label 16-rank
-   results mechanism validation. Report a completed scaling sweep; do not
-   extrapolate a timed-out 256-node condition as measured evidence.
+No remedy is selected for the documented DBLP flaws. Before any future protocol
+or experiment design is described as a direction, resolve the relevant
+evidence gap:
+
+1. Is exposed communication time still a material bottleneck once the intended
+  workload's overlap behavior is modeled?
+2. Is the target tail event loss, PFC pause propagation, retransmission,
+  congestion control, or a combination of mechanisms?
+3. Can the target fabric deliver the required control information during the
+  same congestion episode, and what is its queueing behavior?
+4. What application-visible delivery information is required to preserve the
+  semantics of optimizer, compression, and residual state?
+5. Which traffic domain and collective dependency can tolerate which logical or
+  physical loss outcome, if any?
+6. What phase signal is available, what does it cost, and how accurately does
+  it predict the claimed sensitivity?
+
+See the [known-flaws register](ring-3d-known-flaws.md) for the evidence status
+and scope of each question. A completed simulation at a larger topology is not
+by itself an answer to any of them.
 
 ## Required experimental controls
 

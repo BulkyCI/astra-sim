@@ -24,12 +24,19 @@ verify it with `uv lock --check`.
 | General simulator behavior | `astra-sim/system/`, `astra-sim/common/`, or the relevant frontend; follow nearby C++ conventions |
 | Dependency revision | `.gitmodules` plus the submodule pointer; do not modify submodule contents in place |
 | Agent workflow or reusable agent procedure | Root/nested `AGENTS.md`, `docs/agents/`, or an upstream skill repository; keep task-specific context out of the root guide |
+| DBLP flaw, modern-framework mismatch, or external-validity concern | [DBLP known-flaws register](ring-3d-known-flaws.md); add an evidence-labeled problem statement, not a speculative remedy |
 
 For Ring-3D work, read the documents in the order defined by the
 [agent-context index](README.md#ring-3d-reading-order). Do not begin from an
 implementation file when a request uses paper terms such as “loss”,
 “microburst”, or $P_\mathrm{low}$: their original-paper meaning and current
 code meaning are intentionally different.
+
+When a Ring-3D change is motivated by a protocol critique, read the
+[DBLP known-flaws register](ring-3d-known-flaws.md) before altering a baseline
+or describing an outcome. Preserve the source-reported, repository-verified, or
+critical-hypothesis status. Do not present an unvalidated remedy as an existing
+project direction.
 
 ## Change discipline
 

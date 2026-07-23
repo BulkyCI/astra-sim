@@ -7,6 +7,7 @@ small while retaining the non-obvious project decisions.
 | --- | --- |
 | Any code, configuration, test, or documentation change | [Development workflow](development.md) |
 | Interpreting the original DBLP paper | [DBLP paper brief](ring-3d-paper-brief.md) |
+| Evaluating a DBLP criticism or validity threat | [DBLP known flaws](ring-3d-known-flaws.md) |
 | Deciding whether a paper mechanism maps to ASTRA-sim | [ASTRA-sim pivot](ring-3d-astra-pivot.md) |
 | Interpreting Ring-3D claims, limits, or roadmap | [Ring-3D research context](ring-3d-research-context.md) |
 | Editing profiles, CLR, microbursts, or analysis | [Ring-3D local guide](../../experiments/ring_3d/AGENTS.md), then [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md) |
@@ -23,10 +24,12 @@ a nearer nested `AGENTS.md`.
 
 1. Read the [paper brief](ring-3d-paper-brief.md) for the original DBLP
 	protocol and empirical assumptions.
-2. Read the [ASTRA-sim pivot](ring-3d-astra-pivot.md) before proposing a
-	reproduction, deliberate abstraction, or claim.
-3. Load the local [glossary](../../experiments/ring_3d/GLOSSARY.md) and
+2. Read the [known-flaws register](ring-3d-known-flaws.md) before proposing a
+	reproduction, deliberate abstraction, baseline, or claim.
+3. Read the [ASTRA-sim pivot](ring-3d-astra-pivot.md) to distinguish the
+	current model from the paper; it does not prescribe a remedy.
+4. Load the local [glossary](../../experiments/ring_3d/GLOSSARY.md) and
 	[implementation guide](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)
 	only when changing a named parameter or code path.
-4. Treat [the validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md)
+5. Treat [the validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md)
 	as the source of truth for estimands, controls, and decision rules.

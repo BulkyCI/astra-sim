@@ -64,6 +64,8 @@ checks that are intentionally not run, especially costly simulator runs.
   [docs/agents/development.md](docs/agents/development.md)
 - Research scope, valid claims, and the lossy-transport roadmap:
   [docs/agents/ring-3d-research-context.md](docs/agents/ring-3d-research-context.md)
+- DBLP baseline, loss-semantics, PFC, topology, and CLR validity threats:
+  [docs/agents/ring-3d-known-flaws.md](docs/agents/ring-3d-known-flaws.md)
 - Ring-3D generator, policy, telemetry, or profile changes:
   [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
 - Agent-context index:

@@ -8,7 +8,7 @@ The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and
 
 ## Pre-registered primary estimands
 
-For each pair, use the same Chakra traces, topology, policy-selection seed, ns-3 RNG seed/run, and microburst schedule. The lossless baseline keeps all policy plumbing enabled but sets every selection threshold to zero.
+For each pair, use the same Chakra traces, topology, policy-selection seed, static CLR mask, ns-3 RNG seed/run, and microburst schedule. The lossless baseline keeps all policy plumbing enabled but sets both CLR/stable selection tolerances to zero.
 
 1. **DP All-Reduce per-rank P99 completion latency**: native collective completion minus native collective issue for every DP All-Reduce rank event.
 2. **DP All-Reduce all-rank-span P99**: $\max(end)-\min(start)$ for each `(training_step, workload_node_id)` population across ranks.
@@ -40,7 +40,7 @@ The always-on CI Llama condition schedules the five matched pairs independently,
 | --- | --- | --- | --- |
 | Negative control | `profiles/no_incast_8.json`, policy 0% versus policy | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
 | Congested baseline | `profiles/llama3_70b_16.json`, 0% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
-| Congested policy | `profiles/llama3_70b_16.json`, the predeclared 10% selection in steps 2 and 3 | Measure DBLP under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
+| Congested policy | `profiles/llama3_70b_16.json`, 0% CLR and 10% stable-convergence selection under the fixed decay-and-spike mask | Measure DBLP under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one 256-card structural policy run | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, one 256-card structural policy run | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |

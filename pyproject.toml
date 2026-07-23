@@ -8,6 +8,7 @@ dependencies = [
     "chakra @ git+https://github.com/astra-sim/chakra.git@0e3cd40c569f0a4cacb6d961bb56be53407abd2f",
     # Chakra's trace-link module imports et_replay but does not declare it.
     "et-replay @ git+https://github.com/facebookresearch/param.git@7b19f586dd8b267333114992833a0d7e0d601630#subdirectory=et_replay",
+    "numpy==2.4.6",
     # Keep the Python runtime aligned with the Protobuf 29.0 C++ toolchain.
     "protobuf==5.29.6",
 ]

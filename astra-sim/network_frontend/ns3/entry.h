@@ -83,6 +83,7 @@ map<MsgEventKey, MsgEvent> sim_recv_waiting_hash;
 map<MsgEventKey, uint64_t> received_msg_standby_hash;
 map<FlowKey, AstraSimNs3::FlowRecord> active_flow_registry;
 uint64_t pending_background_flows = 0;
+uint64_t completed_qps = 0;
 
 FlowKey make_flow_key(uint16_t source_port, int src_id, int dst_id) {
     return make_pair(source_port, make_pair(src_id, dst_id));
@@ -95,6 +96,14 @@ void account_physical_bytes(int src_id, int dst_id, uint64_t bytes) {
 
 bool has_pending_background_traffic() {
     return pending_background_flows != 0;
+}
+
+uint64_t completed_qp_count() {
+    return completed_qps;
+}
+
+size_t active_qp_count() {
+    return active_flow_registry.size();
 }
 
 void register_logical_send_event(int src_id,
@@ -366,6 +375,7 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     }
     AstraSimNs3::experiment_telemetry.record_flow(flow);
     active_flow_registry.erase(active);
+    ++completed_qps;
 }
 
 int setup_ns3_simulation(string network_configuration) {

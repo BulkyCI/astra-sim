@@ -249,6 +249,7 @@ def _execution_rows(execution: Any) -> list[list[Any]]:
             f"{execution.get('ns3_rng_run', 'unknown')}",
         ],
         ["Simulator wall-clock cap", timeout_text],
+        ["Static CLR mask", execution.get("clr_mask", "not recorded")],
     ]
 
 
@@ -327,6 +328,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     else:
         provenance = policy.get("provenance", {})
         microburst = policy.get("microburst", {})
+        clr_tolerances = policy.get("clr_tolerances", {})
         microburst_flows = microburst.get("flows", [])
         if not isinstance(microburst_flows, list):
             microburst_flows = []
@@ -342,6 +344,17 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     ["Eligibility", policy.get("eligibility", "unknown")],
                     ["Default priority group", policy.get("default_priority_group", "unknown")],
                     ["Protected provenance control", f"{provenance.get('control_bytes', 'unknown')} B on priority group {provenance.get('priority_group', 'unknown')}"],
+                    [
+                        "CLR / stable suppression tolerance",
+                        (
+                            f"{_format_probability(clr_tolerances.get('clr_drop_probability'))} / "
+                            f"{_format_probability(clr_tolerances.get('stable_drop_probability'))}"
+                            if isinstance(clr_tolerances, dict)
+                            and "clr_drop_probability" in clr_tolerances
+                            and "stable_drop_probability" in clr_tolerances
+                            else "not recorded"
+                        ),
+                    ],
                     ["Background microburst", "enabled" if microburst.get("enabled") else "disabled"],
                     ["Microburst trigger step", microburst.get("trigger_step", "not applicable")],
                     ["Microburst flows", len(microburst_flows) if microburst.get("enabled") else "not applicable"],
@@ -351,7 +364,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         )
         thresholds = policy.get("drop_probability_by_step")
         if isinstance(thresholds, dict):
-            lines.extend(["", "Configured admission-suppression thresholds:", ""])
+            lines.extend(["", "Materialized admission-suppression thresholds:", ""])
             threshold_rows = [
                 [step, _format_probability(probability)]
                 for step, probability in sorted(thresholds.items(), key=lambda item: int(item[0]))

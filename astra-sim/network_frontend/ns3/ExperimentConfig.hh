@@ -16,6 +16,7 @@ LICENSE file in the root directory of this source tree.
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -51,6 +52,11 @@ struct ExperimentConfig {
     uint64_t provenance_control_bytes = 64;
     std::map<uint32_t, uint16_t> vnet_to_priority_group;
     std::map<uint32_t, uint64_t> shedding_threshold_by_step;
+    bool clr_tolerances_configured = false;
+    uint64_t clr_drop_threshold = 0;
+    uint64_t stable_drop_threshold = 0;
+    bool clr_mask_configured = false;
+    std::map<uint32_t, bool> clr_mask_by_step;
     bool microburst_enabled = false;
     uint32_t microburst_trigger_step = 2;
     std::vector<MicroburstFlow> microburst_flows;
@@ -60,6 +66,7 @@ struct ExperimentConfig {
 struct SheddingDecision {
     bool eligible = false;
     bool shed = false;
+    bool is_clr = false;
     uint64_t decision_hash = 0;
 };
 
@@ -296,6 +303,20 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
 
     decision.eligible = true;
     decision.decision_hash = stable_operation_hash(request, src, dst, tag);
+    if (experiment_config.clr_mask_configured) {
+        const auto clr = experiment_config.clr_mask_by_step.find(
+            request.operation.training_step);
+        if (clr == experiment_config.clr_mask_by_step.end()) {
+            throw std::runtime_error(
+                "CLR mask does not define the request training step");
+        }
+        decision.is_clr = clr->second;
+        const uint64_t threshold = decision.is_clr
+            ? experiment_config.clr_drop_threshold
+            : experiment_config.stable_drop_threshold;
+        decision.shed = decision.decision_hash % kDecisionScale < threshold;
+        return decision;
+    }
     const auto threshold = experiment_config.shedding_threshold_by_step.find(
         request.operation.training_step);
     if (threshold == experiment_config.shedding_threshold_by_step.end()) {
@@ -366,6 +387,87 @@ inline uint64_t parse_probability_threshold(const nlohmann::json& value,
         std::llround(probability * static_cast<double>(kDecisionScale)));
 }
 
+inline void configure_clr_mask(const std::string& configuration_path) {
+    if (configuration_path.empty() || configuration_path == "empty") {
+        return;
+    }
+    if (!experiment_config.enabled) {
+        throw std::runtime_error(
+            "--clr-mask-configuration requires an enabled experiment");
+    }
+    if (!experiment_config.clr_tolerances_configured) {
+        throw std::runtime_error(
+            "--clr-mask-configuration requires clr_tolerances in the experiment configuration");
+    }
+
+    std::ifstream input(configuration_path);
+    if (!input) {
+        throw std::runtime_error("Unable to open CLR mask: " + configuration_path);
+    }
+    std::string line;
+    if (!std::getline(input, line)) {
+        throw std::runtime_error("CLR mask must contain a header");
+    }
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+    if (line != "step_id,is_clr,probability") {
+        throw std::runtime_error(
+            "CLR mask header must be step_id,is_clr,probability");
+    }
+
+    uint64_t row_count = 0;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            throw std::runtime_error("CLR mask must not contain blank rows");
+        }
+        std::stringstream stream(line);
+        std::string step_text;
+        std::string clr_text;
+        std::string probability_text;
+        std::string unexpected;
+        if (!std::getline(stream, step_text, ',') ||
+            !std::getline(stream, clr_text, ',') ||
+            !std::getline(stream, probability_text, ',') ||
+            std::getline(stream, unexpected, ',')) {
+            throw std::runtime_error(
+                "CLR mask rows must contain step_id,is_clr,probability");
+        }
+        const uint64_t step = parse_uint64_key(step_text, "CLR mask step_id");
+        if (step == 0 || step > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("CLR mask step_id must be a nonzero uint32");
+        }
+        if (clr_text != "0" && clr_text != "1") {
+            throw std::runtime_error("CLR mask is_clr must be 0 or 1");
+        }
+        size_t probability_length = 0;
+        double probability = 0.0;
+        try {
+            probability = std::stod(probability_text, &probability_length);
+        } catch (const std::exception&) {
+            throw std::runtime_error("CLR mask probability must be in [0, 1]");
+        }
+        if (probability_length != probability_text.size() ||
+            !std::isfinite(probability) || probability < 0.0 ||
+            probability > 1.0) {
+            throw std::runtime_error("CLR mask probability must be in [0, 1]");
+        }
+        if (!experiment_config.clr_mask_by_step
+                 .emplace(static_cast<uint32_t>(step), clr_text == "1")
+                 .second) {
+            throw std::runtime_error("CLR mask must not contain duplicate step_id values");
+        }
+        ++row_count;
+    }
+    if (row_count == 0) {
+        throw std::runtime_error("CLR mask must contain at least one step");
+    }
+    experiment_config.clr_mask_configured = true;
+}
+
 inline void configure_experiment(const std::string& configuration_path,
                                  const std::string& output_dir) {
     experiment_config = ExperimentConfig{};
@@ -391,6 +493,7 @@ inline void configure_experiment(const std::string& configuration_path,
     reject_unknown_keys(root,
                         {"schema_version", "enabled", "seed", "run_id",
                          "eligibility", "drop_probability_by_step",
+                         "clr_tolerances",
                          "default_priority_group", "provenance",
                          "vnet_to_priority_group", "microburst"},
                         "experiment configuration");
@@ -488,6 +591,36 @@ inline void configure_experiment(const std::string& configuration_path,
                 parse_probability_threshold(
                     it.value(), "drop_probability_by_step probability"));
         }
+    }
+
+    if (root.contains("clr_tolerances")) {
+        const auto& tolerances = root.at("clr_tolerances");
+        if (!tolerances.is_object()) {
+            throw std::runtime_error("clr_tolerances must be an object");
+        }
+        reject_unknown_keys(tolerances,
+                            {"clr_drop_probability",
+                             "stable_drop_probability"},
+                            "clr_tolerances");
+        for (const char* key : {"clr_drop_probability",
+                                "stable_drop_probability"}) {
+            if (!tolerances.contains(key)) {
+                throw std::runtime_error(
+                    std::string("clr_tolerances requires ") + key);
+            }
+        }
+        experiment_config.clr_drop_threshold = parse_probability_threshold(
+            tolerances.at("clr_drop_probability"),
+            "clr_tolerances.clr_drop_probability");
+        experiment_config.stable_drop_threshold = parse_probability_threshold(
+            tolerances.at("stable_drop_probability"),
+            "clr_tolerances.stable_drop_probability");
+        if (experiment_config.clr_drop_threshold >
+            experiment_config.stable_drop_threshold) {
+            throw std::runtime_error(
+                "clr_tolerances.clr_drop_probability must not exceed stable_drop_probability");
+        }
+        experiment_config.clr_tolerances_configured = true;
     }
 
     if (root.contains("microburst")) {

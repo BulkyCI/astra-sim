@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import sys
 import tempfile
@@ -68,10 +69,29 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")
-            self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.1})
+            self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.0})
+            self.assertEqual(
+                policy["clr_tolerances"],
+                {"clr_drop_probability": 0.0, "stable_drop_probability": 0.1},
+            )
+            with (output / "clr_mask.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertEqual(
+                    list(csv.DictReader(handle)),
+                    [
+                        {"step_id": "1", "is_clr": "1", "probability": "1"},
+                        {
+                            "step_id": "2",
+                            "is_clr": "0",
+                            "probability": "0.35846544338504249",
+                        },
+                        {"step_id": "3", "is_clr": "1", "probability": "1"},
+                    ],
+                )
             self.assertEqual(policy["provenance"]["priority_group"], 1)
             self.assertEqual(manifest["ranks"], 8)
             self.assertEqual(Path(manifest["profile_config"]), output / "profile.json")
+            self.assertEqual(Path(manifest["clr_mask"]), output / "clr_mask.csv")
+            self.assertEqual(manifest["clr_schedule"]["clr_step_count"], 2)
 
     def test_llama3_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
@@ -105,7 +125,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertFalse(policy["microburst"]["enabled"])
             self.assertEqual(policy["microburst"]["flows"], [])
             self.assertEqual(
-                policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.1}
+                policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.0}
             )
 
     def test_lossless_override_preserves_enabled_microburst(self) -> None:
@@ -121,6 +141,22 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertTrue(policy["enabled"])
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.0, "3": 0.0})
+
+    def test_materialization_covers_every_profile_training_step(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["steps"] = 6
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "six_steps.json"
+            output = Path(temporary_directory) / "experiment"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            manifest = materialize(profile_path, output)
+
+            with (output / "clr_mask.csv").open(newline="", encoding="utf-8") as handle:
+                mask_rows = list(csv.DictReader(handle))
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertEqual([row["step_id"] for row in mask_rows], [str(step) for step in range(1, 7)])
+            self.assertEqual(set(policy["drop_probability_by_step"]), {str(step) for step in range(1, 7)})
+            self.assertEqual(manifest["clr_schedule"]["steps"], 6)
 
     def test_llama3_profile_has_one_1gib_dp_bucket_per_step(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"

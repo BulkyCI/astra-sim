@@ -12,8 +12,10 @@ from typing import Any
 
 try:
     from .generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
+    from .generate_clr_schedule import ClrScheduleParameters
 except ImportError:
     from generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
+    from generate_clr_schedule import ClrScheduleParameters
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +47,7 @@ def run_experiment(
     ns3_rng_run: int | None = None,
     simulation_timeout_seconds: int | None = None,
     drop_probabilities: dict[str, float] | None = None,
+    clr_schedule_parameters: ClrScheduleParameters | None = None,
     skip_analysis: bool = False,
 ) -> dict[str, Any]:
     """Materialize, execute, and analyze one reproducible policy invocation."""
@@ -70,6 +73,7 @@ def run_experiment(
         clean,
         seed_override=seed,
         drop_probabilities=drop_probabilities,
+        clr_schedule_parameters=clr_schedule_parameters,
     )
     binary = binary.resolve() if binary else find_default_binary()
     if not binary.is_file() or not binary.stat().st_mode & 0o111:
@@ -84,6 +88,7 @@ def run_experiment(
         f"--logical-topology-configuration={manifest['logical_topology']}",
         f"--comm-group-configuration={manifest['communicator_groups']}",
         f"--experiment-configuration={manifest['experiment_config']}",
+        f"--clr-mask-configuration={manifest['clr_mask']}",
         f"--experiment-output-dir={manifest['telemetry_dir']}",
         f"--ns3-rng-seed={ns3_rng_seed}",
         f"--ns3-rng-run={ns3_rng_run}",
@@ -93,6 +98,7 @@ def run_experiment(
         "ns3_rng_seed": ns3_rng_seed,
         "ns3_rng_run": ns3_rng_run,
         "simulation_timeout_seconds": simulation_timeout_seconds,
+        "clr_mask": manifest["clr_mask"],
     }
     (output / "execution.json").write_text(
         json.dumps(execution, indent=2) + "\n", encoding="utf-8"
@@ -148,8 +154,40 @@ def main() -> int:
         action="store_true",
         help="keep the policy and microbursts enabled while setting every suppression threshold to zero",
     )
+    parser.add_argument(
+        "--clr-decay-rate",
+        type=float,
+        help="exponential CLR probability decay rate",
+    )
+    parser.add_argument(
+        "--clr-epoch-steps",
+        type=int,
+        help="steps between Gaussian CLR epoch-boundary spikes",
+    )
+    parser.add_argument(
+        "--clr-spike-stddev-steps",
+        type=float,
+        help="Gaussian CLR epoch-boundary spike width in steps",
+    )
+    parser.add_argument(
+        "--clr-spike-amplitude",
+        type=float,
+        help="Gaussian CLR epoch-boundary spike amplitude",
+    )
     parser.add_argument("--skip-analysis", action="store_true")
     arguments = parser.parse_args()
+    clr_schedule_parameters = ClrScheduleParameters(
+        **{
+            field: value
+            for field, value in {
+                "decay_rate": arguments.clr_decay_rate,
+                "epoch_steps": arguments.clr_epoch_steps,
+                "spike_stddev_steps": arguments.clr_spike_stddev_steps,
+                "spike_amplitude": arguments.clr_spike_amplitude,
+            }.items()
+            if value is not None
+        }
+    )
 
     manifest = run_experiment(
         arguments.profile,
@@ -161,6 +199,7 @@ def main() -> int:
         ns3_rng_run=arguments.ns3_rng_run,
         simulation_timeout_seconds=arguments.simulation_timeout_seconds,
         drop_probabilities=(lossless_drop_probabilities() if arguments.lossless_baseline else None),
+        clr_schedule_parameters=clr_schedule_parameters,
         skip_analysis=arguments.skip_analysis,
     )
     print(json.dumps(manifest, indent=2))

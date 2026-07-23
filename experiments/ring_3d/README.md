@@ -6,7 +6,7 @@ $$
 rank=((dp\_rank\cdot PP)+pp\_rank)\cdot TP+tp\_rank.
 $$
 
-The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a typed physical topology, native-Ring collective configuration, and the ns-3 experiment policy. The logical Ring collective and physical network are independent: a profile chooses either a two-stage Clos or a host-attached switch ring. The latter attaches every accelerator host to a dedicated switch and connects the switches in a bidirectional ring, preserving ns-3 switch queue and PFC observability. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
+The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a typed physical topology, native-Ring collective configuration, an ns-3 experiment policy, and a deterministic `clr_mask.csv`. The logical Ring collective and physical network are independent: a profile chooses either a two-stage Clos or a host-attached switch ring. The latter attaches every accelerator host to a dedicated switch and connects the switches in a bidirectional ring, preserving ns-3 switch queue and PFC observability. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
 
 ## Profiles
 
@@ -39,9 +39,32 @@ uv run --locked python experiments/ring_3d/analyze.py \
   --telemetry-dir runs/ring_3d/smoke_8/telemetry
 ```
 
+## Deterministic CLR schedule
+
+Every materialized run contains a static `clr_mask.csv` with one row per one-based training step: `step_id,is_clr,probability`. It is generated once with the profile/override seed and passed to ns-3 as `--clr-mask-configuration`. The runtime reads the mask before scheduling work, then applies the strict CLR tolerance when `is_clr=1` and the relaxed stable-convergence tolerance when `is_clr=0`; it does not sample CLR state during simulation.
+
+The vectorized schedule computes
+
+$$
+P(\mathrm{CLR}\mid t)=\min\left(1, e^{-\lambda t}+
+\sum_k A\exp\left(-\frac{(t-kT_{\mathrm{epoch}})^2}{2\sigma^2}\right)\right),
+$$
+
+then samples the whole Boolean mask with a fixed NumPy generator seed. Defaults are $\lambda=1.5$, $T_{\mathrm{epoch}}=2$ steps, $\sigma=0.5$ steps, and $A=1.0$. The first zero-indexed step is therefore always a CLR; narrow epoch-boundary spikes restore CLR state at configured shifts. `manifest.json` retains all parameters, the seed, and the CLR-step count.
+
+Generate only the immutable schedule with:
+
+```sh
+uv run --locked python experiments/ring_3d/generate_clr_schedule.py \
+  --steps 1000 --seed 314159265 --output runs/ring_3d/clr_mask.csv \
+  --decay-rate 0.01 --epoch-steps 100 --spike-stddev-steps 1
+```
+
+`generate.py` and `run.py` expose the same `--clr-decay-rate`, `--clr-epoch-steps`, `--clr-spike-stddev-steps`, and `--clr-spike-amplitude` controls. The seed override controls both the legacy deterministic per-flow admission decision and the static CLR-mask sample, so baseline and policy invocations in a pair ingest identical masks.
+
 ## Paired baseline comparison
 
-Use [compare.py](compare.py) for a matched comparison. For every fixed seed it runs the lossless baseline first with the policy and microbursts still enabled but all suppression thresholds set to $0\%$, then runs the DBLP policy with the same generated workload, topology, seed, and microburst schedule. The default is five fixed seeds and it writes both individual run bundles, `comparison.json`, and `comparison_report.md`.
+Use [compare.py](compare.py) for a matched comparison. For every fixed seed it runs the lossless baseline first with the policy and microbursts still enabled but both CLR/stable suppression tolerances set to $0\%$, then runs the DBLP policy with the same generated workload, topology, seed, and static CLR mask. The default is five fixed seeds and it writes both individual run bundles, `comparison.json`, and `comparison_report.md`.
 
 ```sh
 uv run --locked python experiments/ring_3d/compare.py \
@@ -97,9 +120,11 @@ uv run --locked python experiments/ring_3d/report.py \
   --output runs/ring_3d/smoke_8/research_report.md
 ```
 
-## Admission policy
+## Admission policy and liveness
 
-The generated policy uses deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag. Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The default thresholds are $0\%$, $10\%$, and $10\%$ for steps 1–3. A selected logical payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss.
+Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The static CLR mask selects a strict $0\%$ suppression tolerance during critical learning steps and a relaxed $10\%$ tolerance during stable steps. Within a selected tolerance, deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag selects the logical payloads. A selected payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss.
+
+The ns-3 frontend emits an info-level liveness checkpoint every 10 ms of simulated time while work remains. Each message reports simulated time, completed QPs, active QPs, completed ranks, and pending background flows. The watchdog is bounded to 10,000 checkpoints (100 s simulated time); reaching that bound stops the simulation and returns a failed run instead of retaining a misleading partial result.
 
 Priority group 0 remains reserved. Foreground vnet 0 maps to priority group 3, while provenance controls use priority group 1. Step 2 also triggers deterministic cross-rack RDMA microbursts on the same modeled host/RDMA path.
 

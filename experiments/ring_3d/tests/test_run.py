@@ -32,6 +32,7 @@ class Ring3DRunnerTests(unittest.TestCase):
                 "logical_topology": "/tmp/topology.json",
                 "communicator_groups": "/tmp/groups.json",
                 "experiment_config": "/tmp/experiment.json",
+                "clr_mask": "/tmp/clr_mask.csv",
                 "telemetry_dir": "/tmp/telemetry",
             }
             with (
@@ -52,12 +53,14 @@ class Ring3DRunnerTests(unittest.TestCase):
             command = subprocess_run.call_args.args[0]
             self.assertIn("--ns3-rng-seed=9", command)
             self.assertIn("--ns3-rng-run=17", command)
+            self.assertIn("--clr-mask-configuration=/tmp/clr_mask.csv", command)
             self.assertEqual(subprocess_run.call_args.kwargs["timeout"], 960)
             self.assertEqual(returned["execution"], {
                 "dblp_selection_seed": 17,
                 "ns3_rng_seed": 9,
                 "ns3_rng_run": 17,
                 "simulation_timeout_seconds": 960,
+                "clr_mask": "/tmp/clr_mask.csv",
             })
             self.assertEqual(
                 json.loads((output / "execution.json").read_text(encoding="utf-8")),

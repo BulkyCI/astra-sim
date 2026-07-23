@@ -45,6 +45,7 @@ using json = nlohmann::json;
 class NS3BackendCompletionTracker {
   public:
     NS3BackendCompletionTracker(int num_ranks) {
+        num_ranks_ = num_ranks;
         num_unfinished_ranks_ = num_ranks;
         completion_tracker_ = vector<int>(num_ranks, 0);
     }
@@ -63,7 +64,44 @@ class NS3BackendCompletionTracker {
         }
     }
 
+    void start_liveness_checkpoints() {
+        Simulator::Schedule(kLivenessCheckpointInterval,
+                            &NS3BackendCompletionTracker::liveness_checkpoint,
+                            this);
+    }
+
+    bool is_complete() const {
+        return num_unfinished_ranks_ == 0 && active_qp_count() == 0 &&
+               !has_pending_background_traffic();
+    }
+
   private:
+    static constexpr uint64_t kLivenessCheckpointLimit = 10000;
+    static constexpr uint64_t kLivenessCheckpointIntervalNs = 10000000;
+    static const Time kLivenessCheckpointInterval;
+
+    void liveness_checkpoint() {
+        ++liveness_checkpoint_count_;
+        AstraSim::LoggerFactory::get_logger("network")->info(
+            "Liveness checkpoint: simulated_time_ns={} completed_qps={} "
+            "active_qps={} completed_ranks={}/{} pending_background_flows={}",
+            Simulator::Now().GetNanoSeconds(), completed_qp_count(),
+            active_qp_count(), num_ranks_ - num_unfinished_ranks_, num_ranks_,
+            pending_background_flows);
+        if (is_complete()) {
+            return;
+        }
+        if (liveness_checkpoint_count_ >= kLivenessCheckpointLimit) {
+            AstraSim::LoggerFactory::get_logger("network")->error(
+                "Liveness checkpoint limit reached before simulation completion");
+            Simulator::Stop();
+            return;
+        }
+        Simulator::Schedule(kLivenessCheckpointInterval,
+                            &NS3BackendCompletionTracker::liveness_checkpoint,
+                            this);
+    }
+
     void stop_when_ready() {
         if (num_unfinished_ranks_ != 0) {
             return;
@@ -77,9 +115,14 @@ class NS3BackendCompletionTracker {
         Simulator::Stop();
     }
 
+    int num_ranks_;
     int num_unfinished_ranks_;
     vector<int> completion_tracker_;
+    uint64_t liveness_checkpoint_count_ = 0;
 };
+
+const Time NS3BackendCompletionTracker::kLivenessCheckpointInterval =
+    NanoSeconds(NS3BackendCompletionTracker::kLivenessCheckpointIntervalNs);
 
 class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
   public:
@@ -228,6 +271,7 @@ string logical_topology_configuration;
 string logging_configuration = "empty";
 string experiment_configuration = "empty";
 string experiment_output_dir = "empty";
+string clr_mask_configuration = "empty";
 int num_queues_per_dim = 1;
 double comm_scale = 1;
 double injection_scale = 1;
@@ -294,6 +338,9 @@ void parse_args(int argc, char* argv[]) {
     cmd.AddValue("experiment-output-dir",
                  "Directory for experiment flow and completion telemetry",
                  experiment_output_dir);
+    cmd.AddValue("clr-mask-configuration",
+                 "CSV mapping training steps to static CLR states",
+                 clr_mask_configuration);
     cmd.AddValue("ns3-rng-seed", "Seed for ns-3 random streams", ns3_rng_seed);
     cmd.AddValue("ns3-rng-run", "Run number for ns-3 random streams", ns3_rng_run);
 
@@ -348,6 +395,7 @@ int main(int argc, char* argv[]) {
     try {
         AstraSimNs3::configure_experiment(experiment_configuration,
                                           experiment_output_dir);
+        AstraSimNs3::configure_clr_mask(clr_mask_configuration);
     } catch (const exception& error) {
         cerr << "Unable to configure experiment: " << error.what() << "\n";
         Simulator::Destroy();
@@ -358,10 +406,15 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < num_npus; i++) {
         systems[i]->workload->fire();
     }
+    completion_tracker->start_liveness_checkpoints();
 
     // Run the simulation by triggering the ns3 event queue.
     Simulator::Run();
     AstraSimNs3::finalize_experiment_telemetry();
     Simulator::Destroy();
+    if (!completion_tracker->is_complete()) {
+        cerr << "Simulation ended before all ranks, QPs, and background flows completed\n";
+        return 1;
+    }
     return 0;
 }

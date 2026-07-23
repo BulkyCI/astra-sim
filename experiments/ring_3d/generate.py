@@ -36,8 +36,22 @@ from chakra.src.third_party.utils.protolib import (  # noqa: E402
 )
 
 try:
+    from .generate_clr_schedule import (
+        ClrSchedule,
+        ClrScheduleParameters,
+        generate_clr_schedule,
+        schedule_metadata,
+        write_clr_mask,
+    )
     from .topology import PhysicalNetwork, build_topology, load_network
 except ImportError:
+    from generate_clr_schedule import (
+        ClrSchedule,
+        ClrScheduleParameters,
+        generate_clr_schedule,
+        schedule_metadata,
+        write_clr_mask,
+    )
     from topology import PhysicalNetwork, build_topology, load_network
 
 
@@ -242,8 +256,7 @@ def load_profile(profile_path: Path) -> Profile:
     name = document.get("name")
     if not isinstance(name, str) or not name:
         raise ValueError("name must be a nonempty string")
-    if document.get("steps") != 3:
-        raise ValueError("this experiment requires exactly three training steps")
+    steps = _require_positive_int(document.get("steps"), "steps")
     tp = _require_positive_int(parallelism["tp"], "parallelism.tp")
     pp = _require_positive_int(parallelism["pp"], "parallelism.pp")
     dp = _require_positive_int(parallelism["dp"], "parallelism.dp")
@@ -295,7 +308,7 @@ def load_profile(profile_path: Path) -> Profile:
         tp=tp,
         pp=pp,
         dp=dp,
-        steps=3,
+        steps=steps,
         compute_duration_us=_require_positive_int(
             document.get("compute_duration_us"), "compute_duration_us"
         ),
@@ -824,10 +837,14 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
 def _validated_drop_probabilities(
     probabilities: dict[str, float] | None,
 ) -> dict[str, float]:
-    result = dict(DEFAULT_DROP_PROBABILITY_BY_STEP if probabilities is None else probabilities)
-    if set(result) != set(DEFAULT_DROP_PROBABILITY_BY_STEP):
-        raise ValueError("drop probabilities must define exactly training steps 1, 2, and 3")
+    result = dict(
+        DEFAULT_DROP_PROBABILITY_BY_STEP if probabilities is None else probabilities
+    )
+    if not result:
+        raise ValueError("drop probabilities must not be empty")
     for step, probability in result.items():
+        if not isinstance(step, str) or not step.isdecimal() or int(step) <= 0:
+            raise ValueError("drop probability keys must be positive step identifiers")
         if isinstance(probability, bool) or not isinstance(probability, (int, float)):
             raise ValueError(f"drop probability for step {step} must be numeric")
         if not 0.0 <= probability <= 1.0:
@@ -835,19 +852,49 @@ def _validated_drop_probabilities(
     return {step: float(probability) for step, probability in result.items()}
 
 
+def _clr_tolerances(
+    drop_probabilities: dict[str, float] | None,
+) -> dict[str, float]:
+    """Map legacy per-step settings to strict CLR and relaxed stable tolerances."""
+    probabilities = _validated_drop_probabilities(drop_probabilities)
+    return {
+        "clr_drop_probability": min(probabilities.values()),
+        "stable_drop_probability": max(probabilities.values()),
+    }
+
+
+def _drop_probabilities_for_schedule(
+    schedule: ClrSchedule,
+    tolerances: dict[str, float],
+) -> dict[str, float]:
+    return {
+        step: (
+            tolerances["clr_drop_probability"]
+            if is_clr
+            else tolerances["stable_drop_probability"]
+        )
+        for step, is_clr in schedule.is_clr_by_step().items()
+    }
+
+
 def write_experiment_config(
     path: Path,
     profile: Profile,
+    clr_schedule: ClrSchedule,
     drop_probabilities: dict[str, float] | None = None,
 ) -> None:
     microburst_flows = _microburst_flows(profile)
+    tolerances = _clr_tolerances(drop_probabilities)
     policy = {
         "schema_version": 1,
         "enabled": True,
         "seed": profile.seed,
         "run_id": profile.name,
         "eligibility": "dp_all_reduce_only",
-        "drop_probability_by_step": _validated_drop_probabilities(drop_probabilities),
+        "drop_probability_by_step": _drop_probabilities_for_schedule(
+            clr_schedule, tolerances
+        ),
+        "clr_tolerances": tolerances,
         "default_priority_group": 3,
         "provenance": {"control_bytes": 64, "priority_group": 1},
         "vnet_to_priority_group": {"0": 3},
@@ -924,6 +971,7 @@ def materialize(
     *,
     seed_override: int | None = None,
     drop_probabilities: dict[str, float] | None = None,
+    clr_schedule_parameters: ClrScheduleParameters | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
     if seed_override is not None:
@@ -933,6 +981,13 @@ def materialize(
     output_dir.mkdir(parents=True, exist_ok=True)
     profile_config = output_dir / "profile.json"
     shutil.copyfile(profile_path, profile_config)
+    clr_mask = output_dir / "clr_mask.csv"
+    clr_schedule = generate_clr_schedule(
+        profile.steps,
+        profile.seed,
+        clr_schedule_parameters or ClrScheduleParameters(),
+    )
+    write_clr_mask(clr_mask, clr_schedule)
 
     groups, tp_groups, pp_groups, dp_groups = generate_groups(profile)
     workload_dir = output_dir / "workload"
@@ -958,7 +1013,9 @@ def materialize(
         profile.network.queue_monitor_start_ns,
     )
     experiment_config = output_dir / "experiment.json"
-    write_experiment_config(experiment_config, profile, drop_probabilities)
+    write_experiment_config(
+        experiment_config, profile, clr_schedule, drop_probabilities
+    )
     system_config = output_dir / "system.json"
     write_system_config(system_config)
     (output_dir / "communicator_groups.json").write_text(
@@ -992,6 +1049,8 @@ def materialize(
         "communicator_groups": str((output_dir / "communicator_groups.json").resolve()),
         "logical_topology": str((output_dir / "logical_topology.json").resolve()),
         "experiment_config": str(experiment_config.resolve()),
+        "clr_mask": str(clr_mask.resolve()),
+        "clr_schedule": schedule_metadata(clr_schedule),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
     }
     if model_metadata is not None:
@@ -1008,12 +1067,45 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
     parser.add_argument("--seed", type=int, help="override the profile seed")
+    parser.add_argument(
+        "--clr-decay-rate",
+        type=float,
+        help="exponential CLR probability decay rate",
+    )
+    parser.add_argument(
+        "--clr-epoch-steps",
+        type=int,
+        help="steps between Gaussian CLR epoch-boundary spikes",
+    )
+    parser.add_argument(
+        "--clr-spike-stddev-steps",
+        type=float,
+        help="Gaussian CLR epoch-boundary spike width in steps",
+    )
+    parser.add_argument(
+        "--clr-spike-amplitude",
+        type=float,
+        help="Gaussian CLR epoch-boundary spike amplitude",
+    )
     arguments = parser.parse_args()
+    clr_schedule_parameters = ClrScheduleParameters(
+        **{
+            field: value
+            for field, value in {
+                "decay_rate": arguments.clr_decay_rate,
+                "epoch_steps": arguments.clr_epoch_steps,
+                "spike_stddev_steps": arguments.clr_spike_stddev_steps,
+                "spike_amplitude": arguments.clr_spike_amplitude,
+            }.items()
+            if value is not None
+        }
+    )
     manifest = materialize(
         arguments.profile.resolve(),
         arguments.output.resolve(),
         arguments.clean,
         seed_override=arguments.seed,
+        clr_schedule_parameters=clr_schedule_parameters,
     )
     print(json.dumps(manifest, indent=2))
     return 0

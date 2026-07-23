@@ -8,7 +8,7 @@ PROJ_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ## Install System Dependencies
 sudo apt-get update
 sudo apt-get install --yes --no-install-recommends \
-    coreutils wget vim git \
+    coreutils wget vim git ccache \
     gcc-11 g++-11 make cmake ninja-build \
     clang-format \
     libboost-dev libboost-program-options-dev \

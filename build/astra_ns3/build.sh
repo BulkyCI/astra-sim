@@ -15,7 +15,14 @@ function setup {
 }
 function compile {
     cd "${NS3_DIR}"
-    ./ns3 configure --enable-mpi
+    local configure_args=(--enable-mpi)
+    # CI supplies a launcher through CMake's standard environment variable.
+    # Bypass ns-3's own integration there: it weakens ccache correctness by
+    # enabling sloppiness for timestamps and include-file metadata.
+    if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
+        configure_args+=(-- -DNS3_CCACHE=OFF)
+    fi
+    ./ns3 configure "${configure_args[@]}"
     ./ns3 build AstraSimNetwork -j $(nproc)
     cd "${SCRIPT_DIR:?}"
 }

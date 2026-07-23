@@ -25,9 +25,10 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v9.0.0
       with:
         version: "0.11.28"
         enable-cache: true
@@ -48,24 +49,75 @@ jobs:
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
 
     steps:
     - name: Check out source and submodules
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v9.0.0
       with:
         version: "0.11.28"
         enable-cache: true
 
+    - name: Restore trusted compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+        restore-keys: |
+          astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-
+
+    - name: Set compiler-cache paths
+      run: |
+        echo "CCACHE_DIR=$RUNNER_TEMP/astra-sim-ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/astra-sim-ccache-config/ccache.conf" >> "$GITHUB_ENV"
+
     - name: Install native build dependencies
       run: ./.github/workflows/setup.sh
 
+    - name: Configure compiler cache
+      run: |
+        install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
+        : > "$CCACHE_CONFIGPATH"
+        chmod 600 "$CCACHE_CONFIGPATH"
+        ccache --set-config=cache_dir="$CCACHE_DIR"
+        ccache --set-config=compiler_check=content
+        ccache --set-config=compression=true
+        ccache --set-config=max_size=1G
+        ccache --set-config=sloppiness=
+        ccache --zero-stats
+        ccache --show-config
+
     - name: Build analytical and ns-3 backends
       run: bash ./.github/workflows/build.sh
+
+    # Only branch pushes can publish cache entries. Pull-request code can read
+    # trusted entries but never writes one that a protected branch can consume.
+    - name: Save compiler cache from trusted pushes
+      if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+
+    - name: Report compiler-cache statistics
+      if: always()
+      run: |
+        ccache --show-stats
+        {
+          echo '### Compiler cache'
+          echo '```text'
+          ccache --show-stats
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Run analytical regression suite
       run: bash ./.github/workflows/test.sh
@@ -117,24 +169,75 @@ jobs:
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 180
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
 
     steps:
     - name: Check out source and submodules
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v9.0.0
       with:
         version: "0.11.28"
         enable-cache: true
 
+    - name: Restore trusted compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+        restore-keys: |
+          astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-
+
+    - name: Set compiler-cache paths
+      run: |
+        echo "CCACHE_DIR=$RUNNER_TEMP/astra-sim-ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/astra-sim-ccache-config/ccache.conf" >> "$GITHUB_ENV"
+
     - name: Install native build dependencies
       run: ./.github/workflows/setup.sh
 
+    - name: Configure compiler cache
+      run: |
+        install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
+        : > "$CCACHE_CONFIGPATH"
+        chmod 600 "$CCACHE_CONFIGPATH"
+        ccache --set-config=cache_dir="$CCACHE_DIR"
+        ccache --set-config=compiler_check=content
+        ccache --set-config=compression=true
+        ccache --set-config=max_size=1G
+        ccache --set-config=sloppiness=
+        ccache --zero-stats
+        ccache --show-config
+
     - name: Build analytical and ns-3 backends
       run: bash ./.github/workflows/build.sh
+
+    # Only branch pushes can publish cache entries. Pull-request code can read
+    # trusted entries but never writes one that a protected branch can consume.
+    - name: Save compiler cache from trusted pushes
+      if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+
+    - name: Report compiler-cache statistics
+      if: always()
+      run: |
+        ccache --show-stats
+        {
+          echo '### Compiler cache'
+          echo '```text'
+          ccache --show-stats
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Run five-seed paired incast comparison
       run: |

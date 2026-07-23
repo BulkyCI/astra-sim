@@ -65,6 +65,10 @@ def _format_optional_duration_ns(value: Any) -> str:
     return _format_duration_ns(value) if isinstance(value, int) else "not available"
 
 
+def _format_optional_bytes(value: Any) -> str:
+    return _format_bytes(value) if isinstance(value, int) else "unknown"
+
+
 def _format_probability(value: Any) -> str:
     try:
         return f"{float(value) * 100:.2f}%"
@@ -141,6 +145,113 @@ def _display_path(path: Path) -> str:
         return path.as_posix()
 
 
+def _physical_network_rows(
+    network: Any, physical_topology: Any
+) -> list[list[Any]]:
+    """Return a stable physical-network table from materialized metadata."""
+    rows: list[list[Any]] = []
+    if isinstance(physical_topology, dict):
+        get = physical_topology.get
+        rows.extend(
+            [
+                ["Topology", get("description", "unknown")],
+                ["Accelerator cards / hosts", get("host_count", "unknown")],
+                ["Modeled nodes", get("node_count", "unknown")],
+                ["Switches", get("switch_count", "unknown")],
+                ["Bidirectional physical links", get("link_count", "unknown")],
+                ["Link rate", get("link_rate", "unknown")],
+            ]
+        )
+        if get("kind") == "clos":
+            rows.extend(
+                [
+                    ["Leaf switches", get("leaf_count", "unknown")],
+                    ["Spine switches", get("spine_count", "unknown")],
+                    ["Hosts per leaf", get("hosts_per_leaf", "unknown")],
+                ]
+            )
+        elif get("kind") == "ring":
+            rows.append(["Switch-ring size", get("switch_ring_size", "unknown")])
+    elif isinstance(network, dict):
+        rows.extend(
+            [
+                ["Topology", network.get("topology", "clos (legacy profile)")],
+                ["Link rate", network.get("link_rate", "unknown")],
+            ]
+        )
+    if isinstance(network, dict):
+        packet_payload = _format_optional_bytes(network.get("packet_payload_bytes"))
+        monitor_start = f"{network.get('queue_monitor_start_ns', 0)} ns"
+        rows.extend(
+            [
+                ["RDMA packet payload", packet_payload],
+                ["Queue telemetry start", monitor_start],
+            ]
+        )
+    return rows
+
+
+def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
+    """Render the generated model ledger rather than inferring traffic from labels."""
+    if not isinstance(model_trace, dict):
+        return []
+    get = model_trace.get
+    rows = [
+        ["Trace representation", get("workload_kind", "unknown")],
+        ["Reference parameter count", get("parameter_count", "unknown")],
+        ["Parameter dtype", f"{get('parameter_dtype_bytes', 'unknown')} B"],
+        [
+            "Total gradient bytes per DP replica",
+            _format_optional_bytes(get("total_gradient_bytes_per_data_parallel_replica")),
+        ],
+        [
+            "Gradient bytes per rank",
+            _format_optional_bytes(get("gradient_bytes_per_rank")),
+        ],
+        ["Gradient bucket count", get("gradient_bucket_count", "unknown")],
+    ]
+    if "gradient_bucket_bytes" in model_trace:
+        rows.append(
+            ["Gradient bucket payload", _format_optional_bytes(get("gradient_bucket_bytes"))]
+        )
+    if "simulated_gradient_bucket_bytes" in model_trace:
+        rows.append(
+            [
+                "Simulated representative bucket payload",
+                _format_optional_bytes(get("simulated_gradient_bucket_bytes")),
+            ]
+        )
+    for label, field in [
+        ("Transformer layers", "transformer_layers"),
+        ("Layers per pipeline stage", "transformer_layers_per_pipeline_stage"),
+        ("Pipeline microbatches", "pipeline_microbatches"),
+        ("TP All-Reduces per layer", "tensor_parallel_all_reduces_per_layer"),
+    ]:
+        if field in model_trace:
+            rows.append([label, model_trace[field]])
+    return rows
+
+
+def _execution_rows(execution: Any) -> list[list[Any]]:
+    if not isinstance(execution, dict):
+        return []
+    timeout = execution.get("simulation_timeout_seconds")
+    timeout_text = (
+        f"{timeout} seconds ({timeout / 60:.1f} minutes)"
+        if isinstance(timeout, int)
+        else "not set"
+    )
+    return [
+        ["DBLP selection seed", execution.get("dblp_selection_seed", "unknown")],
+        [
+            "ns-3 RNG seed / run",
+            f"{execution.get('ns3_rng_seed', 'unknown')} / "
+            f"{execution.get('ns3_rng_run', 'unknown')}",
+        ],
+        ["Simulator wall-clock cap", timeout_text],
+    ]
+
+
 def render_report(run_dir: Path, profile_path: Path) -> str:
     """Return a self-contained Markdown report for an experiment directory."""
     profile = _read_json(profile_path)
@@ -157,6 +268,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         raise ValueError("profile parallelism requires tp, pp, and dp") from error
     expected_ranks = tp * pp * dp
 
+    manifest = _read_json(run_dir / "manifest.json")
+    model_trace = _read_json(run_dir / "model_trace.json")
+    execution = _read_json(run_dir / "execution.json")
     policy = _read_json(run_dir / "experiment.json")
     summary = _read_json(run_dir / "summary.json")
     flows = _read_csv(run_dir / "telemetry" / "flow_events.csv")
@@ -164,9 +278,10 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
 
     profile_name = profile.get("name", profile_path.stem)
     lines = [
-        "# 3D Ring ns-3 researcher report",
+        "# 3D Ring collective / ns-3 researcher report",
         "",
-        "> This report distinguishes logical modeled bytes (collective and background operations) "
+        "> The 3D Ring label identifies the logical collective workload; the physical fabric is "
+        "reported below. This report distinguishes logical modeled bytes (collective and background operations) "
         "from physical transport bytes. A shed payload is modeled by protected provenance control, "
         "not literal packet loss.",
         "",
@@ -191,14 +306,20 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     )
 
     network = profile.get("network")
-    if isinstance(network, dict):
+    physical_topology = (
+        manifest.get("physical_topology") if isinstance(manifest, dict) else None
+    )
+    if (network_rows := _physical_network_rows(network, physical_topology)):
         lines.extend(["", "## Physical network", ""])
-        lines.extend(
-            _markdown_table(
-                ["Hosts per leaf", "Spines", "Link rate"],
-                [[network.get("hosts_per_leaf", "unknown"), network.get("spine_count", "unknown"), network.get("link_rate", "unknown")]],
-            )
-        )
+        lines.extend(_markdown_table(["Field", "Value"], network_rows))
+
+    if (model_rows := _model_trace_rows(model_trace)):
+        lines.extend(["", "## Materialized model workload", ""])
+        lines.extend(_markdown_table(["Field", "Value"], model_rows))
+
+    if (execution_rows := _execution_rows(execution)):
+        lines.extend(["", "## Execution controls", ""])
+        lines.extend(_markdown_table(["Field", "Value"], execution_rows))
 
     lines.extend(["", "## Admission policy", ""])
     if policy is None:
@@ -602,6 +723,8 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
 
     lines.extend(["", "## Reproducibility", ""])
     lines.append(f"- Profile source: `{_display_path(profile_path)}`")
+    if (run_profile := run_dir / "profile.json").is_file():
+        lines.append(f"- Materialized profile copy: `{_display_path(run_profile)}`")
     lines.append(f"- Generated run directory: `{_display_path(run_dir)}`")
     if (revision := os.environ.get("GITHUB_SHA")):
         lines.append(f"- Source revision: `{revision}`")

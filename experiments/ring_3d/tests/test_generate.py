@@ -18,6 +18,7 @@ from experiments.ring_3d.generate import (
     materialize,
     rank_for,
 )
+from experiments.ring_3d.topology import build_topology
 from chakra.schema.protobuf.et_def_pb2 import GlobalMetadata, Node
 from chakra.src.third_party.utils.protolib import decodeMessage
 
@@ -60,12 +61,17 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(len(topology_lines), edge_count + 2)
             self.assertEqual((output / "ns3/flow.txt").read_text(encoding="utf-8"), "0\n")
             self.assertEqual((output / "ns3/trace.txt").read_text(encoding="utf-8"), "0\n")
+            self.assertEqual(
+                json.loads((output / "profile.json").read_text(encoding="utf-8")),
+                json.loads(self.profile_path.read_text(encoding="utf-8")),
+            )
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")
             self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.1})
             self.assertEqual(policy["provenance"]["priority_group"], 1)
             self.assertEqual(manifest["ranks"], 8)
+            self.assertEqual(Path(manifest["profile_config"]), output / "profile.json")
 
     def test_llama3_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
@@ -172,6 +178,115 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 {1: 1_073_741_824, 2: 1_073_741_824, 3: 1_073_741_824},
             )
             self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1, 3: 1})
+
+    def test_100b_profiles_materialize_clos_and_switch_ring(self) -> None:
+        expected_topologies = {
+            "model_100b_256_clos.json": {
+                "kind": "clos",
+                "header": (288, 32, 512),
+                "description": "Two-stage leaf-spine Clos",
+            },
+            "model_100b_256_ring.json": {
+                "kind": "ring",
+                "header": (512, 256, 512),
+                "description": "Host-attached bidirectional switch ring",
+            },
+        }
+        for profile_name, expected in expected_topologies.items():
+            with self.subTest(profile=profile_name):
+                profile_path = (
+                    REPOSITORY_ROOT / "experiments/ring_3d/profiles" / profile_name
+                )
+                profile = load_profile(profile_path)
+                layout = build_topology(profile.network, profile.ranks)
+                self.assertEqual(profile.ranks, 256)
+                self.assertEqual(layout.kind, expected["kind"])
+                self.assertEqual(
+                    (layout.node_count, len(layout.switch_ids), len(layout.links)),
+                    expected["header"],
+                )
+                if expected["kind"] == "ring":
+                    self.assertEqual(layout.links[0].source, 0)
+                    self.assertEqual(layout.links[0].destination, 256)
+                    self.assertEqual(layout.links[255].source, 255)
+                    self.assertEqual(layout.links[255].destination, 511)
+                    self.assertEqual(layout.links[256].source, 256)
+                    self.assertEqual(layout.links[256].destination, 257)
+                    self.assertEqual(layout.links[-1].source, 511)
+                    self.assertEqual(layout.links[-1].destination, 256)
+
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    output = Path(temporary_directory) / "experiment"
+                    manifest = materialize(profile_path, output)
+                    topology_lines = (output / "topology.txt").read_text(
+                        encoding="utf-8"
+                    ).splitlines()
+                    self.assertEqual(
+                        tuple(map(int, topology_lines[0].split())), expected["header"]
+                    )
+                    self.assertEqual(len(topology_lines), expected["header"][2] + 2)
+                    self.assertEqual(
+                        manifest["physical_topology"]["kind"], expected["kind"]
+                    )
+                    self.assertEqual(
+                        manifest["physical_topology"]["description"],
+                        expected["description"],
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["parameter_count"], 100_000_000_000
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["gradient_bytes_per_rank"],
+                        6_250_000_000,
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["gradient_bucket_count"], 20
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["gradient_bucket_bytes"], 312_500_000
+                    )
+                    self.assertEqual(
+                        len(list((output / "workload").glob("ring_3d.*.et"))), 256
+                    )
+                    dp_bucket_count: dict[int, int] = {}
+                    dp_bytes: dict[int, int] = {}
+                    with (output / "workload/ring_3d.0.et").open("rb") as trace:
+                        metadata = GlobalMetadata()
+                        self.assertTrue(decodeMessage(trace, metadata))
+                        while True:
+                            node = Node()
+                            if not decodeMessage(trace, node):
+                                break
+                            attributes = {
+                                attribute.name: attribute for attribute in node.attr
+                            }
+                            if attributes.get("parallelism_domain") and (
+                                attributes["parallelism_domain"].string_val == "dp"
+                            ):
+                                step = attributes["training_step"].uint64_val
+                                dp_bucket_count[step] = (
+                                    dp_bucket_count.get(step, 0) + 1
+                                )
+                                dp_bytes[step] = dp_bytes.get(step, 0) + attributes[
+                                    "comm_size"
+                                ].uint64_val
+                    self.assertEqual(dp_bucket_count, {1: 20, 2: 20, 3: 20})
+                    self.assertEqual(
+                        dp_bytes,
+                        {1: 6_250_000_000, 2: 6_250_000_000, 3: 6_250_000_000},
+                    )
+
+    def test_ring_network_rejects_clos_only_fields(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/model_100b_256_ring.json"
+        )
+        document = json.loads(profile_path.read_text(encoding="utf-8"))
+        document["network"]["spine_count"] = 16
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            invalid_profile = Path(temporary_directory) / "invalid.json"
+            invalid_profile.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unknown network keys"):
+                load_profile(invalid_profile)
 
     def test_trace_has_explicit_domains_and_overlap_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

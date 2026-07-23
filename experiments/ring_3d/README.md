@@ -6,13 +6,15 @@ $$
 rank=((dp\_rank\cdot PP)+pp\_rank)\cdot TP+tp\_rank.
 $$
 
-The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a physical Clos topology, native-Ring system configuration, and the ns-3 experiment policy. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
+The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator groups, a typed physical topology, native-Ring collective configuration, and the ns-3 experiment policy. The logical Ring collective and physical network are independent: a profile chooses either a two-stage Clos or a host-attached switch ring. The latter attaches every accelerator host to a dedicated switch and connects the switches in a bidirectional ring, preserving ns-3 switch queue and PFC observability. Workload modes make their trace shape explicit: the smoke profile uses two backward buckets with an overlap dependency, the structural mode expands transformer layers, and the Llama 3 70B-class mode models one representative DP gradient bucket per step.
 
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
 - [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
 - [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a packet-accurate Llama 3 70B-class gradient-bucket stress workload with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, and a 400 Gb/s two-leaf Clos.
+- [profiles/model_100b_256_clos.json](profiles/model_100b_256_clos.json): a 100B-parameter structural workload on 256 accelerator cards and a 16-leaf × 16-spine Clos.
+- [profiles/model_100b_256_ring.json](profiles/model_100b_256_ring.json): the same 100B structural workload and communication schedule on a 256-switch host-attached physical ring.
 
 ## Generate and run
 
@@ -72,11 +74,19 @@ The physical-budget calculation uses the configured 4 KiB RoCE payload, not a fi
 
 This is a **70B-class bucket microbenchmark**, not an exact Llama, Megatron, DeepSpeed, or PyTorch replay and not a claim to simulate a complete 140 GB gradient synchronization per step. It deliberately isolates an industry-relevant 1 GiB communication spike. The CI gate requires observed queueing and PFC recovery before the paired results can be interpreted as congested-network evidence.
 
+## 100B 256-card structural topology studies
+
+The two 100B profiles retain the supplied large-model shape: $TP=8$, $PP=4$, and $DP=8$, for 256 accelerator cards; 80 transformer layers; eight pipeline microbatches; and two TP All-Reduces per layer. The reference model has 100 billion FP16 parameters, so a data-parallel replica contains 200 GB of gradients. Each rank owns a 6.25 GB decimal TP×PP gradient shard and emits 20 exact 312.5 MB decimal DP buckets per step. The activation-derived TP All-Reduce and PP message payloads are both $1\times2048\times12288\times2=50{,}331{,}648$ bytes. Both profiles use 4 KiB RDMA payloads and retain the supplied seven-source 50 MB step-2 incast.
+
+The Clos layout contains 256 hosts, 16 leaf switches, 16 spine switches, and 512 bidirectional physical links. The physical-ring layout contains the same 256 hosts plus 256 attached switches and 512 bidirectional physical links: 256 host-to-switch links and 256 switch-ring links. It is not a direct host-only ring, because the bundled ns-3 backend models queueing and PFC at switches. In both cases the ASTRA-sim collective implementation remains Ring, making the reports explicit about the distinction between collective algorithm and physical fabric.
+
+After `python-quality` passes, CI starts these two structural studies concurrently with the native smoke/regression job and the Llama 3 70B paired study. Each 100B job has GitHub Actions' six-hour ceiling, a 330-minute command guard, and a 300-minute per-simulator cap. They are single policy runs, not baseline/policy comparisons: their Markdown reports present topology geometry, model-trace ledger, execution budget, logical collective metrics, transport diagnostics, traffic accounting, and congestion telemetry without claiming a causal DBLP benefit.
+
 ## Researcher-facing CI results
 
-The native CI job publishes a Markdown report in its GitHub Actions job summary and uploads it as the standalone `ring-3d-research-report-<run-id>` artifact. It also retains the report in the `ring-3d-smoke-results-<run-id>` reproducibility bundle, alongside generated ET traces, topology, communicator groups, system and experiment policy JSON, raw ns-3 outputs, telemetry CSV files, and `summary.json`.
+The native CI job and each structural-topology job publish a Markdown report in their GitHub Actions job summary and retain it in their reproducibility artifact. Every bundle includes the exact source `profile.json`, ET traces, topology, topology manifest, communicator groups, system and experiment policy JSON, execution controls, raw ns-3 outputs, telemetry CSV files, and `summary.json` when the simulator completes.
 
-The report records the TP/PP/DP shape, workload and network parameters, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, native logical-collective latency, per-QP FCT diagnostics, simulated makespan distribution, and queue/PFC pause observations. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
+The report records the TP/PP/DP shape, materialized model ledger, physical network geometry, execution controls, configured and observed DP-only admission-suppression rates, completion coverage, logical-versus-physical byte accounting, native logical-collective latency, per-QP FCT diagnostics, simulated makespan distribution, and queue/PFC pause observations. It explicitly labels provenance control as the safe logical suppression model rather than literal packet loss.
 
 Generate the same standalone Markdown record for any completed run with:
 

@@ -35,6 +35,11 @@ from chakra.src.third_party.utils.protolib import (  # noqa: E402
     encodeMessage,
 )
 
+try:
+    from .topology import PhysicalNetwork, build_topology, load_network
+except ImportError:
+    from topology import PhysicalNetwork, build_topology, load_network
+
 
 REQUIRED_PROFILE_KEYS = {
     "schema_version",
@@ -58,12 +63,6 @@ OPTIONAL_PROFILE_KEYS = {
     "model",
 }
 EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
-REQUIRED_NETWORK_KEYS = {"hosts_per_leaf", "spine_count", "link_rate"}
-OPTIONAL_NETWORK_KEYS = {
-    "packet_payload_bytes",
-    "queue_monitor_start_ns",
-}
-EXPECTED_NETWORK_KEYS = REQUIRED_NETWORK_KEYS | OPTIONAL_NETWORK_KEYS
 EXPECTED_MODEL_TRACE_KEYS = {
     "parameter_count",
     "parameter_dtype_bytes",
@@ -121,11 +120,7 @@ class Profile:
     pp_bytes: int
     dp_all_reduce_bytes: int
     seed: int
-    hosts_per_leaf: int
-    spine_count: int
-    link_rate: str
-    packet_payload_bytes: int
-    queue_monitor_start_ns: int
+    network: PhysicalNetwork
     microburst_bytes: int
     microburst_flow_count: int
     microburst_destination_rank: int | None
@@ -244,28 +239,16 @@ def load_profile(profile_path: Path) -> Profile:
     parallelism = document.get("parallelism")
     if not isinstance(parallelism, dict) or set(parallelism) != {"tp", "pp", "dp"}:
         raise ValueError("parallelism must contain exactly tp, pp, and dp")
-    network = document.get("network")
-    if not isinstance(network, dict) or not REQUIRED_NETWORK_KEYS <= set(network) or set(
-        network
-    ) - EXPECTED_NETWORK_KEYS:
-        raise ValueError(
-            "network must contain hosts_per_leaf, spine_count, and link_rate, "
-            "with optional packet_payload_bytes and queue_monitor_start_ns"
-        )
-
     name = document.get("name")
     if not isinstance(name, str) or not name:
         raise ValueError("name must be a nonempty string")
     if document.get("steps") != 3:
         raise ValueError("this experiment requires exactly three training steps")
-    link_rate = network.get("link_rate")
-    if not isinstance(link_rate, str) or not link_rate.endswith("Gbps"):
-        raise ValueError("network.link_rate must be a rate such as 200Gbps")
-
     tp = _require_positive_int(parallelism["tp"], "parallelism.tp")
     pp = _require_positive_int(parallelism["pp"], "parallelism.pp")
     dp = _require_positive_int(parallelism["dp"], "parallelism.dp")
     ranks = tp * pp * dp
+    network = load_network(document.get("network"), ranks)
     microburst_flow_count = _require_positive_int(
         document.get("microburst_flow_count", min(2, ranks // 2)),
         "microburst_flow_count",
@@ -324,19 +307,7 @@ def load_profile(profile_path: Path) -> Profile:
             document.get("dp_all_reduce_bytes"), "dp_all_reduce_bytes"
         ),
         seed=_require_positive_int(document.get("seed"), "seed"),
-        hosts_per_leaf=_require_positive_int(
-            network["hosts_per_leaf"], "network.hosts_per_leaf"
-        ),
-        spine_count=_require_positive_int(network["spine_count"], "network.spine_count"),
-        link_rate=link_rate,
-        packet_payload_bytes=_require_positive_int(
-            network.get("packet_payload_bytes", 1_000),
-            "network.packet_payload_bytes",
-        ),
-        queue_monitor_start_ns=_require_nonnegative_int(
-            network.get("queue_monitor_start_ns", 0),
-            "network.queue_monitor_start_ns",
-        ),
+        network=network,
         microburst_bytes=_require_positive_int(
             document.get("microburst_bytes"), "microburst_bytes"
         ),
@@ -350,12 +321,6 @@ def load_profile(profile_path: Path) -> Profile:
         microburst_enabled=microburst_enabled,
         model=model,
     )
-    if profile.ranks % profile.hosts_per_leaf:
-        raise ValueError("parallelism product must be divisible by network.hosts_per_leaf")
-    if profile.spine_count > 255:
-        raise ValueError("network.spine_count must not exceed 255")
-    if profile.packet_payload_bytes > 9_000:
-        raise ValueError("network.packet_payload_bytes must not exceed 9000")
     if profile.pp > 1 and profile.pp_bytes == 0:
         raise ValueError("pp_bytes must be positive when PP is greater than one")
     if isinstance(profile.model, ModelTrace):
@@ -771,26 +736,6 @@ class TraceWriter:
                 encodeMessage(trace, node)
 
 
-def write_clos_topology(path: Path, profile: Profile) -> None:
-    """Write a two-stage Clos topology accepted by the bundled ns-3 parser."""
-    leaf_count = profile.ranks // profile.hosts_per_leaf
-    switch_count = leaf_count + profile.spine_count
-    node_count = profile.ranks + switch_count
-    edge_count = profile.ranks + leaf_count * profile.spine_count
-    leaf_start = profile.ranks
-    spine_start = leaf_start + leaf_count
-
-    with path.open("w", encoding="utf-8") as topology:
-        topology.write(f"{node_count} {switch_count} {edge_count}\n")
-        topology.write(" ".join(str(switch) for switch in range(leaf_start, node_count)) + " \n")
-        for host in range(profile.ranks):
-            leaf = leaf_start + host // profile.hosts_per_leaf
-            topology.write(f"{host} {leaf} {profile.link_rate} 0.005ms 0\n")
-        for leaf in range(leaf_start, spine_start):
-            for spine in range(spine_start, node_count):
-                topology.write(f"{leaf} {spine} {profile.link_rate} 0.0125ms 0\n")
-
-
 def write_network_config(
     path: Path,
     topology: Path,
@@ -952,8 +897,8 @@ def model_trace_metadata(profile: Profile) -> dict[str, int | float | str] | Non
             "gradient_bytes_per_rank": total_gradient_bytes // (profile.tp * profile.pp),
             "simulated_gradient_bucket_bytes": profile.dp_all_reduce_bytes,
             "simulated_gradient_buckets_per_step": 1,
-            "packet_payload_bytes": profile.packet_payload_bytes,
-            "queue_monitor_start_ns": profile.queue_monitor_start_ns,
+            "packet_payload_bytes": profile.network.packet_payload_bytes,
+            "queue_monitor_start_ns": profile.network.queue_monitor_start_ns,
         }
     gradient_bytes_per_rank = total_gradient_bytes // (profile.tp * profile.pp)
     return {
@@ -979,13 +924,15 @@ def materialize(
     *,
     seed_override: int | None = None,
     drop_probabilities: dict[str, float] | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     profile = load_profile(profile_path)
     if seed_override is not None:
         profile = replace(profile, seed=_require_positive_int(seed_override, "seed_override"))
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    profile_config = output_dir / "profile.json"
+    shutil.copyfile(profile_path, profile_config)
 
     groups, tp_groups, pp_groups, dp_groups = generate_groups(profile)
     workload_dir = output_dir / "workload"
@@ -1000,14 +947,15 @@ def materialize(
         writer.write()
 
     topology = output_dir / "topology.txt"
-    write_clos_topology(topology, profile)
+    physical_topology = build_topology(profile.network, profile.ranks)
+    physical_topology.write(topology)
     network_config = output_dir / "network_config.txt"
     write_network_config(
         network_config,
         topology.resolve(),
         output_dir / "ns3",
-        profile.packet_payload_bytes,
-        profile.queue_monitor_start_ns,
+        profile.network.packet_payload_bytes,
+        profile.network.queue_monitor_start_ns,
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(experiment_config, profile, drop_probabilities)
@@ -1035,6 +983,8 @@ def materialize(
         "seed": profile.seed,
         "ranks": profile.ranks,
         "parallelism": {"tp": profile.tp, "pp": profile.pp, "dp": profile.dp},
+        "physical_topology": physical_topology.manifest(),
+        "profile_config": str(profile_config.resolve()),
         "workload_prefix": str((workload_dir / "ring_3d").resolve()),
         "system_config": str(system_config.resolve()),
         "network_config": str(network_config.resolve()),

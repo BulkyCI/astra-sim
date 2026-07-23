@@ -4,7 +4,7 @@ This protocol determines whether the DBLP provenance policy has an empirically s
 
 ## Scope and claim boundary
 
-The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte protected provenance-control QP; it is not a packet drop. The Llama 3 70B-class condition is a single-gradient-bucket microbenchmark, not an exact framework replay, hardware measurement, or a full-model synchronization result.
+The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte protected provenance-control QP; it is not a packet drop. The Llama 3 70B-class condition is a single-gradient-bucket microbenchmark, not an exact framework replay, hardware measurement, or a full-model synchronization result. The 100B 256-card topology studies are structural transformer workloads on two physical fabrics; they are descriptive single-policy runs and do not establish a DBLP effect without a matched baseline.
 
 ## Pre-registered primary estimands
 
@@ -41,6 +41,8 @@ The always-on CI Llama condition uses GitHub Actions' six-hour job limit, bounds
 | Negative control | `profiles/no_incast_8.json`, policy 0% versus policy | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
 | Congested baseline | `profiles/llama3_70b_16.json`, 0% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
 | Congested policy | `profiles/llama3_70b_16.json`, the predeclared 10% selection in steps 2 and 3 | Measure DBLP under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
+| 100B Clos topology study | `profiles/model_100b_256_clos.json`, one 256-card structural policy run | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
+| 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, one 256-card structural policy run | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |
 | Incast-load scale | 0, 2, 4, and 7 simultaneous sources; fixed 128 MiB source payload | Identify onset and severity of congestion | Report queue/PFC and primary outcomes at every point, including controls with no PFC. |
 

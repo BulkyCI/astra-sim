@@ -13,6 +13,7 @@
   "dp_all_reduce_bytes": 1073741824,
   "seed": 20260317,
   "network": {
+    "topology": "clos",
     "hosts_per_leaf": 8,
     "spine_count": 4,
     "link_rate": "400Gbps",

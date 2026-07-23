@@ -1,0 +1,168 @@
+name: Reusable ns-3 evaluation
+
+on:
+  workflow_call:
+    inputs:
+      evaluation_name:
+        description: Human-readable evaluation name.
+        required: true
+        type: string
+      profile:
+        description: Repository-relative experiment profile.
+        required: true
+        type: string
+      run_directory:
+        description: Repository-relative directory for all generated inputs and results.
+        required: true
+        type: string
+      artifact_name:
+        description: Artifact prefix; the workflow appends the GitHub run ID.
+        required: true
+        type: string
+      comparison:
+        description: Run the five-seed matched comparison instead of one structural experiment.
+        required: true
+        type: boolean
+      execution_timeout_minutes:
+        description: Wall-clock guard for the run or comparison command.
+        required: true
+        type: number
+      simulation_timeout_seconds:
+        description: Wall-clock cap for each ns-3 simulator process.
+        required: true
+        type: number
+      require_congestion:
+        description: Fail a paired evaluation without raw queue, PFC, and background-traffic evidence.
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: ${{ inputs.evaluation_name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      EXPERIMENT_PROFILE: ${{ inputs.profile }}
+      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        persist-credentials: false
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v9.0.0
+      with:
+        version: "0.11.28"
+        enable-cache: true
+
+    - name: Restore trusted compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+        restore-keys: |
+          astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-
+
+    - name: Set compiler-cache paths
+      run: |
+        echo "CCACHE_DIR=$RUNNER_TEMP/astra-sim-ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/astra-sim-ccache-config/ccache.conf" >> "$GITHUB_ENV"
+
+    - name: Install native build dependencies
+      run: ./.github/workflows/setup.sh
+
+    - name: Configure compiler cache
+      run: |
+        install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
+        : > "$CCACHE_CONFIGPATH"
+        chmod 600 "$CCACHE_CONFIGPATH"
+        ccache --set-config=cache_dir="$CCACHE_DIR"
+        ccache --set-config=compiler_check=content
+        ccache --set-config=compression=true
+        ccache --set-config=max_size=1G
+        ccache --set-config=sloppiness=
+        ccache --zero-stats
+        ccache --show-config
+
+    - name: Build analytical and ns-3 backends
+      run: bash ./.github/workflows/build.sh
+
+    # Pull-request code can restore only trusted cache entries. Only master/dev
+    # push jobs may publish a new entry consumed by later protected-branch work.
+    - name: Save compiler cache from trusted pushes
+      if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache
+        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
+
+    - name: Report compiler-cache statistics
+      if: always()
+      run: |
+        ccache --show-stats
+        {
+          echo '### Compiler cache'
+          echo '```text'
+          ccache --show-stats
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Run structural ns-3 experiment
+      if: ${{ !inputs.comparison }}
+      run: |
+        timeout --foreground ${{ inputs.execution_timeout_minutes }}m \
+          uv run --locked python experiments/ring_3d/run.py \
+          --profile "$EXPERIMENT_PROFILE" \
+          --output "$EXPERIMENT_RUN_DIRECTORY" \
+          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }} \
+          --clean
+
+    - name: Run paired ns-3 comparison
+      if: ${{ inputs.comparison }}
+      run: |
+        command=(
+          uv run --locked python experiments/ring_3d/compare.py
+          --profile "$EXPERIMENT_PROFILE"
+          --output "$EXPERIMENT_RUN_DIRECTORY"
+          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
+          --clean
+        )
+        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
+          command+=(--require-congestion)
+        fi
+        timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
+
+    - name: Publish structural researcher report
+      if: ${{ always() && !inputs.comparison }}
+      run: |
+        uv run --locked python experiments/ring_3d/report.py \
+          --profile "$EXPERIMENT_PROFILE" \
+          --run-dir "$EXPERIMENT_RUN_DIRECTORY" \
+          --output "$EXPERIMENT_RUN_DIRECTORY/research_report.md"
+        cat "$EXPERIMENT_RUN_DIRECTORY/research_report.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Publish paired comparison report
+      if: ${{ always() && inputs.comparison }}
+      run: |
+        if [[ -f "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" ]]; then
+          cat "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "Paired evaluation did not produce a comparison report; inspect the retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload reproducibility bundle
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        path: ${{ inputs.run_directory }}
+        if-no-files-found: ignore

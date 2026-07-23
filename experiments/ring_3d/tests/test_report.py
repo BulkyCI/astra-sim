@@ -45,6 +45,57 @@ class Ring3DReportTests(unittest.TestCase):
     def _write_completed_run(self, run_dir: Path) -> None:
         telemetry_dir = run_dir / "telemetry"
         telemetry_dir.mkdir(parents=True)
+        run_dir.joinpath("profile.json").write_text(
+            self.profile_path.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        run_dir.joinpath("manifest.json").write_text(
+            json.dumps(
+                {
+                    "physical_topology": {
+                        "kind": "clos",
+                        "description": "Two-stage leaf-spine Clos",
+                        "host_count": 8,
+                        "node_count": 16,
+                        "switch_count": 8,
+                        "link_count": 24,
+                        "link_rate": "200Gbps",
+                        "leaf_count": 4,
+                        "spine_count": 4,
+                        "hosts_per_leaf": 2,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        run_dir.joinpath("model_trace.json").write_text(
+            json.dumps(
+                {
+                    "workload_kind": "structural_transformer_trace",
+                    "parameter_count": 100_000_000_000,
+                    "parameter_dtype_bytes": 2,
+                    "total_gradient_bytes_per_data_parallel_replica": 200_000_000_000,
+                    "gradient_bytes_per_rank": 6_250_000_000,
+                    "gradient_bucket_count": 20,
+                    "gradient_bucket_bytes": 312_500_000,
+                    "transformer_layers": 80,
+                    "transformer_layers_per_pipeline_stage": 20,
+                    "pipeline_microbatches": 8,
+                    "tensor_parallel_all_reduces_per_layer": 2,
+                }
+            ),
+            encoding="utf-8",
+        )
+        run_dir.joinpath("execution.json").write_text(
+            json.dumps(
+                {
+                    "dblp_selection_seed": 17,
+                    "ns3_rng_seed": 1,
+                    "ns3_rng_run": 17,
+                    "simulation_timeout_seconds": 18_000,
+                }
+            ),
+            encoding="utf-8",
+        )
         run_dir.joinpath("experiment.json").write_text(
             json.dumps(
                 {
@@ -260,7 +311,7 @@ class Ring3DReportTests(unittest.TestCase):
 
             report = render_report(run_dir, self.profile_path)
 
-            self.assertIn("# 3D Ring ns-3 researcher report", report)
+            self.assertIn("# 3D Ring collective / ns-3 researcher report", report)
             self.assertIn("TP=2 × PP=2 × DP=2", report)
             self.assertIn("8 unique / 8 expected (complete)", report)
             self.assertIn("PASS — DP-only shedding", report)
@@ -277,6 +328,12 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("ns-3 congestion observability", report)
             self.assertIn("Logical collective-completion latency", report)
             self.assertIn("Causal traffic mix", report)
+            self.assertIn("Two-stage leaf-spine Clos", report)
+            self.assertIn("Materialized model workload", report)
+            self.assertIn("5.82 GiB", report)
+            self.assertIn("Execution controls", report)
+            self.assertIn("300.0 minutes", report)
+            self.assertIn("Materialized profile copy", report)
 
     def test_report_explains_missing_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

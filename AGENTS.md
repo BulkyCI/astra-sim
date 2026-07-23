@@ -1,0 +1,70 @@
+# ASTRA-sim Agent Guide
+
+## Start here
+
+- Initialize the pinned workspace with `./utils/setup.sh`; use `uv` and
+  `uv run --locked` for every project-owned Python command. Do not use `pip`
+  or the system interpreter.
+- Read the closest `AGENTS.md` before changing files in that subtree.
+- Before committing, read and follow
+  [`.github/skills/git-commits/SKILL.md`](.github/skills/git-commits/SKILL.md).
+  It defines this repository's required Conventional Commit message format.
+
+## Verification
+
+| Change | Run before commit |
+| --- | --- |
+| Python tooling or Ring-3D experiment | `uv lock --check && uv run --locked python -m compileall -q experiments/ring_3d && uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v` |
+| Shell script | `bash -n <changed-script>` |
+| Native ASTRA-sim or ns-3 integration | `bash .github/workflows/build.sh && bash .github/workflows/test.sh` |
+| Ring-3D native integration | `bash experiments/ring_3d/smoke.sh` after the native build |
+| Any change | `git diff --check` |
+
+Run the narrowest applicable checks first. Do not commit failing checks; record
+checks that are intentionally not run, especially costly simulator runs.
+
+## Engineering contract
+
+- Favor typed, validated configurations; explicit ownership and lifecycle
+  boundaries; immutable inputs; deterministic seeds; and total state
+  transitions. Make invalid states unrepresentable where the existing language
+  and ABI permit.
+- Treat error handling as part of the model: validate inputs at boundaries,
+  preserve error context, and never silently swallow failures or convert them
+  into fabricated simulation results.
+- Optimize measured hot paths without weakening semantics. Avoid avoidable
+  allocations, copies, dynamic dispatch, and repeated parsing in packet/event
+  paths; measure before claiming a performance gain.
+- Keep project-owned units cohesive and normally below 500 lines. When a
+  change would materially grow a large file, extract a focused module first;
+  document any unavoidable exception in the change description.
+- Refactor decisively rather than maintaining duplicate legacy paths. When a
+  schema or interface changes, migrate all owned call sites, profiles, tests,
+  and documentation in the same change while preserving reproducibility.
+- Preserve local style and public behavior unless a task deliberately changes
+  them. Do not edit vendored or third-party submodules under `extern/` merely
+  to work around an owned-code issue; make such changes only for a deliberate,
+  tested transport/backend task.
+
+## Scope and safety boundaries
+
+- Never commit credentials, generated local run outputs, or changes inside
+  `.venv/`, `build/`, or `runs/`.
+- Pinned dependency changes update both `pyproject.toml` and `uv.lock` through
+  `uv lock`; never hand-edit `uv.lock`.
+- `extern/` entries are pinned submodules. Initialize with
+  `git submodule update --init --recursive`; change a pointer only when that
+  dependency revision is intentionally part of the task.
+- The shared agent skills are the `.github/skills` submodule. Load skill files
+  just in time; do not edit the vendored copy from this repository.
+
+## Progressive context
+
+- General development, validation, and change workflows:
+  [docs/agents/development.md](docs/agents/development.md)
+- Research scope, valid claims, and the lossy-transport roadmap:
+  [docs/agents/ring-3d-research-context.md](docs/agents/ring-3d-research-context.md)
+- Ring-3D generator, policy, telemetry, or profile changes:
+  [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
+- Agent-context index:
+  [docs/agents/README.md](docs/agents/README.md)

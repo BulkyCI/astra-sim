@@ -319,6 +319,7 @@ def run_comparison(
 	binary: Path | None = None,
 	clean: bool = False,
 	require_congestion_signals: bool = False,
+	simulation_timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
 	"""Run the matched experiment pairs and retain their individual artifacts."""
 	if not seeds:
@@ -342,6 +343,7 @@ def run_comparison(
 			clean=True,
 			seed=seed,
 			ns3_rng_run=seed,
+			simulation_timeout_seconds=simulation_timeout_seconds,
 			drop_probabilities=lossless_drop_probabilities(),
 		)
 		run_experiment(
@@ -351,6 +353,7 @@ def run_comparison(
 			clean=True,
 			seed=seed,
 			ns3_rng_run=seed,
+			simulation_timeout_seconds=simulation_timeout_seconds,
 		)
 		baseline_summary = _read_summary(baseline_dir)
 		policy_summary = _read_summary(policy_dir)
@@ -382,6 +385,7 @@ def run_comparison(
 		"profile": profile.resolve().as_posix(),
 		"seeds": seeds,
 		"congestion_required": require_congestion_signals,
+		"simulation_timeout_seconds": simulation_timeout_seconds,
 		"per_seed": per_seed,
 		"aggregate": aggregate_comparisons(per_seed),
 	}
@@ -411,6 +415,11 @@ def main() -> int:
 		action="store_true",
 		help="require observed background traffic, queueing, and completed PFC pause intervals",
 	)
+	parser.add_argument(
+		"--simulation-timeout-seconds",
+		type=int,
+		help="maximum wall-clock seconds for each ns-3 simulator process",
+	)
 	parser.add_argument("--clean", action="store_true", help="replace an existing comparison directory")
 	arguments = parser.parse_args()
 	comparison = run_comparison(
@@ -420,6 +429,7 @@ def main() -> int:
 		binary=arguments.binary,
 		clean=arguments.clean,
 		require_congestion_signals=arguments.require_congestion,
+		simulation_timeout_seconds=arguments.simulation_timeout_seconds,
 	)
 	print(json.dumps(comparison, indent=2))
 	return 0

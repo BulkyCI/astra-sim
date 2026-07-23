@@ -244,6 +244,7 @@ jobs:
         timeout --foreground 160m uv run --locked python experiments/ring_3d/compare.py \
           --profile experiments/ring_3d/profiles/llama3_70b_16.json \
           --output runs/ring_3d/llama3_70b_16_comparison \
+          --simulation-timeout-seconds 960 \
           --require-congestion --clean
 
     - name: Publish paired comparison report

@@ -45,16 +45,19 @@ class Ring3DRunnerTests(unittest.TestCase):
                     seed=17,
                     ns3_rng_seed=9,
                     ns3_rng_run=17,
+                    simulation_timeout_seconds=960,
                     skip_analysis=True,
                 )
 
             command = subprocess_run.call_args.args[0]
             self.assertIn("--ns3-rng-seed=9", command)
             self.assertIn("--ns3-rng-run=17", command)
+            self.assertEqual(subprocess_run.call_args.kwargs["timeout"], 960)
             self.assertEqual(returned["execution"], {
                 "dblp_selection_seed": 17,
                 "ns3_rng_seed": 9,
                 "ns3_rng_run": 17,
+                "simulation_timeout_seconds": 960,
             })
             self.assertEqual(
                 json.loads((output / "execution.json").read_text(encoding="utf-8")),

@@ -34,6 +34,7 @@ Failures are reported as invalid or unavailable data; they are never silently re
 ## Conditions
 
 Run every condition with the five fixed paired seeds currently used by `compare.py`.
+The always-on CI Llama condition bounds each of its ten ns-3 simulator processes to 960 seconds and applies a separate 160-minute guard to the complete paired comparison.
 
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |

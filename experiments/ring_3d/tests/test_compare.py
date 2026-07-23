@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -14,6 +17,7 @@ from experiments.ring_3d.compare import (
     congestion_evidence,
     require_congestion,
     render_comparison_report,
+    run_comparison,
 )
 
 
@@ -107,6 +111,37 @@ class Ring3DComparisonTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "did not establish required congestion"):
             require_congestion(uncongested, "test run")
+
+    def test_comparison_propagates_per_simulation_timeout(self) -> None:
+        def fake_run_experiment(
+            _profile: Path, output: Path, **_kwargs: object
+        ) -> dict[str, object]:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "summary.json").write_text(
+                json.dumps(congested_summary()), encoding="utf-8"
+            )
+            return {}
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with patch(
+                "experiments.ring_3d.compare.run_experiment",
+                side_effect=fake_run_experiment,
+            ) as mocked_run:
+                comparison = run_comparison(
+                    REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json",
+                    Path(temporary_directory) / "comparison",
+                    [17],
+                    simulation_timeout_seconds=960,
+                )
+
+        self.assertEqual(mocked_run.call_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["simulation_timeout_seconds"] == 960
+                for call in mocked_run.call_args_list
+            )
+        )
+        self.assertEqual(comparison["simulation_timeout_seconds"], 960)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ def run_experiment(
     seed: int | None = None,
     ns3_rng_seed: int = 1,
     ns3_rng_run: int | None = None,
+    simulation_timeout_seconds: int | None = None,
     drop_probabilities: dict[str, float] | None = None,
     skip_analysis: bool = False,
 ) -> dict[str, Any]:
@@ -54,6 +55,15 @@ def run_experiment(
         ns3_rng_run = seed if seed is not None else 1
     if ns3_rng_run <= 0:
         raise ValueError("ns3_rng_run must be positive")
+    if (
+        simulation_timeout_seconds is not None
+        and (
+            isinstance(simulation_timeout_seconds, bool)
+            or not isinstance(simulation_timeout_seconds, int)
+            or simulation_timeout_seconds <= 0
+        )
+    ):
+        raise ValueError("simulation_timeout_seconds must be positive when set")
     manifest = materialize(
         profile.resolve(),
         output,
@@ -82,6 +92,7 @@ def run_experiment(
         "dblp_selection_seed": manifest["seed"],
         "ns3_rng_seed": ns3_rng_seed,
         "ns3_rng_run": ns3_rng_run,
+        "simulation_timeout_seconds": simulation_timeout_seconds,
     }
     (output / "execution.json").write_text(
         json.dumps(execution, indent=2) + "\n", encoding="utf-8"
@@ -90,7 +101,12 @@ def run_experiment(
     (output / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
-    subprocess.run(command, cwd=REPOSITORY_ROOT, check=True)
+    subprocess.run(
+        command,
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        timeout=simulation_timeout_seconds,
+    )
 
     if not skip_analysis:
         analysis = REPOSITORY_ROOT / "experiments/ring_3d/analyze.py"
@@ -123,6 +139,11 @@ def main() -> int:
     parser.add_argument("--ns3-rng-seed", type=int, default=1)
     parser.add_argument("--ns3-rng-run", type=int, help="ns-3 random-stream run number")
     parser.add_argument(
+        "--simulation-timeout-seconds",
+        type=int,
+        help="maximum wall-clock seconds for the ns-3 simulator process",
+    )
+    parser.add_argument(
         "--lossless-baseline",
         action="store_true",
         help="keep the policy and microbursts enabled while setting every suppression threshold to zero",
@@ -138,6 +159,7 @@ def main() -> int:
         seed=arguments.seed,
         ns3_rng_seed=arguments.ns3_rng_seed,
         ns3_rng_run=arguments.ns3_rng_run,
+        simulation_timeout_seconds=arguments.simulation_timeout_seconds,
         drop_probabilities=(lossless_drop_probabilities() if arguments.lossless_baseline else None),
         skip_analysis=arguments.skip_analysis,
     )

@@ -170,7 +170,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seed: [20260317, 20260318, 20260319, 20260320, 20260321]
+        # Consecutive nine-digit chunks of π's decimal expansion. They are
+        # deterministic for reproducibility and portable 32-bit seed values.
+        seed: [314159265, 358979323, 846264338, 327950288, 419716939]
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
       evaluation_name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})

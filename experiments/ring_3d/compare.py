@@ -16,7 +16,9 @@ except ImportError:
 	from run import lossless_drop_probabilities, run_experiment
 
 
-DEFAULT_SEEDS = (20260317, 20260318, 20260319, 20260320, 20260321)
+# Consecutive nine-digit chunks of π's decimal expansion. Keeping the CLI and
+# CI defaults identical makes local reruns exactly reproduce CI's seed sweep.
+DEFAULT_SEEDS = (314159265, 358979323, 846264338, 327950288, 419716939)
 T_CRITICAL_95 = {
 	1: 12.706,
 	2: 4.303,

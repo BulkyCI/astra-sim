@@ -12,6 +12,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from experiments.ring_3d.compare import (
+    DEFAULT_SEEDS,
     aggregate_comparison_artifacts,
     aggregate_comparisons,
     compare_summaries,
@@ -74,6 +75,19 @@ def congested_summary() -> dict[str, object]:
 
 
 class Ring3DComparisonTests(unittest.TestCase):
+    def test_default_seeds_are_consecutive_pi_chunks(self) -> None:
+        self.assertEqual(
+            DEFAULT_SEEDS,
+            (314159265, 358979323, 846264338, 327950288, 419716939),
+        )
+        profile = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/llama3_70b_16.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(profile["seed"], DEFAULT_SEEDS[0])
+
     def test_pairwise_metrics_use_positive_reduction_for_faster_policy(self) -> None:
         results = compare_summaries(summary(1_000, 100), summary(900, 90))
 

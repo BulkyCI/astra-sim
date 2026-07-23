@@ -11,7 +11,7 @@
   "tp_all_reduce_bytes": 16777216,
   "pp_bytes": 0,
   "dp_all_reduce_bytes": 1073741824,
-  "seed": 20260317,
+  "seed": 314159265,
   "network": {
     "topology": "clos",
     "hosts_per_leaf": 8,

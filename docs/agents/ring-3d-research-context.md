@@ -8,12 +8,14 @@ original paper or a code-path guide. Read documents in this order:
 1. [DBLP paper brief](ring-3d-paper-brief.md): original transport concepts.
 2. [DBLP known flaws](ring-3d-known-flaws.md): evidence-labeled baseline,
   transport, PFC, topology, and CLR validity threats.
-3. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
+3. [Loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md): adopted
+  future transport contract and implementation evidence gates.
+4. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
   models, abstracts, or does not model; it selects no remedy.
-4. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
+5. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
   parameter names and generated artifacts.
-5. This document: claims, backend limits, controls, and future work.
-6. [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md):
+6. This document: claims, backend limits, controls, and future work.
+7. [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md):
   canonical estimands and decision rules.
 
 ## Purpose
@@ -137,6 +139,16 @@ This is not yet a safe high-loss DBLP model:
 Do not enable $q=60\%-90\%$ by changing one global setting and report the
 result as DBLP. That can produce artifacts or liveness failures unrelated to
 the intended paper mechanism.
+
+## Adopted loss-tolerant transport direction
+
+Future packet-loss research must follow the
+[loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md): classify packets
+before impairment, place named control packets in a separate high-priority
+class with zero configured impairment loss, and apply loss only to explicitly
+scoped data traffic. This is an adopted requirement, not a statement that the
+current backend satisfies it. Current Ring-3D remains the lossless-incast
+ablation described above.
 
 ## Unresolved research questions
 

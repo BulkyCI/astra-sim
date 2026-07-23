@@ -62,10 +62,12 @@ checks that are intentionally not run, especially costly simulator runs.
 
 - General development, validation, and change workflows:
   [docs/agents/development.md](docs/agents/development.md)
-- Research scope, valid claims, and the lossy-transport roadmap:
+- Research scope, valid claims, and current transport-model limits:
   [docs/agents/ring-3d-research-context.md](docs/agents/ring-3d-research-context.md)
 - DBLP baseline, loss-semantics, PFC, topology, and CLR validity threats:
   [docs/agents/ring-3d-known-flaws.md](docs/agents/ring-3d-known-flaws.md)
+- Adopted loss-tolerant RDMA transport direction and model-level gates:
+  [docs/agents/loss-tolerant-rdma-decision.md](docs/agents/loss-tolerant-rdma-decision.md)
 - Ring-3D generator, policy, telemetry, or profile changes:
   [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
 - Agent-context index:

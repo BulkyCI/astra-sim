@@ -20,7 +20,7 @@ verify it with `uv lock --check`.
 | --- | --- |
 | Workload, profile, analysis, policy, or experiment tests | `experiments/ring_3d/`; read its local `AGENTS.md` first |
 | Native simulation interface or telemetry bridge | `astra-sim/network_frontend/ns3/`; preserve logical completion and add focused tests |
-| Packet loss, queueing, PFC, or RDMA recovery semantics | Bundled ns-3 backend under `extern/network_backend/ns-3/`; treat as a transport-model change and document the new semantics |
+| Packet loss, queueing, PFC, control class, or RDMA recovery semantics | Read [loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md), then treat the bundled ns-3 backend under `extern/network_backend/ns-3/` as a transport-model change |
 | General simulator behavior | `astra-sim/system/`, `astra-sim/common/`, or the relevant frontend; follow nearby C++ conventions |
 | Dependency revision | `.gitmodules` plus the submodule pointer; do not modify submodule contents in place |
 | Agent workflow or reusable agent procedure | Root/nested `AGENTS.md`, `docs/agents/`, or an upstream skill repository; keep task-specific context out of the root guide |
@@ -37,6 +37,12 @@ When a Ring-3D change is motivated by a protocol critique, read the
 or describing an outcome. Preserve the source-reported, repository-verified, or
 critical-hypothesis status. Do not present an unvalidated remedy as an existing
 project direction.
+
+The adopted [loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md)
+requires pre-loss packet classification, a separate high-priority control class
+with zero configured impairment loss, and independently configured data loss.
+It is a target transport contract, not a claim that the current backend already
+implements it or that control packets are physically infallible.
 
 ## Change discipline
 

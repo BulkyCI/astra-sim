@@ -5,6 +5,10 @@ Read [the paper brief](../../../docs/agents/ring-3d-paper-brief.md) and
 [the ASTRA-sim pivot](../../../docs/agents/ring-3d-astra-pivot.md) first: this
 code is not DBLP bitmap/retransmission transport.
 
+For physical packet loss, control-plane priority, or RDMA recovery work, read
+the [loss-tolerant RDMA decision](../../../docs/agents/loss-tolerant-rdma-decision.md)
+first. This file documents neither a packet classifier nor loss isolation.
+
 ## Data flow
 
 ```text
@@ -101,7 +105,8 @@ For a policy, CLR, or completion change, update together:
 5. unit tests and a native smoke run where applicable;
 6. glossary, research context, validation protocol, and claim language.
 
-For a packet-loss feature, do **not** overload current selection fields. Add
-separate typed fields for $q$, $D$, direction, affected traffic classes, retry
-policy, and recorded recovery outcome. See the
-[ASTRA-sim pivot](../../../docs/agents/ring-3d-astra-pivot.md#implementation-direction).
+For a packet-loss feature, do **not** overload current selection fields. Follow
+the [loss-tolerant RDMA decision](../../../docs/agents/loss-tolerant-rdma-decision.md):
+classify before loss injection, isolate named control traffic from configured
+impairment loss, and use separate typed fields for $q$, $D$, direction/scope,
+recovery policy, and recorded terminal outcome.

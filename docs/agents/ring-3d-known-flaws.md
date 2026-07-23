@@ -93,6 +93,13 @@ with all RoCEv2 deployments, or that a lossless-fabric result validates a
 lossy-Ethernet protocol. Those are distinct mechanisms requiring explicit
 modeling and evidence.
 
+**Decision boundary:** the project now requires a loss-tolerant RDMA simulation
+path with independent data/control treatment. That direction does not resolve
+this flaw by itself and does not make PFC behavior irrelevant. See the
+[loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md) for the adopted
+transport contract and the evidence required before a change can claim to meet
+it.
+
 ## 5. Scale, topology, and collective-algorithm external validity
 
 **Status: source-reported external-validity threat.** The supplied review

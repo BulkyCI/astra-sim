@@ -14,6 +14,8 @@ paper term in a profile, report, or code symbol.
 | `stable_drop_probability` | Current logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 0.1 | Generated `experiment.json` | `decision`, `decision_hash` |
 | $q$ | Packet-loss probability during a proposed data-plane impairment | 0; no loss experiment is active | Would require a transport-loss configuration | Drop/retransmission telemetry, not present |
 | $D$ | Duration of a proposed loss/injection window | Unset | Would require a time-window configuration | Window begin/end, not present |
+| control plane | ACK, NACK, congestion-feedback, PFC, and named protocol/recovery control | No general classifier is active | Future transport contract requires a separate high-priority class and zero configured impairment loss | Per-type queue delay/drop reason, not present |
+| data plane | In-scope payload packets subject to a defined impairment | No loss experiment is active | Future transport contract requires explicit $q$, $D$, direction/path scope, and seed | Per-plane attempts/drops/retransmissions, not present |
 | `microburst_bytes` | Bytes required by one synthetic background RDMA flow | 128 MiB | Profile JSON | Background `flow_events.csv` row |
 | `microburst_flow_count` | Number of background flows | 7 | Profile JSON | Background flow rows |
 | `microburst_offset_spacing_ns` | Start offset increment among background flows | 0 ns | Profile JSON | `start_time_ns` |
@@ -68,3 +70,5 @@ contention.
 - Reserve **residual-loss tolerance** for a future DBLP-like stop condition.
 - Say **incast** for the finite background RDMA stressor.
 - Never call a 64-byte provenance control QP a “dropped packet.”
+- Do not call the existing priority-group mapping a general loss-protected
+  control plane; see the [loss-tolerant RDMA decision](../../docs/agents/loss-tolerant-rdma-decision.md).

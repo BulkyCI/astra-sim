@@ -17,6 +17,11 @@ solution for a DBLP flaw. Consult the
 [known-flaws register](ring-3d-known-flaws.md) before proposing a remedy or
 assuming that an existing abstraction resolves a paper limitation.
 
+The project has separately adopted a
+[loss-tolerant RDMA transport requirement](loss-tolerant-rdma-decision.md).
+It sets the control/data-plane model contract but does not select a DBLP
+recovery design or change the current lossless Ring-3D result boundary.
+
 ## Causal contract for an acceptable deviation
 
 Every new condition must state these five facts in its profile, manifest,

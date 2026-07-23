@@ -76,12 +76,10 @@ class NS3BackendCompletionTracker {
     }
 
   private:
-    static constexpr uint64_t kLivenessCheckpointLimit = 10000;
     static constexpr uint64_t kLivenessCheckpointIntervalNs = 10000000;
     static const Time kLivenessCheckpointInterval;
 
     void liveness_checkpoint() {
-        ++liveness_checkpoint_count_;
         AstraSim::LoggerFactory::get_logger("network")->info(
             "Liveness checkpoint: simulated_time_ns={} completed_qps={} "
             "active_qps={} completed_ranks={}/{} pending_background_flows={}",
@@ -89,12 +87,6 @@ class NS3BackendCompletionTracker {
             active_qp_count(), num_ranks_ - num_unfinished_ranks_, num_ranks_,
             pending_background_flows);
         if (is_complete()) {
-            return;
-        }
-        if (liveness_checkpoint_count_ >= kLivenessCheckpointLimit) {
-            AstraSim::LoggerFactory::get_logger("network")->error(
-                "Liveness checkpoint limit reached before simulation completion");
-            Simulator::Stop();
             return;
         }
         Simulator::Schedule(kLivenessCheckpointInterval,
@@ -118,7 +110,6 @@ class NS3BackendCompletionTracker {
     int num_ranks_;
     int num_unfinished_ranks_;
     vector<int> completion_tracker_;
-    uint64_t liveness_checkpoint_count_ = 0;
 };
 
 const Time NS3BackendCompletionTracker::kLivenessCheckpointInterval =

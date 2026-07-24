@@ -185,7 +185,7 @@ rather than treating the class as magically reliable.
 
 - Do not turn on the current global `ERROR_RATE_PER_LINK` and call the run
   loss-tolerant transport; it violates the plane-separation contract.
-- Do not overload `clr_drop_probability`, `stable_drop_probability`, or the
+- Do not overload logical-selection `p_low`, `p_high`, or the
   provenance-control flow to represent physical loss.
 - Do not hide an unresolved recovery stall with a fabricated completion,
   synthetic latency, or omitted seed.

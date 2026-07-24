@@ -70,7 +70,13 @@ uv run --locked python experiments/ring_3d/generate_clr_schedule.py \
 
 ## Paired baseline comparison
 
-Use [compare.py](compare.py) for a matched comparison. For every fixed seed it runs the lossless baseline first with the policy and microbursts still enabled but both CLR/stable selection probabilities set to $0\%$, then runs the phase-aware substitution policy with the same generated workload, topology, seed, and static CLR mask. The default is five fixed seeds and it writes both individual run bundles, `comparison.json`, and `comparison_report.md`.
+Use [compare.py](compare.py) for a matched comparison. For every fixed seed it
+runs a fixed-low baseline first with policy and microbursts still enabled, but
+with both phases set to `p_low` (0.5% by default). It then runs the phase-aware
+selection policy with the same generated workload, topology, seed, and static
+CLR mask: `p_low` in CLR and `p_high` (10% by default) outside CLR. The
+default is five fixed seeds and it writes both individual run bundles,
+`comparison.json`, and `comparison_report.md`.
 
 ```sh
 uv run --locked python experiments/ring_3d/compare.py \
@@ -128,7 +134,18 @@ uv run --locked python experiments/ring_3d/report.py \
 
 ## Admission policy and liveness
 
-Only payload requests explicitly labeled `dp`, `CollectivePayload`, and `All_Reduce` are eligible. The static CLR mask selects a $0\%$ selection probability during critical-learning steps and a $10\%$ selection probability during stable steps. Within a selected probability, deterministic integer hashing of the seed, run ID, training step, workload node ID, message sequence, endpoints, and tag selects the logical payloads. A selected payload uses a reliable, protected 64-byte provenance-control flow; completion still resolves the original sender and receiver. `flow_events.csv` records both logical and physical bytes so results do not characterize the modeled operation as literal packet loss. See [POLICY_IMPLEMENTATION.md](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md) for the runtime contract.
+Only payload requests explicitly labeled `dp`, `CollectivePayload`, and
+`All_Reduce` are eligible. The static CLR mask selects `p_low` (0.5% by
+default) during critical-learning steps and `p_high` (10% by default) during
+stable steps. Within a selected probability, deterministic integer hashing of
+the seed, run ID, training step, workload node ID, message sequence, endpoints,
+and tag selects the logical payloads. A selected payload uses a reliable,
+protected 64-byte provenance-control flow; completion still resolves the
+original sender and receiver. `flow_events.csv` records both logical and
+physical bytes so results do not characterize the modeled operation as literal
+packet loss. These are selection-proxy knobs, not DBLP residual-loss $P$
+semantics. See [POLICY_IMPLEMENTATION.md](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)
+for the runtime contract.
 
 The ns-3 frontend emits an info-level liveness checkpoint every 10 ms of simulated time while work remains. Each message reports simulated time, completed QPs, active QPs, completed ranks, and pending background flows. Simulated time is ns-3's virtual clock, not wall-clock duration: checkpoints never impose a virtual-time cutoff. The configured `--simulation-timeout-seconds` setting and CI's outer `timeout` command remain the only wall-clock guards for long-running experiments.
 

@@ -65,6 +65,7 @@ REQUIRED_PROFILE_KEYS = {
     "pp_bytes",
     "dp_all_reduce_bytes",
     "seed",
+    "selection_policy",
     "network",
     "microburst_bytes",
 }
@@ -94,7 +95,7 @@ GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
     "parameter_dtype_bytes",
     "gradient_bucket_count",
 }
-DEFAULT_DROP_PROBABILITY_BY_STEP = {"1": 0.0, "2": 0.1, "3": 0.1}
+MAX_P_LOW = 0.01
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,18 @@ class GradientBucketSample:
 
 
 @dataclass(frozen=True)
+class SelectionPolicy:
+    """Logical-admission selection parameters retained for paired runs.
+
+    These values are intentionally not presented as a DBLP residual-delivery
+    contract: the current Ring-3D policy still substitutes whole payloads.
+    """
+
+    p_low: float
+    p_high: float
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     tp: int
@@ -134,6 +147,7 @@ class Profile:
     pp_bytes: int
     dp_all_reduce_bytes: int
     seed: int
+    selection_policy: SelectionPolicy
     network: PhysicalNetwork
     microburst_bytes: int
     microburst_flow_count: int
@@ -158,6 +172,36 @@ def _require_nonnegative_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{field} must be a nonnegative integer")
     return value
+
+
+def _probability(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be numeric")
+    probability = float(value)
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError(f"{field} must be in [0, 1]")
+    return probability
+
+
+def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
+    policy = document.get("selection_policy")
+    if not isinstance(policy, dict):
+        raise ValueError("selection_policy must be an object")
+    expected_keys = {"p_low", "p_high"}
+    if set(policy) != expected_keys:
+        raise ValueError(
+            "selection_policy must contain exactly "
+            f"{sorted(expected_keys)}"
+        )
+    p_low = _probability(policy["p_low"], "selection_policy.p_low")
+    p_high = _probability(policy["p_high"], "selection_policy.p_high")
+    if p_low == 0.0 or p_low > MAX_P_LOW:
+        raise ValueError(
+            "selection_policy.p_low must be greater than zero and at most 0.01"
+        )
+    if p_high < p_low:
+        raise ValueError("selection_policy.p_high must be at least p_low")
+    return SelectionPolicy(p_low=p_low, p_high=p_high)
 
 
 def _load_model_workload(
@@ -261,6 +305,7 @@ def load_profile(profile_path: Path) -> Profile:
     pp = _require_positive_int(parallelism["pp"], "parallelism.pp")
     dp = _require_positive_int(parallelism["dp"], "parallelism.dp")
     ranks = tp * pp * dp
+    selection_policy = _load_selection_policy(document)
     network = load_network(document.get("network"), ranks)
     microburst_flow_count = _require_positive_int(
         document.get("microburst_flow_count", min(2, ranks // 2)),
@@ -320,6 +365,7 @@ def load_profile(profile_path: Path) -> Profile:
             document.get("dp_all_reduce_bytes"), "dp_all_reduce_bytes"
         ),
         seed=_require_positive_int(document.get("seed"), "seed"),
+        selection_policy=selection_policy,
         network=network,
         microburst_bytes=_require_positive_int(
             document.get("microburst_bytes"), "microburst_bytes"
@@ -861,44 +907,35 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
     ]
 
 
-def _validated_drop_probabilities(
-    probabilities: dict[str, float] | None,
-) -> dict[str, float]:
-    result = dict(
-        DEFAULT_DROP_PROBABILITY_BY_STEP if probabilities is None else probabilities
+def resolve_selection_policy(
+    profile: Profile,
+    *,
+    p_low: float | None = None,
+    p_high: float | None = None,
+) -> SelectionPolicy:
+    """Resolve optional command-line overrides against the typed profile policy."""
+    resolved_low = profile.selection_policy.p_low if p_low is None else _probability(
+        p_low, "p_low"
     )
-    if not result:
-        raise ValueError("drop probabilities must not be empty")
-    for step, probability in result.items():
-        if not isinstance(step, str) or not step.isdecimal() or int(step) <= 0:
-            raise ValueError("drop probability keys must be positive step identifiers")
-        if isinstance(probability, bool) or not isinstance(probability, (int, float)):
-            raise ValueError(f"drop probability for step {step} must be numeric")
-        if not 0.0 <= probability <= 1.0:
-            raise ValueError(f"drop probability for step {step} must be in [0, 1]")
-    return {step: float(probability) for step, probability in result.items()}
+    resolved_high = (
+        profile.selection_policy.p_high if p_high is None else _probability(p_high, "p_high")
+    )
+    if resolved_low == 0.0 or resolved_low > MAX_P_LOW:
+        raise ValueError("p_low must be greater than zero and at most 0.01")
+    if resolved_high < resolved_low:
+        raise ValueError("p_high must be at least p_low")
+    return SelectionPolicy(p_low=resolved_low, p_high=resolved_high)
 
 
-def _clr_tolerances(
-    drop_probabilities: dict[str, float] | None,
-) -> dict[str, float]:
-    """Map legacy per-step settings to strict CLR and relaxed stable tolerances."""
-    probabilities = _validated_drop_probabilities(drop_probabilities)
-    return {
-        "clr_drop_probability": min(probabilities.values()),
-        "stable_drop_probability": max(probabilities.values()),
-    }
-
-
-def _drop_probabilities_for_schedule(
+def _selection_probabilities_for_schedule(
     schedule: ClrSchedule,
-    tolerances: dict[str, float],
+    policy: SelectionPolicy,
 ) -> dict[str, float]:
     return {
         step: (
-            tolerances["clr_drop_probability"]
+            policy.p_low
             if is_clr
-            else tolerances["stable_drop_probability"]
+            else policy.p_high
         )
         for step, is_clr in schedule.is_clr_by_step().items()
     }
@@ -908,20 +945,23 @@ def write_experiment_config(
     path: Path,
     profile: Profile,
     clr_schedule: ClrSchedule,
-    drop_probabilities: dict[str, float] | None = None,
+    selection_policy: SelectionPolicy,
 ) -> None:
     microburst_flows = _microburst_flows(profile)
-    tolerances = _clr_tolerances(drop_probabilities)
     policy = {
         "schema_version": 1,
         "enabled": True,
         "seed": profile.seed,
         "run_id": profile.name,
         "eligibility": "dp_all_reduce_only",
-        "drop_probability_by_step": _drop_probabilities_for_schedule(
-            clr_schedule, tolerances
+        "selection_probability_by_step": _selection_probabilities_for_schedule(
+            clr_schedule, selection_policy
         ),
-        "clr_tolerances": tolerances,
+        "selection_policy": {
+            "semantics": "logical_admission_selection",
+            "p_low": selection_policy.p_low,
+            "p_high": selection_policy.p_high,
+        },
         "default_priority_group": 3,
         "provenance": {"control_bytes": 64, "priority_group": 1},
         "vnet_to_priority_group": {"0": 3},
@@ -997,12 +1037,14 @@ def materialize(
     clean: bool = False,
     *,
     seed_override: int | None = None,
-    drop_probabilities: dict[str, float] | None = None,
+    p_low: float | None = None,
+    p_high: float | None = None,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
     if seed_override is not None:
         profile = replace(profile, seed=_require_positive_int(seed_override, "seed_override"))
+    selection_policy = resolve_selection_policy(profile, p_low=p_low, p_high=p_high)
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1042,7 +1084,7 @@ def materialize(
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(
-        experiment_config, profile, clr_schedule, drop_probabilities
+        experiment_config, profile, clr_schedule, selection_policy
     )
     system_config = output_dir / "system.json"
     write_system_config(system_config)
@@ -1068,6 +1110,11 @@ def materialize(
         "seed": profile.seed,
         "ranks": profile.ranks,
         "parallelism": {"tp": profile.tp, "pp": profile.pp, "dp": profile.dp},
+        "selection_policy": {
+            "semantics": "logical_admission_selection",
+            "p_low": selection_policy.p_low,
+            "p_high": selection_policy.p_high,
+        },
         "physical_topology": physical_topology.manifest(),
         "data_plane_loss": (
             profile.network.data_loss.manifest()
@@ -1103,6 +1150,16 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
     parser.add_argument("--seed", type=int, help="override the profile seed")
+    parser.add_argument(
+        "--p-low",
+        type=float,
+        help="override the low logical-admission selection probability (0, 0.01]",
+    )
+    parser.add_argument(
+        "--p-high",
+        type=float,
+        help="override the high logical-admission selection probability",
+    )
     parser.add_argument(
         "--clr-decay-rate",
         type=float,
@@ -1141,6 +1198,8 @@ def main() -> int:
         arguments.output.resolve(),
         arguments.clean,
         seed_override=arguments.seed,
+        p_low=arguments.p_low,
+        p_high=arguments.p_high,
         clr_schedule_parameters=clr_schedule_parameters,
     )
     print(json.dumps(manifest, indent=2))

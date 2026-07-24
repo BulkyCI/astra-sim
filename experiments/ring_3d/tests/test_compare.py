@@ -110,7 +110,7 @@ class Ring3DComparisonTests(unittest.TestCase):
 
         self.assertEqual(aggregate["makespan_ns"]["mean_reduction_ns"], 150.0)
         self.assertIsNotNone(aggregate["makespan_ns"]["reduction_ci95_ns"])
-        self.assertIn("Paired DBLP comparison", report)
+        self.assertIn("Paired phase-aware selection comparison", report)
         self.assertIn("makespan_ns", report)
         self.assertIn("95% CI of reduction", report)
 
@@ -126,6 +126,11 @@ class Ring3DComparisonTests(unittest.TestCase):
             ]
             return {
                 "profile": "/profiles/llama3_70b_16.json",
+                "selection_policy": {
+                    "semantics": "logical_admission_selection",
+                    "baseline": {"p_low": 0.005, "p_high": 0.005},
+                    "policy": {"p_low": 0.005, "p_high": 0.1},
+                },
                 "seeds": [seed],
                 "congestion_required": True,
                 "simulation_timeout_seconds": 9_000,
@@ -147,6 +152,10 @@ class Ring3DComparisonTests(unittest.TestCase):
         )
         self.assertEqual(
             comparison["aggregate"]["makespan_ns"]["paired_seed_count"], 2
+        )
+        self.assertEqual(
+            comparison["selection_policy"]["baseline"],
+            {"p_low": 0.005, "p_high": 0.005},
         )
 
     def test_congestion_gate_requires_queue_and_pfc_evidence(self) -> None:
@@ -192,6 +201,10 @@ class Ring3DComparisonTests(unittest.TestCase):
             )
         )
         self.assertEqual(comparison["simulation_timeout_seconds"], 960)
+        self.assertEqual(mocked_run.call_args_list[0].kwargs["p_low"], 0.005)
+        self.assertEqual(mocked_run.call_args_list[0].kwargs["p_high"], 0.005)
+        self.assertEqual(mocked_run.call_args_list[1].kwargs["p_low"], 0.005)
+        self.assertEqual(mocked_run.call_args_list[1].kwargs["p_high"], 0.1)
 
 
 if __name__ == "__main__":

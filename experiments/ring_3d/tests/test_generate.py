@@ -69,10 +69,17 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")
-            self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.0})
             self.assertEqual(
-                policy["clr_tolerances"],
-                {"clr_drop_probability": 0.0, "stable_drop_probability": 0.1},
+                policy["selection_probability_by_step"],
+                {"1": 0.005, "2": 0.1, "3": 0.005},
+            )
+            self.assertEqual(
+                policy["selection_policy"],
+                {
+                    "semantics": "logical_admission_selection",
+                    "p_low": 0.005,
+                    "p_high": 0.1,
+                },
             )
             with (output / "clr_mask.csv").open(newline="", encoding="utf-8") as handle:
                 self.assertEqual(
@@ -125,22 +132,36 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertFalse(policy["microburst"]["enabled"])
             self.assertEqual(policy["microburst"]["flows"], [])
             self.assertEqual(
-                policy["drop_probability_by_step"], {"1": 0.0, "2": 0.1, "3": 0.0}
+                policy["selection_probability_by_step"],
+                {"1": 0.005, "2": 0.1, "3": 0.005},
             )
 
-    def test_lossless_override_preserves_enabled_microburst(self) -> None:
+    def test_fixed_p_low_override_preserves_enabled_microburst(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"
             materialize(
                 self.profile_path,
                 output,
-                drop_probabilities={"1": 0.0, "2": 0.0, "3": 0.0},
+                p_low=0.005,
+                p_high=0.005,
             )
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertTrue(policy["enabled"])
             self.assertTrue(policy["microburst"]["enabled"])
-            self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.0, "3": 0.0})
+            self.assertEqual(
+                policy["selection_probability_by_step"],
+                {"1": 0.005, "2": 0.005, "3": 0.005},
+            )
+
+    def test_selection_policy_rejects_low_value_above_one_percent(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["selection_policy"]["p_low"] = 0.0101
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "p_low"):
+                load_profile(profile_path)
 
     def test_data_loss_materializes_data_only_contract(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
@@ -243,7 +264,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 mask_rows = list(csv.DictReader(handle))
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             self.assertEqual([row["step_id"] for row in mask_rows], [str(step) for step in range(1, 7)])
-            self.assertEqual(set(policy["drop_probability_by_step"]), {str(step) for step in range(1, 7)})
+            self.assertEqual(
+                set(policy["selection_probability_by_step"]),
+                {str(step) for step in range(1, 7)},
+            )
             self.assertEqual(manifest["clr_schedule"]["steps"], 6)
 
     def test_llama3_profile_has_one_1gib_dp_bucket_per_step(self) -> None:

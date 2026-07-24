@@ -12,6 +12,10 @@
   "pp_bytes": 32768,
   "dp_all_reduce_bytes": 131072,
   "seed": 20260317,
+  "selection_policy": {
+    "p_low": 0.005,
+    "p_high": 0.1
+  },
   "network": {
     "topology": "clos",
     "hosts_per_leaf": 2,

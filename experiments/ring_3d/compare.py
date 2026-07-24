@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run matched DBLP and lossless-baseline experiments across fixed seeds."""
+"""Run matched fixed-low and phase-aware selection experiments across fixed seeds."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 try:
-	from .run import lossless_drop_probabilities, run_experiment
+	from .generate import load_profile, resolve_selection_policy
+	from .run import fixed_p_low_baseline, run_experiment
 except ImportError:
-	from run import lossless_drop_probabilities, run_experiment
+	from generate import load_profile, resolve_selection_policy
+	from run import fixed_p_low_baseline, run_experiment
 
 
 # Consecutive nine-digit chunks of π's decimal expansion. Keeping the CLI and
@@ -266,10 +268,10 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 		else "Raw congestion signals were recorded but not enforced as a comparison gate."
 	)
 	lines = [
-		"# Paired DBLP comparison",
+		"# Paired phase-aware selection comparison",
 		"",
 		"> Each seed uses identical traces, topology, microburst configuration, and seed. "
-		"The lossless baseline keeps the policy enabled but sets every admission-suppression threshold to zero. "
+		"The fixed-low baseline keeps the policy enabled while setting p_low and p_high to the same low value. "
 		"Baseline and policy share an ns-3 random-stream seed/run within each pair; successive pairs use distinct runs.",
 		"",
 		congestion_statement,
@@ -302,7 +304,7 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 	lines.extend(
 		[
 			"",
-			"Positive reductions favor the DBLP policy. Logical collective metrics include every completed "
+			"Positive reductions favor the phase-aware selection policy. Logical collective metrics include every completed "
 			"DP All-Reduce regardless of whether its payload used provenance control; all-QP FCT is a "
 			"secondary transport diagnostic. Physical-byte reductions are reported against foreground, DP, "
 			"and total offered traffic. Do not interpret a single seed or a confidence interval spanning zero "
@@ -343,6 +345,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 		raise ValueError("at least one comparison artifact is required")
 
 	profile: str | None = None
+	selection_policy: dict[str, Any] | None = None
 	require_congestion: bool | None = None
 	simulation_timeout_seconds: int | None = None
 	per_seed: list[dict[str, Any]] = []
@@ -355,6 +358,14 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 			profile = artifact_profile
 		elif artifact_profile != profile:
 			raise ValueError("comparison artifacts must use the same profile")
+
+		artifact_policy = comparison.get("selection_policy")
+		if not isinstance(artifact_policy, dict):
+			raise ValueError(f"comparison artifact {path} has no selection policy")
+		if selection_policy is None:
+			selection_policy = artifact_policy
+		elif artifact_policy != selection_policy:
+			raise ValueError("comparison artifacts must use the same selection policy")
 
 		artifact_congestion = comparison.get("congestion_required")
 		if not isinstance(artifact_congestion, bool):
@@ -391,6 +402,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 	per_seed.sort(key=lambda entry: entry["seed"])
 	return {
 		"profile": profile,
+		"selection_policy": selection_policy,
 		"seeds": sorted(seeds),
 		"congestion_required": require_congestion,
 		"simulation_timeout_seconds": simulation_timeout_seconds,
@@ -408,6 +420,8 @@ def run_comparison(
 	clean: bool = False,
 	require_congestion_signals: bool = False,
 	simulation_timeout_seconds: int | None = None,
+	p_low: float | None = None,
+	p_high: float | None = None,
 ) -> dict[str, Any]:
 	"""Run the matched experiment pairs and retain their individual artifacts."""
 	if not seeds:
@@ -418,11 +432,20 @@ def run_comparison(
 	if output.exists() and clean:
 		shutil.rmtree(output)
 	output.mkdir(parents=True, exist_ok=True)
+	profile_policy = resolve_selection_policy(
+		load_profile(profile.resolve()), p_low=p_low, p_high=p_high
+	)
+	baseline_p_low, baseline_p_high = fixed_p_low_baseline(
+		load_profile(profile.resolve())
+	)
+	if p_low is not None:
+		baseline_p_low = p_low
+		baseline_p_high = p_low
 
 	per_seed: list[dict[str, Any]] = []
 	for seed in seeds:
 		seed_dir = output / f"seed_{seed}"
-		baseline_dir = seed_dir / "lossless_baseline"
+		baseline_dir = seed_dir / "fixed_p_low_baseline"
 		policy_dir = seed_dir / "dblp_policy"
 		run_experiment(
 			profile,
@@ -432,7 +455,8 @@ def run_comparison(
 			seed=seed,
 			ns3_rng_run=seed,
 			simulation_timeout_seconds=simulation_timeout_seconds,
-			drop_probabilities=lossless_drop_probabilities(),
+			p_low=baseline_p_low,
+			p_high=baseline_p_high,
 		)
 		run_experiment(
 			profile,
@@ -442,6 +466,8 @@ def run_comparison(
 			seed=seed,
 			ns3_rng_run=seed,
 			simulation_timeout_seconds=simulation_timeout_seconds,
+			p_low=profile_policy.p_low,
+			p_high=profile_policy.p_high,
 		)
 		baseline_summary = _read_summary(baseline_dir)
 		policy_summary = _read_summary(policy_dir)
@@ -449,20 +475,20 @@ def run_comparison(
 		policy_congestion = congestion_evidence(policy_summary)
 		if require_congestion_signals:
 			baseline_congestion = require_congestion(
-				baseline_summary, f"seed {seed} lossless baseline"
+				baseline_summary, f"seed {seed} fixed-p-low baseline"
 			)
 			policy_congestion = require_congestion(
-				policy_summary, f"seed {seed} DBLP policy"
+				policy_summary, f"seed {seed} phase-aware selection policy"
 			)
 		per_seed.append(
 			{
 				"seed": seed,
 				"ns3_rng_seed": 1,
 				"ns3_rng_run": seed,
-				"lossless_baseline_dir": baseline_dir.relative_to(output).as_posix(),
+				"fixed_p_low_baseline_dir": baseline_dir.relative_to(output).as_posix(),
 				"dblp_policy_dir": policy_dir.relative_to(output).as_posix(),
 				"congestion": {
-					"lossless_baseline": baseline_congestion,
+					"fixed_p_low_baseline": baseline_congestion,
 					"dblp_policy": policy_congestion,
 				},
 				"metrics": compare_summaries(baseline_summary, policy_summary),
@@ -471,6 +497,11 @@ def run_comparison(
 
 	comparison = {
 		"profile": profile.resolve().as_posix(),
+		"selection_policy": {
+			"semantics": "logical_admission_selection",
+			"baseline": {"p_low": baseline_p_low, "p_high": baseline_p_high},
+			"policy": {"p_low": profile_policy.p_low, "p_high": profile_policy.p_high},
+		},
 		"seeds": seeds,
 		"congestion_required": require_congestion_signals,
 		"simulation_timeout_seconds": simulation_timeout_seconds,
@@ -509,6 +540,16 @@ def main() -> int:
 		type=int,
 		help="maximum wall-clock seconds for each ns-3 simulator process",
 	)
+	parser.add_argument(
+		"--p-low",
+		type=float,
+		help="override the low logical-admission selection probability (0, 0.01]",
+	)
+	parser.add_argument(
+		"--p-high",
+		type=float,
+		help="override the high logical-admission selection probability",
+	)
 	parser.add_argument("--clean", action="store_true", help="replace an existing comparison directory")
 	arguments = parser.parse_args()
 	if (arguments.profile is None) == (arguments.aggregate_inputs is None):
@@ -527,6 +568,8 @@ def main() -> int:
 			clean=arguments.clean,
 			require_congestion_signals=arguments.require_congestion,
 			simulation_timeout_seconds=arguments.simulation_timeout_seconds,
+			p_low=arguments.p_low,
+			p_high=arguments.p_high,
 		)
 	print(json.dumps(comparison, indent=2))
 	return 0

@@ -111,7 +111,16 @@ class Ring3DReportTests(unittest.TestCase):
                     "eligibility": "dp_all_reduce_only",
                     "default_priority_group": 3,
                     "provenance": {"control_bytes": 64, "priority_group": 1},
-                    "drop_probability_by_step": {"1": 0.0, "2": 0.1, "3": 0.1},
+                    "selection_probability_by_step": {
+                        "1": 0.005,
+                        "2": 0.1,
+                        "3": 0.1,
+                    },
+                    "selection_policy": {
+                        "semantics": "logical_admission_selection",
+                        "p_low": 0.005,
+                        "p_high": 0.1,
+                    },
                     "microburst": {"enabled": True, "trigger_step": 2},
                 }
             ),

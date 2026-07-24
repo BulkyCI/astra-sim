@@ -48,8 +48,8 @@ not empirical evidence for a transport mechanism.
 | UDP chunks + bitmap recovery | Reliable RDMA QP and ASTRA completion callbacks | Not equivalent |
 | $q$ loss burst | Seven finite background RDMA flows that create incast/PFC pressure | Congestion stressor; not packet loss |
 | $D$ loss-window duration | No configured duration; background flows drain when the model permits | Not equivalent |
-| $P_\mathrm{low}$/$P_\mathrm{high}$ residual loss | 0%/10% deterministic whole-payload substitution selection | Not equivalent |
-| Fixed-$P_\mathrm{low}$ baseline | Zero-substitution lossless baseline | Different causal question |
+| $P_\mathrm{low}$/$P_\mathrm{high}$ residual loss | 0.5%/10% deterministic whole-payload substitution selection | Explicit proxy; not equivalent |
+| Fixed-$P_\mathrm{low}$ baseline | Fixed 0.5% whole-payload substitution selection | Explicit proxy; not a bounded-loss baseline |
 
 The current system is correctly named a **phase-aware logical admission-
 suppression under incast** experiment. It can test whether reducing selected
@@ -58,9 +58,10 @@ partial delivery, retransmission rounds, or accuracy behavior.
 
 ## Baseline selection is part of the claim
 
-For the existing admission-suppression ablation, the zero-substitution baseline
-is correct: it answers whether that new mechanism reduces congestion relative
-to normal reliable payload transmission.
+For the existing admission-suppression ablation, the fixed-low baseline compares
+one low selection rate in every phase with the same low rate in CLR and a higher
+rate outside CLR. It establishes only the phase-aware selection-proxy effect;
+it does not create a DBLP bounded-loss baseline.
 
 For a DBLP bounded-loss claim, use the paper-aligned baseline:
 

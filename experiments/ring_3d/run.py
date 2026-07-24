@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
+    from .generate import Profile, load_profile, materialize
     from .generate_clr_schedule import ClrScheduleParameters
 except ImportError:
-    from generate import DEFAULT_DROP_PROBABILITY_BY_STEP, materialize
+    from generate import Profile, load_profile, materialize
     from generate_clr_schedule import ClrScheduleParameters
 
 
@@ -31,9 +31,9 @@ def find_default_binary() -> Path:
     return matches[-1]
 
 
-def lossless_drop_probabilities() -> dict[str, float]:
-    """Return the enabled-policy baseline with zero logical suppression."""
-    return {step: 0.0 for step in DEFAULT_DROP_PROBABILITY_BY_STEP}
+def fixed_p_low_baseline(profile: Profile) -> tuple[float, float]:
+    """Return the requested fixed-low logical-selection control values."""
+    return profile.selection_policy.p_low, profile.selection_policy.p_low
 
 
 def run_experiment(
@@ -46,7 +46,8 @@ def run_experiment(
     ns3_rng_seed: int = 1,
     ns3_rng_run: int | None = None,
     simulation_timeout_seconds: int | None = None,
-    drop_probabilities: dict[str, float] | None = None,
+    p_low: float | None = None,
+    p_high: float | None = None,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
     skip_analysis: bool = False,
 ) -> dict[str, Any]:
@@ -72,7 +73,8 @@ def run_experiment(
         output,
         clean,
         seed_override=seed,
-        drop_probabilities=drop_probabilities,
+        p_low=p_low,
+        p_high=p_high,
         clr_schedule_parameters=clr_schedule_parameters,
     )
     binary = binary.resolve() if binary else find_default_binary()
@@ -150,9 +152,19 @@ def main() -> int:
         help="maximum wall-clock seconds for the ns-3 simulator process",
     )
     parser.add_argument(
-        "--lossless-baseline",
+        "--fixed-p-low-baseline",
         action="store_true",
-        help="keep the policy and microbursts enabled while setting every suppression threshold to zero",
+        help="keep the policy and microbursts enabled while setting p_low and p_high to p_low",
+    )
+    parser.add_argument(
+        "--p-low",
+        type=float,
+        help="override the low logical-admission selection probability (0, 0.01]",
+    )
+    parser.add_argument(
+        "--p-high",
+        type=float,
+        help="override the high logical-admission selection probability",
     )
     parser.add_argument(
         "--clr-decay-rate",
@@ -189,6 +201,15 @@ def main() -> int:
         }
     )
 
+    if arguments.fixed_p_low_baseline and arguments.p_high is not None:
+        parser.error("--fixed-p-low-baseline cannot be combined with --p-high")
+    if arguments.fixed_p_low_baseline:
+        profile = load_profile(arguments.profile.resolve())
+        p_low = profile.selection_policy.p_low if arguments.p_low is None else arguments.p_low
+        p_high = p_low
+    else:
+        p_low = arguments.p_low
+        p_high = arguments.p_high
     manifest = run_experiment(
         arguments.profile,
         arguments.output,
@@ -198,7 +219,8 @@ def main() -> int:
         ns3_rng_seed=arguments.ns3_rng_seed,
         ns3_rng_run=arguments.ns3_rng_run,
         simulation_timeout_seconds=arguments.simulation_timeout_seconds,
-        drop_probabilities=(lossless_drop_probabilities() if arguments.lossless_baseline else None),
+        p_low=p_low,
+        p_high=p_high,
         clr_schedule_parameters=clr_schedule_parameters,
         skip_analysis=arguments.skip_analysis,
     )

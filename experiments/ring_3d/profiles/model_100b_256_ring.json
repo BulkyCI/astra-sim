@@ -12,6 +12,10 @@
   "pp_bytes": 50331648,
   "dp_all_reduce_bytes": 312500000,
   "seed": 20260721,
+  "selection_policy": {
+    "p_low": 0.005,
+    "p_high": 0.1
+  },
   "network": {
     "topology": "ring",
     "link_rate": "200Gbps",

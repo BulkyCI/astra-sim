@@ -58,9 +58,9 @@ struct ExperimentConfig {
     uint64_t provenance_control_bytes = 64;
     std::map<uint32_t, uint16_t> vnet_to_priority_group;
     std::map<uint32_t, uint64_t> shedding_threshold_by_step;
-    bool clr_tolerances_configured = false;
-    uint64_t clr_drop_threshold = 0;
-    uint64_t stable_drop_threshold = 0;
+    bool selection_policy_configured = false;
+    uint64_t p_low_threshold = 0;
+    uint64_t p_high_threshold = 0;
     bool clr_mask_configured = false;
     std::map<uint32_t, bool> clr_mask_by_step;
     bool microburst_enabled = false;
@@ -339,8 +339,8 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
         }
         decision.is_clr = clr->second;
         const uint64_t threshold = decision.is_clr
-            ? experiment_config.clr_drop_threshold
-            : experiment_config.stable_drop_threshold;
+            ? experiment_config.p_low_threshold
+            : experiment_config.p_high_threshold;
         decision.shed = decision.decision_hash % kDecisionScale < threshold;
         return decision;
     }
@@ -422,9 +422,9 @@ inline void configure_clr_mask(const std::string& configuration_path) {
         throw std::runtime_error(
             "--clr-mask-configuration requires an enabled experiment");
     }
-    if (!experiment_config.clr_tolerances_configured) {
+    if (!experiment_config.selection_policy_configured) {
         throw std::runtime_error(
-            "--clr-mask-configuration requires clr_tolerances in the experiment configuration");
+            "--clr-mask-configuration requires selection_policy in the experiment configuration");
     }
 
     std::ifstream input(configuration_path);
@@ -519,8 +519,8 @@ inline void configure_experiment(const std::string& configuration_path,
     }
     reject_unknown_keys(root,
                         {"schema_version", "enabled", "seed", "run_id",
-                         "eligibility", "drop_probability_by_step",
-                         "clr_tolerances",
+                         "eligibility", "selection_probability_by_step",
+                         "selection_policy",
                          "default_priority_group", "provenance",
                          "vnet_to_priority_group", "microburst"},
                         "experiment configuration");
@@ -602,52 +602,59 @@ inline void configure_experiment(const std::string& configuration_path,
         }
     }
 
-    if (root.contains("drop_probability_by_step")) {
-        const auto& probabilities = root.at("drop_probability_by_step");
+    if (root.contains("selection_probability_by_step")) {
+        const auto& probabilities = root.at("selection_probability_by_step");
         if (!probabilities.is_object()) {
-            throw std::runtime_error("drop_probability_by_step must be an object");
+            throw std::runtime_error(
+                "selection_probability_by_step must be an object");
         }
         for (auto it = probabilities.begin(); it != probabilities.end(); ++it) {
-            const auto step = parse_uint64_key(it.key(), "drop_probability_by_step");
+            const auto step = parse_uint64_key(
+                it.key(), "selection_probability_by_step");
             if (step == 0 || step > std::numeric_limits<uint32_t>::max()) {
                 throw std::runtime_error(
-                    "drop_probability_by_step keys must be nonzero uint32 values");
+                    "selection_probability_by_step keys must be nonzero uint32 values");
             }
             experiment_config.shedding_threshold_by_step.emplace(
                 static_cast<uint32_t>(step),
                 parse_probability_threshold(
-                    it.value(), "drop_probability_by_step probability"));
+                    it.value(), "selection_probability_by_step probability"));
         }
     }
 
-    if (root.contains("clr_tolerances")) {
-        const auto& tolerances = root.at("clr_tolerances");
-        if (!tolerances.is_object()) {
-            throw std::runtime_error("clr_tolerances must be an object");
+    if (root.contains("selection_policy")) {
+        const auto& policy = root.at("selection_policy");
+        if (!policy.is_object()) {
+            throw std::runtime_error("selection_policy must be an object");
         }
-        reject_unknown_keys(tolerances,
-                            {"clr_drop_probability",
-                             "stable_drop_probability"},
-                            "clr_tolerances");
-        for (const char* key : {"clr_drop_probability",
-                                "stable_drop_probability"}) {
-            if (!tolerances.contains(key)) {
+        reject_unknown_keys(policy, {"semantics", "p_low", "p_high"},
+                            "selection_policy");
+        if (!policy.contains("semantics") ||
+            policy.at("semantics") != "logical_admission_selection") {
+            throw std::runtime_error(
+                "selection_policy.semantics must be logical_admission_selection");
+        }
+        for (const char* key : {"p_low", "p_high"}) {
+            if (!policy.contains(key)) {
                 throw std::runtime_error(
-                    std::string("clr_tolerances requires ") + key);
+                    std::string("selection_policy requires ") + key);
             }
         }
-        experiment_config.clr_drop_threshold = parse_probability_threshold(
-            tolerances.at("clr_drop_probability"),
-            "clr_tolerances.clr_drop_probability");
-        experiment_config.stable_drop_threshold = parse_probability_threshold(
-            tolerances.at("stable_drop_probability"),
-            "clr_tolerances.stable_drop_probability");
-        if (experiment_config.clr_drop_threshold >
-            experiment_config.stable_drop_threshold) {
+        experiment_config.p_low_threshold = parse_probability_threshold(
+            policy.at("p_low"), "selection_policy.p_low");
+        experiment_config.p_high_threshold = parse_probability_threshold(
+            policy.at("p_high"), "selection_policy.p_high");
+        if (experiment_config.p_low_threshold == 0 ||
+            experiment_config.p_low_threshold > 10000) {
             throw std::runtime_error(
-                "clr_tolerances.clr_drop_probability must not exceed stable_drop_probability");
+                "selection_policy.p_low must be in (0, 0.01]");
         }
-        experiment_config.clr_tolerances_configured = true;
+        if (experiment_config.p_low_threshold >
+            experiment_config.p_high_threshold) {
+            throw std::runtime_error(
+                "selection_policy.p_high must be at least p_low");
+        }
+        experiment_config.selection_policy_configured = true;
     }
 
     if (root.contains("microburst")) {

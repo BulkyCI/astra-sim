@@ -355,7 +355,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     else:
         provenance = policy.get("provenance", {})
         microburst = policy.get("microburst", {})
-        clr_tolerances = policy.get("clr_tolerances", {})
+        selection_policy = policy.get("selection_policy", {})
         microburst_flows = microburst.get("flows", [])
         if not isinstance(microburst_flows, list):
             microburst_flows = []
@@ -372,13 +372,13 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     ["Default priority group", policy.get("default_priority_group", "unknown")],
                     ["Protected provenance control", f"{provenance.get('control_bytes', 'unknown')} B on priority group {provenance.get('priority_group', 'unknown')}"],
                     [
-                        "CLR / stable suppression tolerance",
+                        "Low / high selection probability",
                         (
-                            f"{_format_probability(clr_tolerances.get('clr_drop_probability'))} / "
-                            f"{_format_probability(clr_tolerances.get('stable_drop_probability'))}"
-                            if isinstance(clr_tolerances, dict)
-                            and "clr_drop_probability" in clr_tolerances
-                            and "stable_drop_probability" in clr_tolerances
+                            f"{_format_probability(selection_policy.get('p_low'))} / "
+                            f"{_format_probability(selection_policy.get('p_high'))}"
+                            if isinstance(selection_policy, dict)
+                            and "p_low" in selection_policy
+                            and "p_high" in selection_policy
                             else "not recorded"
                         ),
                     ],
@@ -389,9 +389,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 ],
             )
         )
-        thresholds = policy.get("drop_probability_by_step")
+        thresholds = policy.get("selection_probability_by_step")
         if isinstance(thresholds, dict):
-            lines.extend(["", "Materialized admission-suppression thresholds:", ""])
+            lines.extend(["", "Materialized logical-selection probabilities:", ""])
             threshold_rows = [
                 [step, _format_probability(probability)]
                 for step, probability in sorted(thresholds.items(), key=lambda item: int(item[0]))
@@ -542,7 +542,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         if flows:
             lines.extend(["", "### DP All-Reduce admission decisions", ""])
             thresholds = (
-                policy.get("drop_probability_by_step", {})
+                policy.get("selection_probability_by_step", {})
                 if isinstance(policy, dict)
                 else {}
             )

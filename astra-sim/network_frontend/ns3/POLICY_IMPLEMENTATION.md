@@ -53,8 +53,12 @@ $$
 
 `parse_probability_threshold()` validates a number in $[0,1]$ and converts it
 with `llround(probability * kDecisionScale)`. When a CLR mask is configured,
-the strict or stable threshold is selected by its `is_clr` value; otherwise the
-per-step threshold map is used. Missing CLR rows for an issued step are a hard
+`selection_policy.p_low` is selected in CLR and `selection_policy.p_high` is
+selected outside CLR. Profiles require $0 < p_\mathrm{low} \le 1\%$ and
+$p_\mathrm{high} \ge p_\mathrm{low}$; paired comparisons use a fixed-low
+baseline with both values set to $p_\mathrm{low}$. These are logical-selection
+parameters, not DBLP residual-loss bounds. Without a CLR mask, the materialized
+per-step selection map is used. Missing CLR rows for an issued step are a hard
 configuration error, never a default phase.
 
 ## Selected-flow completion contract

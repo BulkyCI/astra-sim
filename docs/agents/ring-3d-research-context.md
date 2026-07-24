@@ -90,9 +90,9 @@ Therefore the current policy is **phase-aware logical admission suppression**.
 Call its thresholds selection probabilities, for example
 $s_\mathrm{CLR}=0$ and $s_\mathrm{stable}=0.1$ in the 70B-class condition:
 
-- Current lossless baseline: both selection probabilities are zero.
-- Current policy: CLR selection probability is zero and stable-step selection
-  probability is 0.1.
+- Current fixed-low baseline: both selection probabilities are 0.5%.
+- Current policy: CLR selection probability is 0.5% and stable-step selection
+  probability is 10%.
 - These values are whole-payload selection probabilities, not packet-loss rates
   or DBLP residual-loss tolerances $P_\mathrm{low}$ and
   $P_\mathrm{high}$.

@@ -8,7 +8,12 @@ The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and
 
 ## Pre-registered primary estimands
 
-For each pair, use the same Chakra traces, topology, policy-selection seed, static CLR mask, ns-3 RNG seed/run, and microburst schedule. The lossless baseline keeps all policy plumbing enabled but sets both CLR/stable selection tolerances to zero.
+For each pair, use the same Chakra traces, topology, policy-selection seed,
+static CLR mask, ns-3 RNG seed/run, and microburst schedule. The fixed-low
+baseline keeps all policy plumbing enabled but sets both phase selection
+probabilities to `p_low`; the phase-aware policy uses `p_low` in CLR and
+`p_high` outside CLR. This remains a logical-selection proxy, not a DBLP
+residual-loss tolerance comparison.
 
 1. **DP All-Reduce per-rank P99 completion latency**: native collective completion minus native collective issue for every DP All-Reduce rank event.
 2. **DP All-Reduce all-rank-span P99**: $\max(end)-\min(start)$ for each `(training_step, workload_node_id)` population across ranks.
@@ -48,9 +53,9 @@ The always-on CI Llama condition schedules the five matched pairs independently,
 
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |
-| Negative control | `profiles/no_incast_8.json`, policy 0% versus policy | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
-| Congested baseline | `profiles/llama3_70b_16.json`, 0% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
-| Congested policy | `profiles/llama3_70b_16.json`, 0% CLR and 10% stable-convergence selection under the fixed decay-and-spike mask | Measure DBLP under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
+| Negative control | `profiles/no_incast_8.json`, fixed 0.5% versus phase-aware 0.5%/10% selection | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
+| Congested baseline | `profiles/llama3_70b_16.json`, fixed 0.5% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
+| Congested policy | `profiles/llama3_70b_16.json`, 0.5% CLR and 10% stable-convergence selection under the fixed decay-and-spike mask | Measure the phase-aware selection proxy under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one 256-card structural policy run | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, one 256-card structural policy run | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |
@@ -72,7 +77,8 @@ If this ratio is small at every rate, a null primary result is expected and vali
 To establish a causal policy effect, one of the following must hold:
 
 1. scale eligible DP traffic so its selected-byte reduction is comparable to the bottleneck load; or
-2. introduce a separately named, congestion-aware DP-only policy and compare it with both the global-hash DBLP policy and the lossless baseline.
+2. introduce a separately named, congestion-aware DP-only policy and compare it
+     with both the global-hash policy and the fixed-low baseline.
 
 The second option is a new policy, not a retroactive reinterpretation of the current global hash rule.
 

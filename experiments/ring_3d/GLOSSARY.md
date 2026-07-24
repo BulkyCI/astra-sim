@@ -10,8 +10,8 @@ paper term in a profile, report, or code symbol.
 | --- | --- | --- | --- | --- |
 | `clr_mask` | Immutable step-to-phase input, not simulator-detected gradients | Generated from a seeded decay/spike proxy | `generate_clr_schedule.py` to `clr_mask.csv` | `clr_mask.csv`, `manifest.json` |
 | CLR | `is_clr=1` selects the strict policy threshold | Step-dependent | `ExperimentConfig.hh` | `experiment.json`, flow rows |
-| `clr_drop_probability` | Current logical-payload selection probability in CLR; **not paper $P_\mathrm{low}$ residual loss** | 0.0 | Generated `experiment.json` | `decision`, `decision_hash` |
-| `stable_drop_probability` | Current logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 0.1 | Generated `experiment.json` | `decision`, `decision_hash` |
+| `selection_policy.p_low` | Logical-payload selection probability in CLR; **not paper $P_\mathrm{low}$ residual loss** | 0.5% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
+| `selection_policy.p_high` | Logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 10% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
 | $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_events.csv` injected data drops |
 | $D$ | Duration of the configured data-loss window | Unset unless a profile explicitly enables `network.data_loss` | `network.data_loss.start_ns`, `.duration_ns` | `manifest.json`, `network_config.txt` |
 | control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; loss profiles use strict priority for ACK/NACK at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
@@ -38,6 +38,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
 | `network.data_loss` | Optional physical data-only impairment plus bounded go-back-$N$ recovery | Absent | Requires probability, time window, scope, RNG stream, retransmission timeout, and retry budget; separate from logical selection thresholds |
+| `selection_policy` | Typed low/high logical-admission selection knobs | `p_low=0.005`, `p_high=0.1` | Profile, manifest, and `experiment.json` | Materialized selection probabilities |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |
 | `microburst_bytes` | Per-flow offered background bytes | 128 MiB | Required even when disabled |
 | `microburst_flow_count` | Background source count | 7 | Must leave a destination rank |
@@ -45,9 +46,9 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `microburst_offset_spacing_ns` | Flow start staggering | 0 | Zero means simultaneous scheduling |
 | `model` | Structural or bucket-sample metadata | 70B FP16 sample | Validated against trace shape |
 
-Policy thresholds are not profile fields. `generate.py` creates them in
-`experiment.json`; `run.py --lossless-baseline` replaces all current selection
-thresholds with zero for the existing ablation.
+`selection_policy` is a strict profile object. `compare.py` holds the fixed-low
+baseline at `p_low` for both phases, then compares it with a policy that uses
+`p_low` in CLR and `p_high` outside CLR. The low value must be in $(0, 1\%]$.
 
 ## Background microburst
 
@@ -65,11 +66,11 @@ contention.
 
 ## Naming rules
 
-- Say **selection probability** for the current `clr_drop_probability` and
-  `stable_drop_probability` fields.
+- Say **selection probability** for the current `selection_policy.p_low` and
+  `selection_policy.p_high` fields.
 - Reserve **packet loss** for transport-level data delivery failures.
 - `network.data_loss` is physical data-plane impairment. It never changes
-  `clr_drop_probability` or `stable_drop_probability`, which remain logical
+  `selection_policy.p_low` or `selection_policy.p_high`, which remain logical
   payload-selection inputs.
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use

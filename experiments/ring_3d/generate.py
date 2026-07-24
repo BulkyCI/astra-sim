@@ -43,7 +43,7 @@ try:
         schedule_metadata,
         write_clr_mask,
     )
-    from .topology import PhysicalNetwork, build_topology, load_network
+    from .topology import DataPlaneLoss, PhysicalNetwork, build_topology, load_network
 except ImportError:
     from generate_clr_schedule import (
         ClrSchedule,
@@ -52,7 +52,7 @@ except ImportError:
         schedule_metadata,
         write_clr_mask,
     )
-    from topology import PhysicalNetwork, build_topology, load_network
+    from topology import DataPlaneLoss, PhysicalNetwork, build_topology, load_network
 
 
 REQUIRED_PROFILE_KEYS = {
@@ -755,6 +755,7 @@ def write_network_config(
     output_dir: Path,
     packet_payload_bytes: int,
     queue_monitor_start_ns: int,
+    data_loss: DataPlaneLoss | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     # The bundled ns-3 setup unconditionally opens these legacy input files,
@@ -770,7 +771,32 @@ def write_network_config(
         "FCT_OUTPUT_FILE": output_dir / "fct.txt",
         "PFC_OUTPUT_FILE": output_dir / "pfc.txt",
         "QLEN_MON_FILE": output_dir / "qlen.txt",
+        "TRANSPORT_EVENT_OUTPUT_FILE": output_dir / "transport_events.csv",
     }
+    if data_loss is None:
+        data_loss_settings = (
+            "DATA_LOSS_PROBABILITY 0.0\nDATA_LOSS_START_NS 0\n"
+            "DATA_LOSS_DURATION_NS 0\nDATA_LOSS_SCOPE all\n"
+            "DATA_LOSS_SOURCE_HOST -1\nDATA_LOSS_DESTINATION_HOST -1\n"
+            "DATA_LOSS_RECEIVER_NODE -1\nDATA_LOSS_RNG_STREAM 51\n"
+            "RETRANSMISSION_TIMEOUT_NS 0\nMAX_RETRANSMISSION_RETRIES 0\n"
+        )
+        ack_high_prio = 0
+    else:
+        data_loss_settings = (
+            f"DATA_LOSS_PROBABILITY {data_loss.probability:.17g}\n"
+            f"DATA_LOSS_START_NS {data_loss.start_ns}\n"
+            f"DATA_LOSS_DURATION_NS {data_loss.duration_ns}\n"
+            f"DATA_LOSS_SCOPE {data_loss.scope}\n"
+            f"DATA_LOSS_SOURCE_HOST {data_loss.source_host if data_loss.source_host is not None else -1}\n"
+            "DATA_LOSS_DESTINATION_HOST "
+            f"{data_loss.destination_host if data_loss.destination_host is not None else -1}\n"
+            f"DATA_LOSS_RECEIVER_NODE {data_loss.receiver_node if data_loss.receiver_node is not None else -1}\n"
+            f"DATA_LOSS_RNG_STREAM {data_loss.rng_stream}\n"
+            f"RETRANSMISSION_TIMEOUT_NS {data_loss.retransmission_timeout_ns}\n"
+            f"MAX_RETRANSMISSION_RETRIES {data_loss.max_retransmission_retries}\n"
+        )
+        ack_high_prio = 1
     with path.open("w", encoding="utf-8") as config:
         config.write(
             "ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\n"
@@ -787,10 +813,11 @@ def write_network_config(
             "FAST_RECOVERY_TIMES 1\nRATE_AI 50Mb/s\nRATE_HAI 100Mb/s\n"
             "MIN_RATE 100Mb/s\nDCTCP_RATE_AI 1000Mb/s\n\n"
             "ERROR_RATE_PER_LINK 0.0000\nL2_CHUNK_SIZE 4000\nL2_ACK_INTERVAL 1\n"
-            "L2_BACK_TO_ZERO 0\n\nHAS_WIN 1\nGLOBAL_T 0\nVAR_WIN 1\n"
+            "L2_BACK_TO_ZERO 0\n"
+            f"{data_loss_settings}\nHAS_WIN 1\nGLOBAL_T 0\nVAR_WIN 1\n"
             "FAST_REACT 1\nU_TARGET 0.95\nMI_THRESH 0\nINT_MULTI 1\nMULTI_RATE 0\n"
             "SAMPLE_FEEDBACK 0\nPINT_LOG_BASE 1.05\nPINT_PROB 1.0\n"
-            "NIC_TOTAL_PAUSE_TIME 0\n\nRATE_BOUND 1\nACK_HIGH_PRIO 0\n"
+            f"NIC_TOTAL_PAUSE_TIME 0\n\nRATE_BOUND 1\nACK_HIGH_PRIO {ack_high_prio}\n"
             "LINK_DOWN 0 0 0\nENABLE_TRACE 1\n\n"
             "KMAX_MAP 6 25000000000 400 40000000000 800 100000000000 1600 "
             "200000000000 2400 400000000000 3200 2400000000000 3200\n"
@@ -1011,6 +1038,7 @@ def materialize(
         output_dir / "ns3",
         profile.network.packet_payload_bytes,
         profile.network.queue_monitor_start_ns,
+        profile.network.data_loss,
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(
@@ -1041,6 +1069,11 @@ def materialize(
         "ranks": profile.ranks,
         "parallelism": {"tp": profile.tp, "pp": profile.pp, "dp": profile.dp},
         "physical_topology": physical_topology.manifest(),
+        "data_plane_loss": (
+            profile.network.data_loss.manifest()
+            if profile.network.data_loss is not None
+            else {"enabled": False}
+        ),
         "profile_config": str(profile_config.resolve()),
         "workload_prefix": str((workload_dir / "ring_3d").resolve()),
         "system_config": str(system_config.resolve()),
@@ -1052,6 +1085,9 @@ def materialize(
         "clr_mask": str(clr_mask.resolve()),
         "clr_schedule": schedule_metadata(clr_schedule),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
+        "transport_event_file": str(
+            (output_dir / "ns3" / "transport_events.csv").resolve()
+        ),
     }
     if model_metadata is not None:
         manifest["model_trace"] = model_metadata

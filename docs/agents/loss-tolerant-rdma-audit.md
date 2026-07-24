@@ -1,15 +1,16 @@
 # Loss-tolerant RDMA readiness audit
 
 - **Audit date:** 2026-07-23
-- **Method:** static read-only inspection of project-owned Ring-3D/ns-3 bridge
-  code and the bundled ns-3 QBB/RDMA backend; no loss experiment was run.
+- **Method:** static read-only inspection of the pre-implementation
+  project-owned Ring-3D/ns-3 bridge and bundled ns-3 QBB/RDMA backend; no loss
+  experiment was run.
 - **Decision assessed:** [loss-tolerant RDMA transport](loss-tolerant-rdma-decision.md)
 - **Scope:** controlled lossy data-plane semantics with a clean, high-priority,
   zero-*configured-impairment-loss* control plane.
 
-## Bottom line
+## Audited baseline
 
-The current simulator does **not** support the adopted transport contract.
+At audit time, the simulator did **not** support the adopted transport contract.
 It can inject static, independent packet loss on QBB receive devices, and it
 has partial control prioritization plus NACK-driven go-back-$N$ recovery. Those
 pieces are not composable into loss-tolerant data plus isolated control:
@@ -30,6 +31,25 @@ pieces are not composable into loss-tolerant data plus isolated control:
 The result is a valid lossless-incast/PFC model with an unsafe global loss knob,
 not a clean loss-tolerant RDMA model. Do not enable `ERROR_RATE_PER_LINK` and
 interpret the output as satisfying the adopted decision.
+
+## Post-audit implementation update — native validation pending
+
+The source tree now contains an initial model-level implementation of the
+audited gaps. It is not a retroactive result claim: no loss-configured native
+simulation has yet supplied the gate evidence below.
+
+| Decision gate | Source implementation | Remaining evidence |
+| --- | --- | --- |
+| Classify before loss | QBB parses `CustomHeader` before invoking its new data-loss error model | Native trace proves only `0x11` reaches the configured loss branch |
+| Zero configured control loss | ACK, NACK, PFC, and CNP bypass the configured data-loss model | Loss-configured run shows zero control injection drops |
+| Priority control | Loss configuration propagates `ACK_HIGH_PRIO 1` to NIC and switch paths | Queue/drop trace confirms the actual modeled behavior under load |
+| Scoped reproducible loss | Typed `network.data_loss` materializes window, direction scope, filters, and RNG stream | Deterministic two-run check verifies the retained schedule |
+| Recovery/liveness | Timeout-driven go-back-$N$ retries yield completed or retry-exhausted QP outcomes | Recovery-success and retry-exhaustion scenarios run natively |
+| Observability | Raw transport events and terminal/recovery flow fields are summarized and reported | Event counts reconcile with a native loss run |
+
+The rest of this document is the detailed **pre-implementation** evidence
+record. Its source-line references intentionally document the former unsafe
+path and should not be read as a description of the post-audit implementation.
 
 ## Gate assessment
 

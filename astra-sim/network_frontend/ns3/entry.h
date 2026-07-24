@@ -84,6 +84,8 @@ map<MsgEventKey, uint64_t> received_msg_standby_hash;
 map<FlowKey, AstraSimNs3::FlowRecord> active_flow_registry;
 uint64_t pending_background_flows = 0;
 uint64_t completed_qps = 0;
+bool transport_failure = false;
+string transport_failure_message;
 
 FlowKey make_flow_key(uint16_t source_port, int src_id, int dst_id) {
     return make_pair(source_port, make_pair(src_id, dst_id));
@@ -104,6 +106,14 @@ uint64_t completed_qp_count() {
 
 size_t active_qp_count() {
     return active_flow_registry.size();
+}
+
+bool has_transport_failure() {
+    return transport_failure;
+}
+
+const string& current_transport_failure_message() {
+    return transport_failure_message;
 }
 
 void register_logical_send_event(int src_id,
@@ -347,8 +357,11 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     }
     AstraSimNs3::FlowRecord flow = active->second;
     flow.physical_bytes = q->m_size;
+    flow.data_attempted_bytes = q->m_data_attempted_bytes;
+    flow.retransmitted_bytes = q->m_retransmitted_bytes;
+    flow.recovery_events = q->m_recovery_events;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
-    flow.terminal = true;
+    flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
         account_physical_bytes(sid, did, q->m_size);
@@ -378,10 +391,57 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     ++completed_qps;
 }
 
+// Registered by common.h::SetupNetwork when bounded timeout recovery exhausts
+// a QP's retry budget. This is a terminal transport outcome, never a logical
+// ASTRA message completion.
+void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
+    const uint32_t sid = ip_to_node_id(q->sip);
+    const uint32_t did = ip_to_node_id(q->dip);
+    const FlowKey key = make_flow_key(q->sport, sid, did);
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        throw runtime_error("Failed QP has no active flow record");
+    }
+
+    Ptr<Node> dst_node = n.Get(did);
+    Ptr<RdmaDriver> rdma = dst_node->GetObject<RdmaDriver>();
+    rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
+
+    AstraSimNs3::FlowRecord flow = active->second;
+    flow.physical_bytes = q->m_size;
+    flow.data_attempted_bytes = q->m_data_attempted_bytes;
+    flow.retransmitted_bytes = q->m_retransmitted_bytes;
+    flow.recovery_events = q->m_recovery_events;
+    flow.end_time_ns = Simulator::Now().GetNanoSeconds();
+    flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Failed;
+    flow.failure_reason = reason == 1 ? "retry_exhausted" : "unknown";
+
+    if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
+        if (pending_background_flows == 0) {
+            throw runtime_error("Background flow failure accounting underflow");
+        }
+        --pending_background_flows;
+    } else {
+        const SenderKey sender_key =
+            make_pair(static_cast<int>(q->sport), make_pair(sid, did));
+        if (sender_src_port_map.erase(sender_key) != 1) {
+            throw runtime_error("Failed QP has no logical sender tag");
+        }
+    }
+
+    AstraSimNs3::experiment_telemetry.record_flow(flow);
+    active_flow_registry.erase(active);
+    transport_failure = true;
+    transport_failure_message =
+        "QP retry budget exhausted for " + to_string(sid) + "->" +
+        to_string(did) + " source_port=" + to_string(q->sport);
+    Simulator::Stop();
+}
+
 int setup_ns3_simulation(string network_configuration) {
     if (!ReadConf(network_configuration)) {
         return -1;
     }
     SetConfig();
-    return SetupNetwork(qp_finish) ? 0 : -1;
+    return SetupNetwork(qp_finish, qp_fail) ? 0 : -1;
 }

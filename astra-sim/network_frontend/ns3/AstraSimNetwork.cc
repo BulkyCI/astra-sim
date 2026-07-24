@@ -403,6 +403,11 @@ int main(int argc, char* argv[]) {
     Simulator::Run();
     AstraSimNs3::finalize_experiment_telemetry();
     Simulator::Destroy();
+    if (has_transport_failure()) {
+        cerr << "Simulation stopped after explicit transport failure: "
+             << current_transport_failure_message() << "\n";
+        return 1;
+    }
     if (!completion_tracker->is_complete()) {
         cerr << "Simulation ended before all ranks, QPs, and background flows completed\n";
         return 1;

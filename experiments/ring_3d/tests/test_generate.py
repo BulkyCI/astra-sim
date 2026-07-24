@@ -142,6 +142,94 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(policy["drop_probability_by_step"], {"1": 0.0, "2": 0.0, "3": 0.0})
 
+    def test_data_loss_materializes_data_only_contract(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["data_loss"] = {
+            "probability": 0.25,
+            "start_ns": 100,
+            "duration_ns": 5_000,
+            "scope": "host_to_switch",
+            "source_host": 0,
+            "destination_host": 4,
+            "receiver_node": 8,
+            "rng_stream": 71,
+            "retransmission_timeout_ns": 500,
+            "max_retransmission_retries": 3,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "lossy.json"
+            output = Path(temporary_directory) / "experiment"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            manifest = materialize(profile_path, output)
+
+            self.assertEqual(
+                manifest["data_plane_loss"],
+                {
+                    "enabled": True,
+                    "probability": 0.25,
+                    "start_ns": 100,
+                    "duration_ns": 5_000,
+                    "scope": "host_to_switch",
+                    "source_host": 0,
+                    "destination_host": 4,
+                    "receiver_node": 8,
+                    "rng_stream": 71,
+                    "retransmission_timeout_ns": 500,
+                    "max_retransmission_retries": 3,
+                },
+            )
+            network_config = (output / "network_config.txt").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("DATA_LOSS_PROBABILITY 0.25", network_config)
+            self.assertIn("DATA_LOSS_SCOPE host_to_switch", network_config)
+            self.assertIn("DATA_LOSS_RECEIVER_NODE 8", network_config)
+            self.assertIn("RETRANSMISSION_TIMEOUT_NS 500", network_config)
+            self.assertIn("MAX_RETRANSMISSION_RETRIES 3", network_config)
+            self.assertIn(
+                f"TRANSPORT_EVENT_OUTPUT_FILE {output / 'ns3' / 'transport_events.csv'}",
+                network_config,
+            )
+            self.assertIn("ACK_HIGH_PRIO 1", network_config)
+            self.assertEqual(
+                Path(manifest["transport_event_file"]),
+                output / "ns3" / "transport_events.csv",
+            )
+
+    def test_data_loss_requires_bounded_recovery(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["data_loss"] = {
+            "probability": 0.25,
+            "start_ns": 0,
+            "duration_ns": 1,
+            "scope": "all",
+            "rng_stream": 51,
+            "retransmission_timeout_ns": 0,
+            "max_retransmission_retries": 3,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "retransmission_timeout_ns"):
+                load_profile(profile_path)
+
+    def test_data_loss_rejects_non_string_scope(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["data_loss"] = {
+            "probability": 0.25,
+            "start_ns": 0,
+            "duration_ns": 1,
+            "scope": ["all"],
+            "rng_stream": 51,
+            "retransmission_timeout_ns": 100,
+            "max_retransmission_retries": 1,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "data_loss.scope"):
+                load_profile(profile_path)
+
     def test_materialization_covers_every_profile_training_step(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["steps"] = 6

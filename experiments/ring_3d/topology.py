@@ -8,6 +8,7 @@ in one place so profile parsing cannot drift from emitted topology files.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,43 @@ DEFAULT_PACKET_PAYLOAD_BYTES = 1_000
 MAX_PACKET_PAYLOAD_BYTES = 9_000
 HOST_TO_SWITCH_DELAY = "0.005ms"
 SWITCH_TO_SWITCH_DELAY = "0.0125ms"
+DATA_LOSS_SCOPES = {
+    "all",
+    "host_to_switch",
+    "switch_to_host",
+    "switch_to_switch",
+}
+
+
+@dataclass(frozen=True)
+class DataPlaneLoss:
+    """Data-only receive impairment and bounded go-back-N recovery policy."""
+
+    probability: float
+    start_ns: int
+    duration_ns: int
+    scope: str
+    source_host: int | None
+    destination_host: int | None
+    receiver_node: int | None
+    rng_stream: int
+    retransmission_timeout_ns: int
+    max_retransmission_retries: int
+
+    def manifest(self) -> dict[str, int | float | str | None]:
+        return {
+            "enabled": True,
+            "probability": self.probability,
+            "start_ns": self.start_ns,
+            "duration_ns": self.duration_ns,
+            "scope": self.scope,
+            "source_host": self.source_host,
+            "destination_host": self.destination_host,
+            "receiver_node": self.receiver_node,
+            "rng_stream": self.rng_stream,
+            "retransmission_timeout_ns": self.retransmission_timeout_ns,
+            "max_retransmission_retries": self.max_retransmission_retries,
+        }
 
 
 @dataclass(frozen=True)
@@ -27,6 +65,7 @@ class ClosNetwork:
     queue_monitor_start_ns: int
     hosts_per_leaf: int
     spine_count: int
+    data_loss: DataPlaneLoss | None = None
 
     @property
     def kind(self) -> str:
@@ -46,6 +85,7 @@ class RingNetwork:
     link_rate: str
     packet_payload_bytes: int
     queue_monitor_start_ns: int
+    data_loss: DataPlaneLoss | None = None
 
     @property
     def kind(self) -> str:
@@ -145,6 +185,91 @@ def _link_rate(value: Any) -> str:
     return value
 
 
+def _probability(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number in [0, 1]")
+    probability = float(value)
+    if not isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError(f"{field} must be a number in [0, 1]")
+    return probability
+
+
+def _optional_host(value: Any, field: str, host_count: int) -> int | None:
+    if value is None:
+        return None
+    host = _nonnegative_int(value, field)
+    if host >= host_count:
+        raise ValueError(f"{field} is outside the host range")
+    return host
+
+
+def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss | None:
+    if "data_loss" not in document:
+        return None
+    loss = document["data_loss"]
+    if not isinstance(loss, dict):
+        raise ValueError("network.data_loss must be an object")
+    required = {
+        "probability",
+        "start_ns",
+        "duration_ns",
+        "scope",
+        "rng_stream",
+        "retransmission_timeout_ns",
+        "max_retransmission_retries",
+    }
+    optional = {"source_host", "destination_host", "receiver_node"}
+    unknown = set(loss) - required - optional
+    if unknown:
+        raise ValueError(f"unknown network.data_loss keys: {sorted(unknown)}")
+    missing = required - set(loss)
+    if missing:
+        raise ValueError(f"missing network.data_loss keys: {sorted(missing)}")
+    scope = loss["scope"]
+    if not isinstance(scope, str) or scope not in DATA_LOSS_SCOPES:
+        raise ValueError(
+            "network.data_loss.scope must be one of "
+            f"{sorted(DATA_LOSS_SCOPES)}"
+        )
+    duration_ns = _positive_int(loss["duration_ns"], "network.data_loss.duration_ns")
+    timeout_ns = _positive_int(
+        loss["retransmission_timeout_ns"],
+        "network.data_loss.retransmission_timeout_ns",
+    )
+    max_retries = _positive_int(
+        loss["max_retransmission_retries"],
+        "network.data_loss.max_retransmission_retries",
+    )
+    rng_stream = _positive_int(loss["rng_stream"], "network.data_loss.rng_stream")
+    if rng_stream > 2**63 - 1:
+        raise ValueError("network.data_loss.rng_stream exceeds the ns-3 range")
+    source_host = _optional_host(
+        loss.get("source_host"), "network.data_loss.source_host", host_count
+    )
+    destination_host = _optional_host(
+        loss.get("destination_host"), "network.data_loss.destination_host", host_count
+    )
+    if source_host is not None and source_host == destination_host:
+        raise ValueError("network.data_loss source_host and destination_host must differ")
+    receiver_node = loss.get("receiver_node")
+    if receiver_node is not None:
+        receiver_node = _nonnegative_int(
+            receiver_node, "network.data_loss.receiver_node"
+        )
+    return DataPlaneLoss(
+        probability=_probability(loss["probability"], "network.data_loss.probability"),
+        start_ns=_nonnegative_int(loss["start_ns"], "network.data_loss.start_ns"),
+        duration_ns=duration_ns,
+        scope=scope,
+        source_host=source_host,
+        destination_host=destination_host,
+        receiver_node=receiver_node,
+        rng_stream=rng_stream,
+        retransmission_timeout_ns=timeout_ns,
+        max_retransmission_retries=max_retries,
+    )
+
+
 def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int]:
     return (
         _link_rate(document.get("link_rate")),
@@ -176,6 +301,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "link_rate",
         "packet_payload_bytes",
         "queue_monitor_start_ns",
+        "data_loss",
     }
     topology_keys = (
         {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
@@ -190,6 +316,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
     link_rate, packet_payload_bytes, queue_monitor_start_ns = _common_network_fields(
         document
     )
+    data_loss = _load_data_loss(document, host_count)
     if packet_payload_bytes > MAX_PACKET_PAYLOAD_BYTES:
         raise ValueError(
             f"network.packet_payload_bytes must not exceed {MAX_PACKET_PAYLOAD_BYTES}"
@@ -202,6 +329,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             link_rate=link_rate,
             packet_payload_bytes=packet_payload_bytes,
             queue_monitor_start_ns=queue_monitor_start_ns,
+            data_loss=data_loss,
         )
 
     hosts_per_leaf = _positive_int(
@@ -218,16 +346,25 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         queue_monitor_start_ns=queue_monitor_start_ns,
         hosts_per_leaf=hosts_per_leaf,
         spine_count=spine_count,
+        data_loss=data_loss,
     )
 
 
 def build_topology(network: PhysicalNetwork, host_count: int) -> TopologyLayout:
     """Build a validated physical layout for the requested network variant."""
     if isinstance(network, ClosNetwork):
-        return _build_clos_topology(network, host_count)
-    if isinstance(network, RingNetwork):
-        return _build_ring_topology(network, host_count)
-    raise TypeError(f"unsupported physical network: {type(network).__name__}")
+        layout = _build_clos_topology(network, host_count)
+    elif isinstance(network, RingNetwork):
+        layout = _build_ring_topology(network, host_count)
+    else:
+        raise TypeError(f"unsupported physical network: {type(network).__name__}")
+    if (
+        network.data_loss is not None
+        and network.data_loss.receiver_node is not None
+        and network.data_loss.receiver_node >= layout.node_count
+    ):
+        raise ValueError("network.data_loss.receiver_node is outside the topology")
+    return layout
 
 
 def _build_clos_topology(network: ClosNetwork, host_count: int) -> TopologyLayout:

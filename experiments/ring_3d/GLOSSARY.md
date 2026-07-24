@@ -12,10 +12,10 @@ paper term in a profile, report, or code symbol.
 | CLR | `is_clr=1` selects the strict policy threshold | Step-dependent | `ExperimentConfig.hh` | `experiment.json`, flow rows |
 | `clr_drop_probability` | Current logical-payload selection probability in CLR; **not paper $P_\mathrm{low}$ residual loss** | 0.0 | Generated `experiment.json` | `decision`, `decision_hash` |
 | `stable_drop_probability` | Current logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 0.1 | Generated `experiment.json` | `decision`, `decision_hash` |
-| $q$ | Packet-loss probability during a proposed data-plane impairment | 0; no loss experiment is active | Would require a transport-loss configuration | Drop/retransmission telemetry, not present |
-| $D$ | Duration of a proposed loss/injection window | Unset | Would require a time-window configuration | Window begin/end, not present |
-| control plane | ACK, NACK, congestion-feedback, PFC, and named protocol/recovery control | No general classifier is active | Future transport contract requires a separate high-priority class and zero configured impairment loss | Per-type queue delay/drop reason, not present |
-| data plane | In-scope payload packets subject to a defined impairment | No loss experiment is active | Future transport contract requires explicit $q$, $D$, direction/path scope, and seed | Per-plane attempts/drops/retransmissions, not present |
+| $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_events.csv` injected data drops |
+| $D$ | Duration of the configured data-loss window | Unset unless a profile explicitly enables `network.data_loss` | `network.data_loss.start_ns`, `.duration_ns` | `manifest.json`, `network_config.txt` |
+| control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; loss profiles use strict priority for ACK/NACK at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
+| data plane | RDMA UDP payload (`0x11`) subject to the explicit scoped impairment | No loss experiment is active | `network.data_loss` applies only after this wire classification | Data attempts, injected drops, retransmission bytes, and terminal flow telemetry |
 | `microburst_bytes` | Bytes required by one synthetic background RDMA flow | 128 MiB | Profile JSON | Background `flow_events.csv` row |
 | `microburst_flow_count` | Number of background flows | 7 | Profile JSON | Background flow rows |
 | `microburst_offset_spacing_ns` | Start offset increment among background flows | 0 ns | Profile JSON | `start_time_ns` |
@@ -37,6 +37,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads | 16 MiB, 0, 1 GiB | Separate from physical transport overhead |
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
+| `network.data_loss` | Optional physical data-only impairment plus bounded go-back-$N$ recovery | Absent | Requires probability, time window, scope, RNG stream, retransmission timeout, and retry budget; separate from logical selection thresholds |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |
 | `microburst_bytes` | Per-flow offered background bytes | 128 MiB | Required even when disabled |
 | `microburst_flow_count` | Background source count | 7 | Must leave a destination rank |
@@ -67,6 +68,12 @@ contention.
 - Say **selection probability** for the current `clr_drop_probability` and
   `stable_drop_probability` fields.
 - Reserve **packet loss** for transport-level data delivery failures.
+- `network.data_loss` is physical data-plane impairment. It never changes
+  `clr_drop_probability` or `stable_drop_probability`, which remain logical
+  payload-selection inputs.
+- Configured control-impaired loss is always zero, but controls can still be
+  delayed or dropped by modeled queue/admission behavior; use
+  `transport_events.csv` to distinguish those cases.
 - Reserve **residual-loss tolerance** for a future DBLP-like stop condition.
 - Say **incast** for the finite background RDMA stressor.
 - Never call a 64-byte provenance control QP a “dropped packet.”

@@ -28,6 +28,24 @@ def _as_bool(row: dict[str, str], key: str) -> bool:
     raise ValueError(f"invalid boolean field {key!r} in telemetry")
 
 
+def _terminal_outcome(row: dict[str, str]) -> str:
+    """Read terminal outcome while accepting telemetry written before this schema."""
+    outcome = row.get("terminal_outcome") or "completed"
+    if outcome not in {"completed", "failed"}:
+        raise ValueError(f"invalid terminal outcome {outcome!r} in telemetry")
+    return outcome
+
+
+def _optional_nonnegative_int(row: dict[str, str], key: str) -> int:
+    value = row.get(key)
+    if value is None or value == "":
+        return 0
+    parsed = _as_int(row, key)
+    if parsed < 0:
+        raise ValueError(f"telemetry field {key!r} must be nonnegative")
+    return parsed
+
+
 def load_csv(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         raise FileNotFoundError(f"missing telemetry file: {path}")
@@ -251,11 +269,18 @@ def _load_fct_records(path: Path) -> dict[tuple[int, int, int], dict[str, int]]:
 def _verify_fct_join(
     flow_rows: list[dict[str, str]], fct_path: Path
 ) -> dict[str, int | str]:
+    completed_rows = [
+        row for row in flow_rows if _terminal_outcome(row) == "completed"
+    ]
+    failed_flow_count = len(flow_rows) - len(completed_rows)
     if not fct_path.is_file():
-        return {"status": "not_available"}
+        return {
+            "status": "not_available",
+            "failed_flow_count": failed_flow_count,
+        }
     records = _load_fct_records(fct_path)
-    telemetry = {_flow_key(row): row for row in flow_rows}
-    if len(telemetry) != len(flow_rows):
+    telemetry = {_flow_key(row): row for row in completed_rows}
+    if len(telemetry) != len(completed_rows):
         raise ValueError("flow telemetry contains a duplicate flow key")
     missing = set(telemetry) - set(records)
     extra = set(records) - set(telemetry)
@@ -273,9 +298,64 @@ def _verify_fct_join(
         if _flow_duration_ns(row) != record["duration_ns"]:
             raise ValueError("telemetry/FCT duration mismatch")
     return {
-        "status": "verified",
+        "status": "verified" if failed_flow_count == 0 else "partial_verified",
         "telemetry_flow_count": len(telemetry),
         "fct_record_count": len(records),
+        "failed_flow_count": failed_flow_count,
+    }
+
+
+def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
+    path = ns3_dir / "transport_events.csv"
+    if not path.is_file():
+        return {"status": "not_available"}
+    rows = load_csv(path)
+    events: dict[str, int] = defaultdict(int)
+    bytes_by_event: dict[str, int] = defaultdict(int)
+    plane_events: dict[str, int] = defaultdict(int)
+    plane_bytes: dict[str, int] = defaultdict(int)
+    valid_events = {
+        "data_arrival",
+        "data_deliver",
+        "data_injected_drop",
+        "control_arrival",
+        "control_deliver",
+        "queue_enqueue",
+        "queue_dequeue",
+        "qbb_drop",
+        "switch_route_drop",
+        "switch_admission_drop",
+    }
+    for row in rows:
+        event = row.get("event")
+        plane = row.get("plane")
+        if event not in valid_events or plane not in {"data", "control"}:
+            raise ValueError("invalid transport event plane or event")
+        if event.startswith("data_") and plane != "data":
+            raise ValueError("configured data impairment dropped a control packet")
+        if event.startswith("control_") and plane != "control":
+            raise ValueError("invalid control transport event plane")
+        packet_bytes = _as_int(row, "packet_bytes")
+        if packet_bytes < 0:
+            raise ValueError("transport event packet bytes must be nonnegative")
+        for field in ("time_ns", "protocol", "node", "node_type", "interface", "queue"):
+            _as_int(row, field)
+        events[event] += 1
+        bytes_by_event[event] += packet_bytes
+        plane_events[plane] += 1
+        plane_bytes[plane] += packet_bytes
+
+    return {
+        "status": "available",
+        "event_count": len(rows),
+        "event_counts": dict(sorted(events.items())),
+        "event_bytes": dict(sorted(bytes_by_event.items())),
+        "plane_event_counts": {
+            plane: plane_events[plane] for plane in ("data", "control")
+        },
+        "plane_bytes": {plane: plane_bytes[plane] for plane in ("data", "control")},
+        "data_injected_drop_count": events["data_injected_drop"],
+        "control_injected_drop_count": 0,
     }
 
 
@@ -415,7 +495,11 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
         }
     else:
         pfc = {"status": "not_available"}
-    return {"queue": queue, "pfc": pfc}
+    return {
+        "queue": queue,
+        "pfc": pfc,
+        "transport": _summarize_transport_events(ns3_dir),
+    }
 
 
 def _traffic_bytes(rows: list[dict[str, str]]) -> dict[str, int]:
@@ -459,6 +543,16 @@ def summarize(
 
     total_logical_bytes = sum(_as_int(row, "logical_bytes") for row in flow_rows)
     total_physical_bytes = sum(_as_int(row, "physical_bytes") for row in flow_rows)
+    completed_rows = [
+        row for row in flow_rows if _terminal_outcome(row) == "completed"
+    ]
+    failed_rows = [row for row in flow_rows if _terminal_outcome(row) == "failed"]
+    for row in completed_rows:
+        if row.get("failure_reason"):
+            raise ValueError("completed flow must not have a failure reason")
+    for row in failed_rows:
+        if not row.get("failure_reason"):
+            raise ValueError("failed flow must record a failure reason")
     shed_rows = [row for row in flow_rows if row.get("decision") == "shed"]
     invalid_sheds = [
         row
@@ -485,18 +579,28 @@ def summarize(
         raise ValueError("provenance control flow must carry nonzero physical bytes")
 
     by_step: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"flows": 0, "shed_flows": 0, "logical_bytes": 0, "physical_bytes": 0}
+        lambda: {
+            "flows": 0,
+            "completed_flows": 0,
+            "failed_flows": 0,
+            "shed_flows": 0,
+            "logical_bytes": 0,
+            "physical_bytes": 0,
+        }
     )
     for row in flow_rows:
         step = row.get("training_step", "unknown")
         bucket = by_step[step]
         bucket["flows"] += 1
+        bucket[f"{_terminal_outcome(row)}_flows"] += 1
         bucket["shed_flows"] += row.get("decision") == "shed"
         bucket["logical_bytes"] += _as_int(row, "logical_bytes")
         bucket["physical_bytes"] += _as_int(row, "physical_bytes")
 
     completion_times = [_as_int(row, "completion_time_ns") for row in completion_rows]
-    flow_completion = _timing_statistics([_flow_duration_ns(row) for row in flow_rows])
+    flow_completion = _timing_statistics(
+        [_flow_duration_ns(row) for row in completed_rows]
+    )
     rank_completion = _timing_statistics(completion_times)
     foreground_logical_rows = [
         row
@@ -513,6 +617,8 @@ def summarize(
     ]
     return {
         "flow_count": len(flow_rows),
+        "completed_flow_count": len(completed_rows),
+        "failed_flow_count": len(failed_rows),
         "shed_flow_count": len(shed_rows),
         "total_logical_bytes": total_logical_bytes,
         "total_physical_bytes": total_physical_bytes,
@@ -522,14 +628,32 @@ def summarize(
         "rank_completion_time_ns": rank_completion,
         "flow_completion_time_ns": {
             "all": flow_completion,
-            "by_training_step": _timing_by_field(flow_rows, "training_step"),
+            "by_training_step": _timing_by_field(completed_rows, "training_step"),
             "by_parallelism_domain": _timing_by_field(
-                flow_rows, "parallelism_domain"
+                completed_rows, "parallelism_domain"
             ),
-            "by_flow_kind": _timing_by_field(flow_rows, "flow_kind"),
+            "by_flow_kind": _timing_by_field(completed_rows, "flow_kind"),
             "by_parallelism_domain_and_flow_kind": _timing_by_domain_and_kind(
-                flow_rows
+                completed_rows
             ),
+        },
+        "transport_recovery": {
+            "data_attempted_bytes": sum(
+                _optional_nonnegative_int(row, "data_attempted_bytes")
+                for row in flow_rows
+            ),
+            "retransmitted_bytes": sum(
+                _optional_nonnegative_int(row, "retransmitted_bytes")
+                for row in flow_rows
+            ),
+            "recovery_event_count": sum(
+                _optional_nonnegative_int(row, "recovery_events")
+                for row in flow_rows
+            ),
+            "failed_by_reason": {
+                reason: sum(1 for row in failed_rows if row.get("failure_reason") == reason)
+                for reason in sorted({row.get("failure_reason", "") for row in failed_rows})
+            },
         },
         "collective_completion": _summarize_collectives(collective_rows),
         "physical_traffic_bytes": {

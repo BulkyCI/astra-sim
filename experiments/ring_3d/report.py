@@ -191,6 +191,28 @@ def _physical_network_rows(
     return rows
 
 
+def _data_plane_loss_rows(data_loss: Any) -> list[list[Any]]:
+    """Return the physical data-loss and bounded-recovery contract when enabled."""
+    if not isinstance(data_loss, dict) or not data_loss.get("enabled"):
+        return []
+    return [
+        ["Configured data loss", data_loss.get("probability", "unknown")],
+        ["Loss scope", data_loss.get("scope", "unknown")],
+        [
+            "Loss window",
+            f"{data_loss.get('start_ns', 0)} ns + {data_loss.get('duration_ns', 0)} ns",
+        ],
+        [
+            "Retransmission timeout",
+            f"{data_loss.get('retransmission_timeout_ns', 0)} ns",
+        ],
+        [
+            "Maximum retransmission retries",
+            data_loss.get("max_retransmission_retries", "unknown"),
+        ],
+    ]
+
+
 def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
     """Render the generated model ledger rather than inferring traffic from labels."""
     if not isinstance(model_trace, dict):
@@ -310,7 +332,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     physical_topology = (
         manifest.get("physical_topology") if isinstance(manifest, dict) else None
     )
-    if (network_rows := _physical_network_rows(network, physical_topology)):
+    data_plane_loss = (
+        manifest.get("data_plane_loss") if isinstance(manifest, dict) else None
+    )
+    network_rows = _physical_network_rows(network, physical_topology)
+    network_rows.extend(_data_plane_loss_rows(data_plane_loss))
+    if network_rows:
         lines.extend(["", "## Physical network", ""])
         lines.extend(_markdown_table(["Field", "Value"], network_rows))
 
@@ -638,7 +665,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         if isinstance(observability, dict):
             queue = observability.get("queue")
             pfc = observability.get("pfc")
-            if isinstance(queue, dict) or isinstance(pfc, dict):
+            transport = observability.get("transport")
+            if (
+                isinstance(queue, dict)
+                or isinstance(pfc, dict)
+                or isinstance(transport, dict)
+            ):
                 queue_status = queue.get("status", "not available") if isinstance(queue, dict) else "not available"
                 pfc_status = pfc.get("status", "not available") if isinstance(pfc, dict) else "not available"
                 queue_value = (
@@ -657,11 +689,21 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     if pfc_status == "available"
                     else "not available"
                 )
+                transport_value = (
+                    f"{transport.get('data_injected_drop_count', 0)} data injected drops; "
+                    f"{transport.get('control_injected_drop_count', 0)} control injected drops"
+                    if transport.get("status") == "available"
+                    else "not available"
+                )
                 lines.extend(["", "## ns-3 congestion observability", ""])
                 lines.extend(
                     _markdown_table(
                         ["Signal", "Observed value"],
-                        [["Queue telemetry", queue_value], ["PFC trace", pfc_value]],
+                        [
+                            ["Queue telemetry", queue_value],
+                            ["PFC trace", pfc_value],
+                            ["Data/control injection", transport_value],
+                        ],
                     )
                 )
                 if isinstance(queue, dict) and queue.get("status") == "available":
@@ -689,6 +731,49 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             )
                             + "."
                         )
+
+        recovery = summary.get("transport_recovery")
+        if isinstance(recovery, dict):
+            failed_by_reason = recovery.get("failed_by_reason", {})
+            failure_value = (
+                ", ".join(
+                    f"{reason or 'unspecified'}: {count}"
+                    for reason, count in sorted(failed_by_reason.items())
+                )
+                if isinstance(failed_by_reason, dict) and failed_by_reason
+                else "none"
+            )
+            lines.extend(["", "## Transport recovery", ""])
+            lines.extend(
+                _markdown_table(
+                    ["Signal", "Observed value"],
+                    [
+                        [
+                            "Data bytes attempted",
+                            _format_bytes(
+                                _as_int(
+                                    recovery.get("data_attempted_bytes", 0),
+                                    "data_attempted_bytes",
+                                )
+                            ),
+                        ],
+                        [
+                            "Retransmitted bytes",
+                            _format_bytes(
+                                _as_int(
+                                    recovery.get("retransmitted_bytes", 0),
+                                    "retransmitted_bytes",
+                                )
+                            ),
+                        ],
+                        [
+                            "Recovery events",
+                            recovery.get("recovery_event_count", 0),
+                        ],
+                        ["Terminal failures", failure_value],
+                    ],
+                )
+            )
 
         background_timeline = summary.get("background_microburst_timeline")
         traffic_bytes = summary.get("physical_traffic_bytes")

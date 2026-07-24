@@ -78,7 +78,34 @@ probability or process, and $D$ only for an explicit impairment time window.
 Neither is the current whole-payload selection probability, and neither is a
 DBLP residual-loss tolerance $P$.
 
-## Current implementation gap
+## Initial implementation status
+
+The initial model-level implementation provides the narrow contract below. It
+is source-implemented and unit-tested at the profile/generator/analyzer layer,
+but it remains **unvalidated as a native loss experiment** until the gate tests
+in this decision run successfully:
+
+- `network.data_loss` is typed profile input that materializes the probability,
+  time window, link direction scope, endpoint filters, independent RNG stream,
+  bounded retransmission timeout/retry budget, and raw transport-event path;
+- `QbbNetDevice::Receive()` parses `CustomHeader` before selecting configured
+  impairment. Only RDMA UDP payload (`0x11`) can invoke the configured
+  data-loss `RateErrorModel`; ACK (`0xFC`), NACK (`0xFD`), PFC (`0xFE`), and CNP
+  (`0xFF`) bypass it;
+- loss profiles set `ACK_HIGH_PRIO 1` for hosts and switches, while control
+  queue/admission events are still emitted and may reveal non-impairment drops;
+- sender timeout recovery reuses the existing go-back-$N$ path. Retry-budget
+  exhaustion creates a failed QP telemetry row and terminates the simulation
+  instead of manufacturing logical completion; and
+- `flow_events.csv`, `transport_events.csv`, analyzer summaries, and reports
+  retain recovery counters and terminal outcomes.
+
+This is not selective retransmission, a reorder-buffer transport, per-packet
+spraying, or an implementation of UET/Falcon behavior. The legacy global
+`ERROR_RATE_PER_LINK` and per-topology error rate are rejected to avoid a
+compatibility path that violates classification-before-loss semantics.
+
+## Pre-implementation gap record
 
 The checked-in backend is not yet this target:
 

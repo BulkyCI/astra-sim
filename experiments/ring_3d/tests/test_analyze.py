@@ -31,6 +31,11 @@ FLOW_FIELDS = [
     "priority_group",
     "logical_bytes",
     "physical_bytes",
+    "data_attempted_bytes",
+    "retransmitted_bytes",
+    "recovery_events",
+    "terminal_outcome",
+    "failure_reason",
     "decision_hash",
     "start_time_ns",
     "end_time_ns",
@@ -114,6 +119,11 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "priority_group": "1",
             "logical_bytes": "1048576",
             "physical_bytes": "64",
+            "data_attempted_bytes": "64",
+            "retransmitted_bytes": "0",
+            "recovery_events": "0",
+            "terminal_outcome": "completed",
+            "failure_reason": "",
             "decision_hash": "42",
             "start_time_ns": "10",
             "end_time_ns": "20",
@@ -186,6 +196,83 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(
                 summary["ns3_observability"]["pfc"]["affected_switch_port_queues"],
                 [{"switch": 8, "port": 3, "queue": 3}],
+            )
+
+    def test_summary_reports_data_loss_without_control_injection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_events.csv").write_text(
+                "time_ns,event,plane,protocol,node,node_type,interface,"
+                "source_host,destination_host,source_port,packet_bytes,queue\n"
+                "10,data_arrival,data,17,8,1,1,0,4,10000,1024,-1\n"
+                "10,data_injected_drop,data,17,8,1,1,0,4,10000,1024,-1\n"
+                "20,control_arrival,control,252,0,0,1,4,0,100,60,-1\n"
+                "20,control_deliver,control,252,0,0,1,4,0,100,60,-1\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+            transport = summary["ns3_observability"]["transport"]
+            self.assertEqual(transport["status"], "available")
+            self.assertEqual(transport["data_injected_drop_count"], 1)
+            self.assertEqual(transport["control_injected_drop_count"], 0)
+            self.assertEqual(transport["plane_event_counts"], {"data": 2, "control": 2})
+
+    def test_summary_rejects_control_configured_loss_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_events.csv").write_text(
+                "time_ns,event,plane,protocol,node,node_type,interface,"
+                "source_host,destination_host,source_port,packet_bytes,queue\n"
+                "10,data_injected_drop,control,252,0,0,1,4,0,100,60,-1\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "configured data impairment"):
+                summarize(telemetry, ns3_dir=ns3)
+
+    def test_summary_reports_explicit_failed_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            failed = self.valid_shed_flow()
+            failed.update(
+                {
+                    "flow_kind": "foreground_payload",
+                    "decision": "admitted",
+                    "admission_eligible": "false",
+                    "transport_role": "collective_payload",
+                    "logical_bytes": "1024",
+                    "physical_bytes": "1024",
+                    "data_attempted_bytes": "4096",
+                    "retransmitted_bytes": "3072",
+                    "recovery_events": "3",
+                    "terminal_outcome": "failed",
+                    "failure_reason": "retry_exhausted",
+                }
+            )
+            self.write_telemetry(telemetry, failed, completions=[])
+
+            summary = summarize(telemetry)
+
+            self.assertEqual(summary["completed_flow_count"], 0)
+            self.assertEqual(summary["failed_flow_count"], 1)
+            self.assertEqual(
+                summary["transport_recovery"],
+                {
+                    "data_attempted_bytes": 4096,
+                    "retransmitted_bytes": 3072,
+                    "recovery_event_count": 3,
+                    "failed_by_reason": {"retry_exhausted": 1},
+                },
             )
 
     def test_summary_uses_native_collective_events_for_logical_latency(self) -> None:

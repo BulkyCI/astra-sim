@@ -1,0 +1,4 @@
+# ns-3's CMake wrapper generates the native compilation database here.
+# The path is relative to this repository-level configuration file.
+CompileFlags:
+  CompilationDatabase: extern/network_backend/ns-3/cmake-cache

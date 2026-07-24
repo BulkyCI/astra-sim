@@ -62,7 +62,16 @@ class Ring3DReportTests(unittest.TestCase):
                         "leaf_count": 4,
                         "spine_count": 4,
                         "hosts_per_leaf": 2,
-                    }
+                    },
+                    "data_plane_loss": {
+                        "enabled": True,
+                        "probability": 0.1,
+                        "start_ns": 100,
+                        "duration_ns": 1_000,
+                        "scope": "host_to_switch",
+                        "retransmission_timeout_ns": 500,
+                        "max_retransmission_retries": 3,
+                    },
                 }
             ),
             encoding="utf-8",
@@ -204,6 +213,17 @@ class Ring3DReportTests(unittest.TestCase):
                             "max_queue_bytes": 4_096,
                         },
                         "pfc": {"status": "available", "event_count": 1},
+                        "transport": {
+                            "status": "available",
+                            "data_injected_drop_count": 2,
+                            "control_injected_drop_count": 0,
+                        },
+                    },
+                    "transport_recovery": {
+                        "data_attempted_bytes": 262_144,
+                        "retransmitted_bytes": 65_536,
+                        "recovery_event_count": 1,
+                        "failed_by_reason": {},
                     },
                     "physical_traffic_bytes": {
                         "foreground_logical_operations": {
@@ -326,10 +346,15 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("Per-QP flow-completion time", report)
             self.assertIn("Simulated rank-completion distribution", report)
             self.assertIn("ns-3 congestion observability", report)
+            self.assertIn("Data/control injection", report)
+            self.assertIn("Transport recovery", report)
+            self.assertIn("Terminal failures", report)
             self.assertIn("Logical collective-completion latency", report)
             self.assertIn("Causal traffic mix", report)
             self.assertIn("Two-stage leaf-spine Clos", report)
             self.assertIn("Materialized model workload", report)
+            self.assertIn("Configured data loss", report)
+            self.assertIn("Maximum retransmission retries", report)
             self.assertIn("5.82 GiB", report)
             self.assertIn("Execution controls", report)
             self.assertIn("300.0 minutes", report)

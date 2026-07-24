@@ -34,6 +34,12 @@ enum class FlowKind : uint8_t {
     BackgroundMicroburst,
 };
 
+enum class FlowTerminalOutcome : uint8_t {
+    Pending = 0,
+    Completed,
+    Failed,
+};
+
 struct MicroburstFlow {
     uint32_t src = 0;
     uint32_t dst = 0;
@@ -85,9 +91,13 @@ struct FlowRecord {
     uint16_t priority_group = 0;
     uint64_t logical_bytes = 0;
     uint64_t physical_bytes = 0;
+    uint64_t data_attempted_bytes = 0;
+    uint64_t retransmitted_bytes = 0;
+    uint32_t recovery_events = 0;
     uint64_t start_time_ns = 0;
     uint64_t end_time_ns = 0;
-    bool terminal = false;
+    FlowTerminalOutcome terminal_outcome = FlowTerminalOutcome::Pending;
+    std::string failure_reason;
 };
 
 inline ExperimentConfig experiment_config;
@@ -107,8 +117,9 @@ class ExperimentTelemetry {
                "origin_transport_role,transport_role,"
                "collective_type,training_step,workload_node_id,"
                "message_sequence,src,dst,tag,source_port,priority_group,"
-               "logical_bytes,physical_bytes,decision_hash,start_time_ns,"
-               "end_time_ns\n";
+               "logical_bytes,physical_bytes,data_attempted_bytes,"
+               "retransmitted_bytes,recovery_events,terminal_outcome,"
+               "failure_reason,decision_hash,start_time_ns,end_time_ns\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
             << "rank,parallelism_domain,collective_type,training_step,"
@@ -135,7 +146,11 @@ class ExperimentTelemetry {
                     << flow.operation.message_sequence << ',' << flow.src << ','
                     << flow.dst << ',' << flow.tag << ',' << flow.source_port
                     << ',' << flow.priority_group << ',' << flow.logical_bytes
-                    << ',' << flow.physical_bytes << ',' << flow.decision_hash
+                    << ',' << flow.physical_bytes << ','
+                    << flow.data_attempted_bytes << ','
+                    << flow.retransmitted_bytes << ',' << flow.recovery_events
+                    << ',' << terminal_outcome_name(flow.terminal_outcome)
+                    << ',' << flow.failure_reason << ',' << flow.decision_hash
                     << ',' << flow.start_time_ns << ',' << flow.end_time_ns
                     << '\n';
     }
@@ -187,6 +202,18 @@ class ExperimentTelemetry {
             return "provenance_control";
         case FlowKind::BackgroundMicroburst:
             return "background_microburst";
+        }
+        return "unknown";
+    }
+
+    static const char* terminal_outcome_name(FlowTerminalOutcome outcome) {
+        switch (outcome) {
+        case FlowTerminalOutcome::Pending:
+            return "pending";
+        case FlowTerminalOutcome::Completed:
+            return "completed";
+        case FlowTerminalOutcome::Failed:
+            return "failed";
         }
         return "unknown";
     }

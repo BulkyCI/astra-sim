@@ -29,6 +29,16 @@ A run is eligible for the primary analysis only if all checks pass:
 - the no-incast negative control has no synthetic background-microburst rows and reports its PFC/queue state explicitly;
 - selected traffic is exclusively DP CollectivePayload All-Reduce provenance control, with nonzero physical provenance bytes.
 
+For a profile that enables `network.data_loss`, the run must additionally retain
+`transport_events.csv` and establish that at least one in-scope data event was
+injected as loss while the configured control-injection-drop count is zero. Any
+control queue/admission drop must remain visible as a separate event; it is not
+evidence of configured impairment isolation. Every flow must finish with either
+the `completed` terminal outcome or the explicit `failed`/`retry_exhausted`
+outcome. A run with any failed outcome is not eligible for the policy primary
+estimands, but is a valid transport liveness observation when its raw telemetry
+is retained.
+
 Failures are reported as invalid or unavailable data; they are never silently replaced by a QP-envelope proxy.
 
 ## Conditions

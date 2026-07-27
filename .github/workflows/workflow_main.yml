@@ -22,13 +22,13 @@ jobs:
 
     steps:
     - name: Check out source and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
+      uses: astral-sh/setup-uv@v9
       with:
         version: "0.11.28"
         enable-cache: true
@@ -55,20 +55,20 @@ jobs:
 
     steps:
     - name: Check out source and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
+      uses: astral-sh/setup-uv@v9
       with:
         version: "0.11.28"
         enable-cache: true
 
     - name: Restore trusted compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache
         key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
@@ -103,7 +103,7 @@ jobs:
     # trusted entries but never writes one that a protected branch can consume.
     - name: Save compiler cache from trusted pushes
       if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache
         key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
@@ -145,7 +145,7 @@ jobs:
 
     - name: Upload 3D Ring researcher report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ring-3d-research-report-${{ github.run_id }}
         path: runs/ring_3d/smoke_8/research_report.md
@@ -153,7 +153,7 @@ jobs:
 
     - name: Upload 3D Ring reproducibility bundle
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ring-3d-smoke-results-${{ github.run_id }}
         path: runs/ring_3d/smoke_8
@@ -161,7 +161,7 @@ jobs:
 
     - name: Upload 3D Ring retry-exhaustion bundle
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ring-3d-retry-exhaustion-${{ github.run_id }}
         path: runs/ring_3d/retry_exhaustion_8
@@ -169,7 +169,7 @@ jobs:
 
     - name: Upload Llama 3 70B-class bucket trace
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ring-3d-llama3-70b-16-trace-${{ github.run_id }}
         path: runs/ring_3d/llama3_70b_16
@@ -204,13 +204,13 @@ jobs:
 
     steps:
     - name: Check out source and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
+      uses: astral-sh/setup-uv@v9
       with:
         version: "0.11.28"
         enable-cache: true
@@ -219,7 +219,7 @@ jobs:
       run: ./utils/setup.sh
 
     - name: Download paired seed artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         pattern: ring-3d-llama3-70b-16-comparison-seed-*-${{ github.run_id }}
         path: runs/ring_3d/llama3_70b_16_comparison/artifacts
@@ -240,7 +240,7 @@ jobs:
 
     - name: Upload aggregate comparison report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
         path: runs/ring_3d/llama3_70b_16_comparison/aggregate

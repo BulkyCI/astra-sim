@@ -57,20 +57,20 @@ jobs:
 
     steps:
     - name: Check out source and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         persist-credentials: false
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
+      uses: astral-sh/setup-uv@v9
       with:
         version: "0.11.28"
         enable-cache: true
 
     - name: Restore trusted compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache
         key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
@@ -105,7 +105,7 @@ jobs:
     # push jobs may publish a new entry consumed by later protected-branch work.
     - name: Save compiler cache from trusted pushes
       if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache
         key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
@@ -169,7 +169,7 @@ jobs:
 
     - name: Upload reproducibility bundle
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact_name }}-${{ github.run_id }}
         path: ${{ inputs.run_directory }}

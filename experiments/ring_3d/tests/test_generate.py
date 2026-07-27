@@ -99,6 +99,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(Path(manifest["profile_config"]), output / "profile.json")
             self.assertEqual(Path(manifest["clr_mask"]), output / "clr_mask.csv")
             self.assertEqual(manifest["clr_schedule"]["clr_step_count"], 2)
+            self.assertIn(
+                "ACK_HIGH_PRIO 1",
+                (output / "network_config.txt").read_text(encoding="utf-8"),
+            )
 
     def test_llama3_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
@@ -216,6 +220,18 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 Path(manifest["transport_event_file"]),
                 output / "ns3" / "transport_events.csv",
             )
+
+    def test_retry_exhaustion_profile_is_a_data_only_failure_fixture(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/retry_exhaustion_8.json"
+        )
+        profile = load_profile(profile_path)
+
+        self.assertFalse(profile.microburst_enabled)
+        self.assertIsNotNone(profile.network.data_loss)
+        self.assertEqual(profile.network.data_loss.probability, 1.0)
+        self.assertEqual(profile.network.data_loss.max_retransmission_retries, 1)
 
     def test_data_loss_requires_bounded_recovery(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))

@@ -827,7 +827,6 @@ def write_network_config(
             "DATA_LOSS_RECEIVER_NODE -1\nDATA_LOSS_RNG_STREAM 51\n"
             "RETRANSMISSION_TIMEOUT_NS 0\nMAX_RETRANSMISSION_RETRIES 0\n"
         )
-        ack_high_prio = 0
     else:
         data_loss_settings = (
             f"DATA_LOSS_PROBABILITY {data_loss.probability:.17g}\n"
@@ -842,7 +841,6 @@ def write_network_config(
             f"RETRANSMISSION_TIMEOUT_NS {data_loss.retransmission_timeout_ns}\n"
             f"MAX_RETRANSMISSION_RETRIES {data_loss.max_retransmission_retries}\n"
         )
-        ack_high_prio = 1
     with path.open("w", encoding="utf-8") as config:
         config.write(
             "ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\n"
@@ -863,7 +861,7 @@ def write_network_config(
             f"{data_loss_settings}\nHAS_WIN 1\nGLOBAL_T 0\nVAR_WIN 1\n"
             "FAST_REACT 1\nU_TARGET 0.95\nMI_THRESH 0\nINT_MULTI 1\nMULTI_RATE 0\n"
             "SAMPLE_FEEDBACK 0\nPINT_LOG_BASE 1.05\nPINT_PROB 1.0\n"
-            f"NIC_TOTAL_PAUSE_TIME 0\n\nRATE_BOUND 1\nACK_HIGH_PRIO {ack_high_prio}\n"
+            "NIC_TOTAL_PAUSE_TIME 0\n\nRATE_BOUND 1\nACK_HIGH_PRIO 1\n"
             "LINK_DOWN 0 0 0\nENABLE_TRACE 1\n\n"
             "KMAX_MAP 6 25000000000 400 40000000000 800 100000000000 1600 "
             "200000000000 2400 400000000000 3200 2400000000000 3200\n"

@@ -305,8 +305,8 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         "",
         "> The 3D Ring label identifies the logical collective workload; the physical fabric is "
         "reported below. This report distinguishes logical modeled bytes (collective and background operations) "
-        "from physical transport bytes. A shed payload is modeled by protected provenance control, "
-        "not literal packet loss.",
+        "from physical transport bytes. A shed payload is modeled by a provenance-replacement "
+        "QP, not a wire-control packet or literal packet loss.",
         "",
         "## Experiment design",
         "",
@@ -370,7 +370,14 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 [
                     ["Eligibility", policy.get("eligibility", "unknown")],
                     ["Default priority group", policy.get("default_priority_group", "unknown")],
-                    ["Protected provenance control", f"{provenance.get('control_bytes', 'unknown')} B on priority group {provenance.get('priority_group', 'unknown')}"],
+                    [
+                        "Provenance replacement QP",
+                        (
+                            f"{provenance.get('control_bytes', 'unknown')} B on logical "
+                            f"priority group {provenance.get('priority_group', 'unknown')}; "
+                            "not a wire-control queue"
+                        ),
+                    ],
                     [
                         "Low / high selection probability",
                         (
@@ -418,11 +425,18 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             )
         else:
             fct_join_status = "not available"
+        eligibility = summary.get("primary_analysis_eligibility")
+        eligibility_status = (
+            eligibility.get("status", "not available")
+            if isinstance(eligibility, dict)
+            else "not available"
+        )
         integrity_rows = [
             ["Telemetry analyzer", "PASS — DP-only shedding and nonzero provenance control were validated before this report was written"],
             ["Rank completion", f"{len(completed_ranks)} unique / {expected_ranks} expected ({'complete' if complete else 'incomplete'})"],
             ["Flow telemetry", f"{len(flows)} rows / {summary.get('flow_count', 'unknown')} summarized"],
             ["Telemetry ↔ ns-3 FCT join", fct_join_status],
+            ["Primary-analysis eligibility", eligibility_status],
             ["Maximum rank completion time", _format_duration_ns(_as_int(summary.get("completion_time_ns_max", 0), "completion_time_ns_max"))],
         ]
         lines.extend(_markdown_table(["Check", "Result"], integrity_rows))
@@ -691,7 +705,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 )
                 transport_value = (
                     f"{transport.get('data_injected_drop_count', 0)} data injected drops; "
-                    f"{transport.get('control_injected_drop_count', 0)} control injected drops"
+                    f"{transport.get('control_injected_drop_count', 0)} control injected drops; "
+                    f"{transport.get('data_natural_buffer_drop_count', 0)} data natural buffer drops; "
+                    f"{transport.get('control_natural_buffer_drop_count', 0)} control natural buffer drops"
                     if transport.get("status") == "available"
                     else "not available"
                 )
@@ -702,7 +718,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         [
                             ["Queue telemetry", queue_value],
                             ["PFC trace", pfc_value],
-                            ["Data/control injection", transport_value],
+                            ["Configured / natural data-control drops", transport_value],
                         ],
                     )
                 )

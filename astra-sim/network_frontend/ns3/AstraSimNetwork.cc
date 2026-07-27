@@ -89,6 +89,13 @@ class NS3BackendCompletionTracker {
         if (is_complete()) {
             return;
         }
+        if (has_transport_failure() && active_qp_count() == 0 &&
+            !has_pending_background_traffic()) {
+            AstraSim::LoggerFactory::get_logger("network")->info(
+                "Transport failure reached quiescence; stopping simulation.");
+            Simulator::Stop();
+            return;
+        }
         Simulator::Schedule(kLivenessCheckpointInterval,
                             &NS3BackendCompletionTracker::liveness_checkpoint,
                             this);

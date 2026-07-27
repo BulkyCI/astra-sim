@@ -435,7 +435,6 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     transport_failure_message =
         "QP retry budget exhausted for " + to_string(sid) + "->" +
         to_string(did) + " source_port=" + to_string(q->sport);
-    Simulator::Stop();
 }
 
 int setup_ns3_simulation(string network_configuration) {

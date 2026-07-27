@@ -29,8 +29,8 @@ def _as_bool(row: dict[str, str], key: str) -> bool:
 
 
 def _terminal_outcome(row: dict[str, str]) -> str:
-    """Read terminal outcome while accepting telemetry written before this schema."""
-    outcome = row.get("terminal_outcome") or "completed"
+    """Read the explicit terminal outcome for an issued transport flow."""
+    outcome = row.get("terminal_outcome")
     if outcome not in {"completed", "failed"}:
         raise ValueError(f"invalid terminal outcome {outcome!r} in telemetry")
     return outcome
@@ -95,6 +95,34 @@ def _flow_duration_ns(row: dict[str, str]) -> int:
     if duration < 0:
         raise ValueError("flow completion time must not be negative")
     return duration
+
+
+def _summarize_rank_completions(
+    completion_rows: list[dict[str, str]], expected_rank_count: int | None
+) -> dict[str, int | str]:
+    seen_ranks: set[int] = set()
+    for row in completion_rows:
+        rank = _as_int(row, "rank")
+        completion_time_ns = _as_int(row, "completion_time_ns")
+        if rank < 0 or completion_time_ns < 0:
+            raise ValueError("rank completion telemetry must be nonnegative")
+        if rank in seen_ranks:
+            raise ValueError("rank completion telemetry contains a duplicate rank")
+        seen_ranks.add(rank)
+
+    result: dict[str, int | str] = {
+        "status": "not_checked" if expected_rank_count is None else "verified",
+        "recorded_rank_count": len(seen_ranks),
+    }
+    if expected_rank_count is not None:
+        if expected_rank_count <= 0:
+            raise ValueError("expected rank count must be positive")
+        if seen_ranks != set(range(expected_rank_count)):
+            raise ValueError(
+                "rank completion telemetry does not cover every expected rank"
+            )
+        result["expected_rank_count"] = expected_rank_count
+    return result
 
 
 def _collective_duration_ns(row: dict[str, str]) -> int:
@@ -314,6 +342,9 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
     bytes_by_event: dict[str, int] = defaultdict(int)
     plane_events: dict[str, int] = defaultdict(int)
     plane_bytes: dict[str, int] = defaultdict(int)
+    event_plane_counts: dict[str, dict[str, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
     valid_events = {
         "data_arrival",
         "data_deliver",
@@ -325,6 +356,7 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "qbb_drop",
         "switch_route_drop",
         "switch_admission_drop",
+        "switch_egress_queue_drop",
     }
     for row in rows:
         event = row.get("event")
@@ -344,6 +376,7 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         bytes_by_event[event] += packet_bytes
         plane_events[plane] += 1
         plane_bytes[plane] += packet_bytes
+        event_plane_counts[event][plane] += 1
 
     return {
         "status": "available",
@@ -356,6 +389,26 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "plane_bytes": {plane: plane_bytes[plane] for plane in ("data", "control")},
         "data_injected_drop_count": events["data_injected_drop"],
         "control_injected_drop_count": 0,
+        "data_switch_admission_drop_count": event_plane_counts[
+            "switch_admission_drop"
+        ]["data"],
+        "control_switch_admission_drop_count": event_plane_counts[
+            "switch_admission_drop"
+        ]["control"],
+        "data_switch_egress_queue_drop_count": event_plane_counts[
+            "switch_egress_queue_drop"
+        ]["data"],
+        "control_switch_egress_queue_drop_count": event_plane_counts[
+            "switch_egress_queue_drop"
+        ]["control"],
+        "data_natural_buffer_drop_count": (
+            event_plane_counts["switch_admission_drop"]["data"]
+            + event_plane_counts["switch_egress_queue_drop"]["data"]
+        ),
+        "control_natural_buffer_drop_count": (
+            event_plane_counts["switch_admission_drop"]["control"]
+            + event_plane_counts["switch_egress_queue_drop"]["control"]
+        ),
     }
 
 
@@ -531,6 +584,7 @@ def summarize(
     telemetry_dir: Path,
     fct_path: Path | None = None,
     ns3_dir: Path | None = None,
+    expected_rank_count: int | None = None,
 ) -> dict[str, Any]:
     telemetry_dir = telemetry_dir.resolve()
     flow_rows = load_csv(telemetry_dir / "flow_events.csv")
@@ -540,6 +594,10 @@ def summarize(
         fct_path = telemetry_dir.parent / "ns3" / "fct.txt"
     if ns3_dir is None:
         ns3_dir = telemetry_dir.parent / "ns3"
+
+    rank_completion_status = _summarize_rank_completions(
+        completion_rows, expected_rank_count
+    )
 
     total_logical_bytes = sum(_as_int(row, "logical_bytes") for row in flow_rows)
     total_physical_bytes = sum(_as_int(row, "physical_bytes") for row in flow_rows)
@@ -615,6 +673,16 @@ def summarize(
         and row.get("origin_transport_role") == "collective_payload"
         and row.get("collective_type") == "all_reduce"
     ]
+    fct_join = _verify_fct_join(flow_rows, fct_path.resolve())
+    collective_completion = _summarize_collectives(collective_rows)
+    ns3_observability = _summarize_ns3_observability(ns3_dir.resolve())
+    primary_eligible = (
+        expected_rank_count is not None
+        and not failed_rows
+        and rank_completion_status["status"] == "verified"
+        and collective_completion["status"] == "available"
+        and fct_join["status"] == "verified"
+    )
     return {
         "flow_count": len(flow_rows),
         "completed_flow_count": len(completed_rows),
@@ -626,6 +694,7 @@ def summarize(
         "completion_rank_count": len(completion_rows),
         "completion_time_ns_max": rank_completion["max_ns"] or 0,
         "rank_completion_time_ns": rank_completion,
+        "rank_completion_status": rank_completion_status,
         "flow_completion_time_ns": {
             "all": flow_completion,
             "by_training_step": _timing_by_field(completed_rows, "training_step"),
@@ -655,15 +724,23 @@ def summarize(
                 for reason in sorted({row.get("failure_reason", "") for row in failed_rows})
             },
         },
-        "collective_completion": _summarize_collectives(collective_rows),
+        "collective_completion": collective_completion,
         "physical_traffic_bytes": {
             "total": _traffic_bytes(flow_rows),
             "foreground_logical_operations": _traffic_bytes(foreground_logical_rows),
             "dp_all_reduce": _traffic_bytes(dp_all_reduce_rows),
         },
         "background_microburst_timeline": _background_timeline(flow_rows),
-        "fct_join": _verify_fct_join(flow_rows, fct_path.resolve()),
-        "ns3_observability": _summarize_ns3_observability(ns3_dir.resolve()),
+        "fct_join": fct_join,
+        "ns3_observability": ns3_observability,
+        "primary_analysis_eligibility": {
+            "status": "eligible" if primary_eligible else "ineligible",
+            "expected_rank_count": expected_rank_count,
+            "failed_flow_count": len(failed_rows),
+            "rank_completion_status": rank_completion_status["status"],
+            "collective_completion_status": collective_completion["status"],
+            "fct_join_status": fct_join["status"],
+        },
         "by_training_step": dict(
             sorted(by_step.items(), key=lambda entry: _training_step_sort_key(entry[0]))
         ),
@@ -683,12 +760,18 @@ def main() -> int:
         type=Path,
         help="directory containing ns-3 queue and PFC output; defaults to ../ns3",
     )
+    parser.add_argument(
+        "--expected-rank-count",
+        type=int,
+        help="require exactly one rank-completion row for every rank in [0, count)",
+    )
     parser.add_argument("--output", type=Path, help="write the JSON summary to this path")
     arguments = parser.parse_args()
     summary = summarize(
         arguments.telemetry_dir.resolve(),
         arguments.fct_file.resolve() if arguments.fct_file else None,
         arguments.ns3_dir.resolve() if arguments.ns3_dir else None,
+        arguments.expected_rank_count,
     )
     encoded = json.dumps(summary, indent=2) + "\n"
     if arguments.output is None:

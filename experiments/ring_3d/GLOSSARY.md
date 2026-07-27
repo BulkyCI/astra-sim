@@ -14,12 +14,13 @@ paper term in a profile, report, or code symbol.
 | `selection_policy.p_high` | Logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 10% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
 | $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_events.csv` injected data drops |
 | $D$ | Duration of the configured data-loss window | Unset unless a profile explicitly enables `network.data_loss` | `network.data_loss.start_ns`, `.duration_ns` | `manifest.json`, `network_config.txt` |
-| control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; loss profiles use strict priority for ACK/NACK at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
+| control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; generated profiles set strict ACK/NACK priority at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
 | data plane | RDMA UDP payload (`0x11`) subject to the explicit scoped impairment | No loss experiment is active | `network.data_loss` applies only after this wire classification | Data attempts, injected drops, retransmission bytes, and terminal flow telemetry |
 | `microburst_bytes` | Bytes required by one synthetic background RDMA flow | 128 MiB | Profile JSON | Background `flow_events.csv` row |
 | `microburst_flow_count` | Number of background flows | 7 | Profile JSON | Background flow rows |
 | `microburst_offset_spacing_ns` | Start offset increment among background flows | 0 ns | Profile JSON | `start_time_ns` |
 | `provenance_control_bytes` | Physical payload for a selected logical payload's reliable control QP | 64 B | Generated `experiment.json` | `physical_bytes` |
+| natural buffer drop | Switch MMU-admission or egress-queue rejection under offered load | Native calibration pending | `switch_admission_drop` or `switch_egress_queue_drop` in ns-3 | `data_natural_buffer_drop_count` and control counterpart |
 | `decision_hash` | Stable selection hash over seed, run, operation, endpoints, and tag | Deterministic | `ExperimentConfig.hh` | `flow_events.csv` |
 | `kDecisionScale` | Integer probability scale for deterministic selection | 1,000,000 | `ExperimentConfig.hh` | N/A |
 | logical bytes | Original ASTRA payload size | 1 GiB DP bucket | Trace/request | `logical_bytes` |
@@ -75,6 +76,8 @@ contention.
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use
   `transport_events.csv` to distinguish those cases.
+- A provenance replacement QP is UDP data on priority group 1, not an ACK,
+  NACK, PFC, CNP, or a queue-0 wire-control packet.
 - Reserve **residual-loss tolerance** for a future DBLP-like stop condition.
 - Say **incast** for the finite background RDMA stressor.
 - Never call a 64-byte provenance control QP a “dropped packet.”

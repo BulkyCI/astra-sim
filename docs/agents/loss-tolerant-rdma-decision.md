@@ -92,8 +92,9 @@ in this decision run successfully:
   impairment. Only RDMA UDP payload (`0x11`) can invoke the configured
   data-loss `RateErrorModel`; ACK (`0xFC`), NACK (`0xFD`), PFC (`0xFE`), and CNP
   (`0xFF`) bypass it;
-- loss profiles set `ACK_HIGH_PRIO 1` for hosts and switches, while control
-  queue/admission events are still emitted and may reveal non-impairment drops;
+- generated profiles set `ACK_HIGH_PRIO 1` for hosts and switches independently
+  of configured impairment, while control queue/admission events are still
+  emitted and may reveal non-impairment drops;
 - sender timeout recovery reuses the existing go-back-$N$ path. Retry-budget
   exhaustion creates a failed QP telemetry row and terminates the simulation
   instead of manufacturing logical completion; and

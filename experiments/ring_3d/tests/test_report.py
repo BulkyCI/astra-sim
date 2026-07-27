@@ -214,6 +214,7 @@ class Ring3DReportTests(unittest.TestCase):
                         "telemetry_flow_count": 2,
                         "fct_record_count": 2,
                     },
+                    "primary_analysis_eligibility": {"status": "eligible"},
                     "ns3_observability": {
                         "queue": {
                             "status": "available",
@@ -226,6 +227,8 @@ class Ring3DReportTests(unittest.TestCase):
                             "status": "available",
                             "data_injected_drop_count": 2,
                             "control_injected_drop_count": 0,
+                            "data_natural_buffer_drop_count": 3,
+                            "control_natural_buffer_drop_count": 1,
                         },
                     },
                     "transport_recovery": {
@@ -344,7 +347,7 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("TP=2 × PP=2 × DP=2", report)
             self.assertIn("8 unique / 8 expected (complete)", report)
             self.assertIn("PASS — DP-only shedding", report)
-            self.assertIn("Protected provenance control", report)
+            self.assertIn("Provenance replacement QP", report)
             self.assertIn("Suppressed logical DP bytes", report)
             self.assertIn("By training step", report)
             self.assertIn("DP All-Reduce admission decisions", report)
@@ -352,10 +355,12 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("By parallelism domain", report)
             self.assertIn("provenance_control", report)
             self.assertIn("Telemetry ↔ ns-3 FCT join", report)
+            self.assertIn("Primary-analysis eligibility", report)
+            self.assertIn("eligible", report)
             self.assertIn("Per-QP flow-completion time", report)
             self.assertIn("Simulated rank-completion distribution", report)
             self.assertIn("ns-3 congestion observability", report)
-            self.assertIn("Data/control injection", report)
+            self.assertIn("Configured / natural data-control drops", report)
             self.assertIn("Transport recovery", report)
             self.assertIn("Terminal failures", report)
             self.assertIn("Logical collective-completion latency", report)

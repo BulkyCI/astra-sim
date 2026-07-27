@@ -18,6 +18,7 @@ logical-payload-substitution ablation, not a DBLP packet-loss reproduction.
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
 - [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
+- [profiles/retry_exhaustion_8.json](profiles/retry_exhaustion_8.json): a native regression fixture that deterministically exhausts a one-retry, data-only impairment budget; it must fail while retaining explicit terminal-QP telemetry and is never a primary-analysis result.
 - [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a packet-accurate Llama 3 70B-class gradient-bucket stress workload with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, and a 400 Gb/s two-leaf Clos.
 - [profiles/model_100b_256_clos.json](profiles/model_100b_256_clos.json): a 100B-parameter structural workload on 256 accelerator cards and a 16-leaf × 16-spine Clos.
 - [profiles/model_100b_256_ring.json](profiles/model_100b_256_ring.json): the same 100B structural workload and communication schedule on a 256-switch host-attached physical ring.
@@ -38,7 +39,7 @@ Build the ns-3 frontend, then execute the complete smoke run:
 bash experiments/ring_3d/smoke.sh
 ```
 
-The runner locates the default ns-3 binary. Pass `--binary /path/to/AstraSimNetwork` to [run.py](run.py) when using another build profile. It emits `telemetry/flow_events.csv`, `telemetry/collective_events.csv`, `telemetry/rank_completion.csv`, and `summary.json`. The analyzer verifies a one-to-one telemetry-to-ns-3 FCT join by `(src, dst, source_port)`, including start time, duration, and physical bytes. Native `collective_events.csv` records exactly one issue-to-completion event per rank and logical collective; it supports per-rank completion and all-rank span $\max(end)-\min(start)$ metrics. The analyzer also reports per-QP FCT diagnostics, rank-completion distribution, queue peak locations, and paired PFC pause/resume burden. To analyze an already completed run:
+The runner locates the default ns-3 binary. Pass `--binary /path/to/AstraSimNetwork` to [run.py](run.py) when using another build profile. It emits `telemetry/flow_events.csv`, `telemetry/collective_events.csv`, `telemetry/rank_completion.csv`, and `summary.json`. The analyzer verifies exactly one completion row for every materialized rank, explicit completed/failed terminal QP outcomes, and a one-to-one telemetry-to-ns-3 FCT join by `(src, dst, source_port)`, including start time, duration, and physical bytes. Native `collective_events.csv` records exactly one issue-to-completion event per rank and logical collective; it supports per-rank completion and all-rank span $\max(end)-\min(start)$ metrics. The analyzer also reports per-QP FCT diagnostics, rank-completion distribution, queue peak locations, paired PFC pause/resume burden, configured data injection, and separately attributed switch admission/egress-queue drops. To analyze an already completed run:
 
 ```sh
 uv run --locked python experiments/ring_3d/analyze.py \
@@ -85,7 +86,7 @@ uv run --locked python experiments/ring_3d/compare.py \
   --require-congestion --clean
 ```
 
-The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor the current policy, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, and at least one completed PFC pause interval.
+The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor the current policy, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, at least one completed PFC pause interval, and an eligible native collective/FCT/terminal ledger. After calibration demonstrates actual packet loss, add `--require-finite-buffer-data-drop`; it additionally requires at least one data-plane switch admission or egress-queue rejection and does not treat PFC alone as loss evidence.
 
 The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the five pairs independently and then validates and aggregates their artifacts. Each pair gets GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 150-minute cap for each of its two ns-3 processes, leaving time for build, report, and artifact publication without serializing five pairs into one job.
 
@@ -139,21 +140,29 @@ Only payload requests explicitly labeled `dp`, `CollectivePayload`, and
 default) during critical-learning steps and `p_high` (10% by default) during
 stable steps. Within a selected probability, deterministic integer hashing of
 the seed, run ID, training step, workload node ID, message sequence, endpoints,
-and tag selects the logical payloads. A selected payload uses a reliable,
-protected 64-byte provenance-control flow; completion still resolves the
-original sender and receiver. `flow_events.csv` records both logical and
-physical bytes so results do not characterize the modeled operation as literal
-packet loss. These are selection-proxy knobs, not DBLP residual-loss $P$
-semantics. See [POLICY_IMPLEMENTATION.md](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)
+and tag selects the logical payloads. A selected payload uses a reliable
+64-byte provenance-replacement QP on logical priority group 1; it is ordinary
+UDP data on the wire, not an ACK/NACK/PFC/CNP control packet. Completion still
+resolves the original sender and receiver. `flow_events.csv` records both
+logical and physical bytes so results do not characterize the modeled operation
+as literal packet loss. These are selection-proxy knobs, not DBLP residual-loss
+$P$ semantics. See [POLICY_IMPLEMENTATION.md](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md)
 for the runtime contract.
 
 The ns-3 frontend emits an info-level liveness checkpoint every 10 ms of simulated time while work remains. Each message reports simulated time, completed QPs, active QPs, completed ranks, and pending background flows. Simulated time is ns-3's virtual clock, not wall-clock duration: checkpoints never impose a virtual-time cutoff. The configured `--simulation-timeout-seconds` setting and CI's outer `timeout` command remain the only wall-clock guards for long-running experiments.
 
-Priority group 0 remains reserved. Foreground vnet 0 maps to priority group 3, while provenance controls use priority group 1. Step 2 also triggers deterministic cross-rack RDMA microbursts on the same modeled host/RDMA path.
+Priority group 0 remains reserved for wire control at the switch. Foreground
+vnet 0 maps to priority group 3, while provenance-replacement QPs use priority
+group 1. Generated network configurations enable strict ACK/NACK priority
+independently of whether configured data impairment is active. Queue 0 has
+strict scheduling but no capacity-reservation claim; its observed delay and
+drops remain part of `transport_events.csv`. Step 2 also triggers deterministic
+cross-rack RDMA microbursts on the same modeled host/RDMA path.
 
 ## Tests
 
 ```sh
 uv run --locked python -m unittest discover \
   -s experiments/ring_3d/tests -v
+bash experiments/ring_3d/failure_liveness.sh
 ```

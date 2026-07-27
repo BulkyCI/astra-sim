@@ -4,7 +4,7 @@ This protocol determines whether the DBLP provenance policy has an empirically s
 
 ## Scope and claim boundary
 
-The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte protected provenance-control QP; it is not a packet drop. The Llama 3 70B-class condition is a single-gradient-bucket microbenchmark, not an exact framework replay, hardware measurement, or a full-model synchronization result. The 100B 256-card topology studies are structural transformer workloads on two physical fabrics; they are descriptive single-policy runs and do not establish a DBLP effect without a matched baseline.
+The packet-level claim is limited to ASTRA-sim 2.0's native Ring collectives and bundled ns-3/RDMA model. The policy is eligible only for typed `dp` + `CollectivePayload` + `All_Reduce` traffic. A selected logical payload uses a 64-byte provenance-replacement QP on priority group 1; it is not a packet drop or a wire-control packet. The Llama 3 70B-class condition is a single-gradient-bucket microbenchmark, not an exact framework replay, hardware measurement, or a full-model synchronization result. The 100B 256-card topology studies are structural transformer workloads on two physical fabrics; they are descriptive single-policy runs and do not establish a DBLP effect without a matched baseline.
 
 ## Pre-registered primary estimands
 
@@ -28,21 +28,30 @@ Positive paired reductions favor the policy. The report must include the mean, a
 A run is eligible for the primary analysis only if all checks pass:
 
 - all modeled ranks complete exactly once;
+- every issued transport flow has exactly one explicit `completed` or `failed`
+     terminal outcome; any failed flow is retained but excludes the run from the
+     primary estimands;
 - every transport telemetry row joins one ns-3 FCT row by `(src, dst, source_port)`, including physical bytes, start time, and duration;
 - every native collective row has nonnegative duration and no duplicate `(domain, collective type, step, workload node, rank)` completion;
 - the incast condition records at least one PFC pause/resume interval and a nonzero queue peak;
 - the no-incast negative control has no synthetic background-microburst rows and reports its PFC/queue state explicitly;
 - selected traffic is exclusively DP CollectivePayload All-Reduce provenance control, with nonzero physical provenance bytes.
 
+An experiment that claims finite-buffer incast loss must additionally retain
+`transport_events.csv`, show zero configured data-injection drops, and show at
+least one `data_natural_buffer_drop_count` event caused by switch admission or
+egress-queue rejection. PFC and a nonzero queue peak demonstrate pressure but
+do not, by themselves, demonstrate physical packet loss. Control queue or
+admission drops must remain separately reported; strict priority and zero
+configured impairment loss do not imply infinite control capacity.
+
 For a profile that enables `network.data_loss`, the run must additionally retain
 `transport_events.csv` and establish that at least one in-scope data event was
 injected as loss while the configured control-injection-drop count is zero. Any
 control queue/admission drop must remain visible as a separate event; it is not
-evidence of configured impairment isolation. Every flow must finish with either
-the `completed` terminal outcome or the explicit `failed`/`retry_exhausted`
-outcome. A run with any failed outcome is not eligible for the policy primary
-estimands, but is a valid transport liveness observation when its raw telemetry
-is retained.
+evidence of configured impairment isolation. A run with any failed outcome is
+not eligible for the policy primary estimands, but is a valid transport
+liveness observation when its raw telemetry is retained.
 
 Failures are reported as invalid or unavailable data; they are never silently replaced by a QP-envelope proxy.
 
@@ -54,7 +63,7 @@ The always-on CI Llama condition schedules the five matched pairs independently,
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |
 | Negative control | `profiles/no_incast_8.json`, fixed 0.5% versus phase-aware 0.5%/10% selection | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
-| Congested baseline | `profiles/llama3_70b_16.json`, fixed 0.5% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. |
+| Congested baseline | `profiles/llama3_70b_16.json`, fixed 0.5% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. This calibrates pressure, not finite-buffer loss, until natural data drops are observed. |
 | Congested policy | `profiles/llama3_70b_16.json`, 0.5% CLR and 10% stable-convergence selection under the fixed decay-and-spike mask | Measure the phase-aware selection proxy under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one 256-card structural policy run | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, one 256-card structural policy run | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
@@ -85,6 +94,9 @@ The second option is a new policy, not a retroactive reinterpretation of the cur
 ## Decision rules
 
 - **Validated congestion only:** raw PFC/queue gates pass, but primary CIs span zero or byte relief is causally negligible. Report congestion calibration, not a policy benefit.
+- **Pressure without finite-buffer loss:** PFC/queue gates pass but no natural
+     data-buffer drop is observed. Report a lossless-incast pressure result; do
+     not call it a finite-buffer-loss result.
 - **Supported policy benefit:** raw gates pass; the pre-registered primary logical-collective metric improves with a CI excluding zero at one or more predeclared scale/rate points; the byte-relief ratio makes the result causally plausible; and the no-incast control is near zero.
 - **No supported benefit:** valid runs fail the preceding criterion. Preserve and publish the null result and all artifacts.
 

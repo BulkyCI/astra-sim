@@ -70,6 +70,10 @@ For a selected eligible payload it creates a `ProvenanceControl` flow with:
 - priority group `provenance_priority_group` (1);
 - original logical payload byte count retained in `FlowRecord`.
 
+This is a logical priority group, not the wire-control queue used by ACK/NACK,
+PFC, or CNP. On the wire, the provenance replacement is RDMA UDP data and must
+not be described as a transport-control packet or a loss-proof queue class.
+
 When that QP completes, `complete_logical_shed_sender()` resolves the original
 send and the receive callback is notified with the original logical byte count
 without counting those bytes as physically sent. An admitted foreground flow
@@ -83,7 +87,8 @@ success/failure/residual-data state and updating all callers.
 
 ## Telemetry contract
 
-Every completed QP records one `FlowRecord` in `flow_events.csv`. Important
+Every issued QP records one terminal `FlowRecord` in `flow_events.csv`: either
+`completed`, or `failed` with a terminal reason. Important
 fields are:
 
 | Field | Meaning |
@@ -94,6 +99,7 @@ fields are:
 | `physical_bytes` | QP payload modeled by ns-3; not a retransmission-byte counter |
 | `decision_hash` | Reproducibility audit key for eligible decisions |
 | `start_time_ns`, `end_time_ns` | Simulated QP interval |
+| `terminal_outcome` / `failure_reason` | Explicit transport terminal state; failures invalidate primary latency analysis |
 
 `collective_events.csv` is the source for native logical collective latency.
 Do not substitute P99 of only admitted QPs: treatment changes that population.

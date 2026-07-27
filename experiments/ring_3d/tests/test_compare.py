@@ -18,6 +18,8 @@ from experiments.ring_3d.compare import (
     compare_summaries,
     congestion_evidence,
     require_congestion,
+    require_finite_buffer_data_drop,
+    require_primary_analysis,
     render_comparison_report,
     run_comparison,
 )
@@ -58,6 +60,7 @@ def summary(makespan: int, fct_p99: int) -> dict[str, object]:
             "dp_all_reduce": {"physical_bytes": 8_000},
             "total": {"physical_bytes": 20_000},
         },
+        "primary_analysis_eligibility": {"status": "eligible"},
     }
 
 
@@ -70,6 +73,11 @@ def congested_summary() -> dict[str, object]:
     result["ns3_observability"] = {
         "queue": {"status": "available", "max_queue_bytes": 32 * 1024 * 1024},
         "pfc": {"status": "available", "completed_pause_interval_count": 1},
+        "transport": {
+            "status": "available",
+            "data_natural_buffer_drop_count": 1,
+            "control_natural_buffer_drop_count": 0,
+        },
     }
     return result
 
@@ -170,6 +178,29 @@ class Ring3DComparisonTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "did not establish required congestion"):
             require_congestion(uncongested, "test run")
+
+    def test_finite_buffer_drop_gate_requires_natural_data_drop(self) -> None:
+        self.assertEqual(
+            require_finite_buffer_data_drop(congested_summary(), "test run")[
+                "data_natural_buffer_drop_count"
+            ],
+            1,
+        )
+        no_drop = congested_summary()
+        no_drop["ns3_observability"]["transport"][
+            "data_natural_buffer_drop_count"
+        ] = 0
+        with self.assertRaisesRegex(ValueError, "finite-buffer data loss"):
+            require_finite_buffer_data_drop(no_drop, "test run")
+
+    def test_primary_analysis_gate_rejects_ineligible_summary(self) -> None:
+        ineligible = summary(1_000, 100)
+        ineligible["primary_analysis_eligibility"] = {
+            "status": "ineligible",
+            "failed_flow_count": 1,
+        }
+        with self.assertRaisesRegex(ValueError, "ineligible for primary analysis"):
+            require_primary_analysis(ineligible, "test run")
 
     def test_comparison_propagates_per_simulation_timeout(self) -> None:
         def fake_run_experiment(

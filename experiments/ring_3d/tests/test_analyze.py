@@ -138,6 +138,16 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(summary["total_physical_bytes"], 64)
             self.assertEqual(summary["completion_time_ns_max"], 120)
 
+    def test_summary_rejects_missing_terminal_outcome(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            missing_outcome = self.valid_shed_flow()
+            missing_outcome.pop("terminal_outcome")
+            self.write_telemetry(telemetry, missing_outcome)
+
+            with self.assertRaisesRegex(ValueError, "terminal outcome"):
+                summarize(telemetry)
+
     def test_summary_rejects_non_dp_shedding(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "telemetry"
@@ -222,6 +232,57 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(transport["data_injected_drop_count"], 1)
             self.assertEqual(transport["control_injected_drop_count"], 0)
             self.assertEqual(transport["plane_event_counts"], {"data": 2, "control": 2})
+
+    def test_summary_distinguishes_natural_data_and_control_buffer_drops(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_events.csv").write_text(
+                "time_ns,event,plane,protocol,node,node_type,interface,"
+                "source_host,destination_host,source_port,packet_bytes,queue\n"
+                "10,switch_admission_drop,data,17,8,1,-1,0,4,10000,1024,-1\n"
+                "11,switch_egress_queue_drop,data,17,8,1,-1,0,4,10000,1024,-1\n"
+                "12,switch_egress_queue_drop,control,252,8,1,-1,4,0,10000,60,-1\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+            transport = summary["ns3_observability"]["transport"]
+            self.assertEqual(transport["data_natural_buffer_drop_count"], 2)
+            self.assertEqual(transport["control_natural_buffer_drop_count"], 1)
+            self.assertEqual(transport["data_injected_drop_count"], 0)
+
+    def test_summary_requires_exact_expected_rank_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (1, 120)])
+
+            summary = summarize(telemetry, expected_rank_count=2)
+
+            self.assertEqual(summary["rank_completion_status"], {
+                "status": "verified",
+                "recorded_rank_count": 2,
+                "expected_rank_count": 2,
+            })
+            self.assertEqual(
+                summary["primary_analysis_eligibility"]["status"], "ineligible"
+            )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (2, 120)])
+            with self.assertRaisesRegex(ValueError, "does not cover every expected rank"):
+                summarize(telemetry, expected_rank_count=2)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (0, 120)])
+            with self.assertRaisesRegex(ValueError, "duplicate rank"):
+                summarize(telemetry, expected_rank_count=2)
 
     def test_summary_rejects_control_configured_loss_event(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -197,6 +197,8 @@ def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
 	observability = _mapping(summary.get("ns3_observability"), "ns3_observability")
 	queue = _mapping(observability.get("queue"), "ns3_observability.queue")
 	pfc = _mapping(observability.get("pfc"), "ns3_observability.pfc")
+	transport_value = observability.get("transport")
+	transport = transport_value if isinstance(transport_value, dict) else {}
 	background = _mapping(
 		summary.get("background_microburst_timeline"), "background_microburst_timeline"
 	)
@@ -221,6 +223,15 @@ def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
 		"max_queue_bytes": max_queue_bytes,
 		"completed_pause_interval_count": completed_pause_intervals,
 		"background_physical_bytes": background_physical_bytes,
+		"transport_status": str(transport.get("status", "not_available")),
+		"data_natural_buffer_drop_count": _nonnegative_int(
+			transport.get("data_natural_buffer_drop_count"),
+			"ns3_observability.transport.data_natural_buffer_drop_count",
+		),
+		"control_natural_buffer_drop_count": _nonnegative_int(
+			transport.get("control_natural_buffer_drop_count"),
+			"ns3_observability.transport.control_natural_buffer_drop_count",
+		),
 		"congestion_established": (
 			queue_status == "available"
 			and pfc_status == "available"
@@ -240,6 +251,32 @@ def require_congestion(summary: dict[str, Any], run_label: str) -> dict[str, boo
 			f"{run_label} did not establish required congestion: {evidence}"
 		)
 	return evidence
+
+
+def require_finite_buffer_data_drop(
+	summary: dict[str, Any], run_label: str
+) -> dict[str, bool | int | str]:
+	"""Reject congestion runs without an observed natural data-buffer drop."""
+	evidence = congestion_evidence(summary)
+	if (
+		evidence["transport_status"] != "available"
+		or evidence["data_natural_buffer_drop_count"] == 0
+	):
+		raise ValueError(
+			f"{run_label} did not establish finite-buffer data loss: {evidence}"
+		)
+	return evidence
+
+
+def require_primary_analysis(summary: dict[str, Any], run_label: str) -> None:
+	"""Reject a paired metric extracted from incomplete native telemetry."""
+	eligibility = _mapping(
+		summary.get("primary_analysis_eligibility"), "primary_analysis_eligibility"
+	)
+	if eligibility.get("status") != "eligible":
+		raise ValueError(
+			f"{run_label} is ineligible for primary analysis: {eligibility}"
+		)
 
 
 def _format_duration_ns(value: float) -> str:
@@ -267,6 +304,12 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 		if comparison.get("congestion_required")
 		else "Raw congestion signals were recorded but not enforced as a comparison gate."
 	)
+	finite_buffer_statement = (
+		"Every run also recorded at least one natural data-plane switch admission "
+		"or egress-queue drop; configured injection remains a separate signal."
+		if comparison.get("finite_buffer_data_drop_required")
+		else "Natural finite-buffer data loss was recorded when available but not enforced."
+	)
 	lines = [
 		"# Paired phase-aware selection comparison",
 		"",
@@ -275,6 +318,7 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
 		"Baseline and policy share an ns-3 random-stream seed/run within each pair; successive pairs use distinct runs.",
 		"",
 		congestion_statement,
+		finite_buffer_statement,
 		"",
 		"| Metric | Baseline mean | Policy mean | Mean reduction | 95% CI of reduction | Mean reduction % |",
 		"| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -347,6 +391,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 	profile: str | None = None
 	selection_policy: dict[str, Any] | None = None
 	require_congestion: bool | None = None
+	require_finite_buffer_drop: bool | None = None
 	simulation_timeout_seconds: int | None = None
 	per_seed: list[dict[str, Any]] = []
 	for path in comparison_paths:
@@ -374,6 +419,20 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 			require_congestion = artifact_congestion
 		elif artifact_congestion != require_congestion:
 			raise ValueError("comparison artifacts must use the same congestion setting")
+
+		artifact_finite_buffer_drop = comparison.get(
+			"finite_buffer_data_drop_required", False
+		)
+		if not isinstance(artifact_finite_buffer_drop, bool):
+			raise ValueError(
+				f"comparison artifact {path} has invalid finite-buffer drop setting"
+			)
+		if require_finite_buffer_drop is None:
+			require_finite_buffer_drop = artifact_finite_buffer_drop
+		elif artifact_finite_buffer_drop != require_finite_buffer_drop:
+			raise ValueError(
+				"comparison artifacts must use the same finite-buffer drop setting"
+			)
 
 		artifact_timeout = comparison.get("simulation_timeout_seconds")
 		if isinstance(artifact_timeout, bool) or not isinstance(artifact_timeout, int):
@@ -405,6 +464,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
 		"selection_policy": selection_policy,
 		"seeds": sorted(seeds),
 		"congestion_required": require_congestion,
+		"finite_buffer_data_drop_required": require_finite_buffer_drop,
 		"simulation_timeout_seconds": simulation_timeout_seconds,
 		"per_seed": per_seed,
 		"aggregate": aggregate_comparisons(per_seed),
@@ -419,6 +479,7 @@ def run_comparison(
 	binary: Path | None = None,
 	clean: bool = False,
 	require_congestion_signals: bool = False,
+	require_finite_buffer_data_drops: bool = False,
 	simulation_timeout_seconds: int | None = None,
 	p_low: float | None = None,
 	p_high: float | None = None,
@@ -471,6 +532,10 @@ def run_comparison(
 		)
 		baseline_summary = _read_summary(baseline_dir)
 		policy_summary = _read_summary(policy_dir)
+		require_primary_analysis(baseline_summary, f"seed {seed} fixed-p-low baseline")
+		require_primary_analysis(
+			policy_summary, f"seed {seed} phase-aware selection policy"
+		)
 		baseline_congestion = congestion_evidence(baseline_summary)
 		policy_congestion = congestion_evidence(policy_summary)
 		if require_congestion_signals:
@@ -478,6 +543,13 @@ def run_comparison(
 				baseline_summary, f"seed {seed} fixed-p-low baseline"
 			)
 			policy_congestion = require_congestion(
+				policy_summary, f"seed {seed} phase-aware selection policy"
+			)
+		if require_finite_buffer_data_drops:
+			baseline_congestion = require_finite_buffer_data_drop(
+				baseline_summary, f"seed {seed} fixed-p-low baseline"
+			)
+			policy_congestion = require_finite_buffer_data_drop(
 				policy_summary, f"seed {seed} phase-aware selection policy"
 			)
 		per_seed.append(
@@ -504,6 +576,7 @@ def run_comparison(
 		},
 		"seeds": seeds,
 		"congestion_required": require_congestion_signals,
+		"finite_buffer_data_drop_required": require_finite_buffer_data_drops,
 		"simulation_timeout_seconds": simulation_timeout_seconds,
 		"per_seed": per_seed,
 		"aggregate": aggregate_comparisons(per_seed),
@@ -536,6 +609,11 @@ def main() -> int:
 		help="require observed background traffic, queueing, and completed PFC pause intervals",
 	)
 	parser.add_argument(
+		"--require-finite-buffer-data-drop",
+		action="store_true",
+		help="require a natural data-plane switch admission or egress-queue drop",
+	)
+	parser.add_argument(
 		"--simulation-timeout-seconds",
 		type=int,
 		help="maximum wall-clock seconds for each ns-3 simulator process",
@@ -566,7 +644,11 @@ def main() -> int:
 			arguments.seeds,
 			binary=arguments.binary,
 			clean=arguments.clean,
-			require_congestion_signals=arguments.require_congestion,
+			require_congestion_signals=(
+				arguments.require_congestion
+				or arguments.require_finite_buffer_data_drop
+			),
+			require_finite_buffer_data_drops=arguments.require_finite_buffer_data_drop,
 			simulation_timeout_seconds=arguments.simulation_timeout_seconds,
 			p_low=arguments.p_low,
 			p_high=arguments.p_high,

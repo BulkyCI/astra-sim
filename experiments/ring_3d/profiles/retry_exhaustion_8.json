@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-retry-exhaustion-8",
+  "parallelism": {
+    "tp": 2,
+    "pp": 2,
+    "dp": 2
+  },
+  "steps": 3,
+  "compute_duration_us": 10,
+  "tp_all_reduce_bytes": 65536,
+  "pp_bytes": 32768,
+  "dp_all_reduce_bytes": 131072,
+  "seed": 20260317,
+  "selection_policy": {
+    "p_low": 0.005,
+    "p_high": 0.1
+  },
+  "network": {
+    "topology": "clos",
+    "hosts_per_leaf": 2,
+    "spine_count": 4,
+    "link_rate": "200Gbps",
+    "data_loss": {
+      "probability": 1.0,
+      "start_ns": 0,
+      "duration_ns": 100000000,
+      "scope": "all",
+      "rng_stream": 73,
+      "retransmission_timeout_ns": 1000,
+      "max_retransmission_retries": 1
+    }
+  },
+  "microburst_enabled": false,
+  "microburst_bytes": 262144
+}

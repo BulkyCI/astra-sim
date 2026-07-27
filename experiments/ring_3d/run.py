@@ -128,6 +128,8 @@ def run_experiment(
                 str(output / "ns3" / "fct.txt"),
                 "--ns3-dir",
                 str(output / "ns3"),
+                "--expected-rank-count",
+                str(manifest["ranks"]),
                 "--output",
                 str(output / "summary.json"),
             ],

@@ -25,6 +25,7 @@ class Ring3DRunnerTests(unittest.TestCase):
             binary.chmod(0o755)
             manifest = {
                 "seed": 17,
+                "ranks": 8,
                 "workload_prefix": "/tmp/workload/ring_3d",
                 "system_config": "/tmp/system.json",
                 "network_config": "/tmp/network.txt",
@@ -47,14 +48,16 @@ class Ring3DRunnerTests(unittest.TestCase):
                     ns3_rng_seed=9,
                     ns3_rng_run=17,
                     simulation_timeout_seconds=960,
-                    skip_analysis=True,
                 )
 
-            command = subprocess_run.call_args.args[0]
+            command = subprocess_run.call_args_list[0].args[0]
             self.assertIn("--ns3-rng-seed=9", command)
             self.assertIn("--ns3-rng-run=17", command)
             self.assertIn("--clr-mask-configuration=/tmp/clr_mask.csv", command)
-            self.assertEqual(subprocess_run.call_args.kwargs["timeout"], 960)
+            analyzer_command = subprocess_run.call_args_list[1].args[0]
+            self.assertIn("--expected-rank-count", analyzer_command)
+            self.assertIn("8", analyzer_command)
+            self.assertEqual(subprocess_run.call_args_list[0].kwargs["timeout"], 960)
             self.assertEqual(returned["execution"], {
                 "dblp_selection_seed": 17,
                 "ns3_rng_seed": 9,

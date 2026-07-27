@@ -63,6 +63,7 @@ class ClosNetwork:
     link_rate: str
     packet_payload_bytes: int
     queue_monitor_start_ns: int
+    queue_monitor_interval_ns: int
     hosts_per_leaf: int
     spine_count: int
     data_loss: DataPlaneLoss | None = None
@@ -85,6 +86,7 @@ class RingNetwork:
     link_rate: str
     packet_payload_bytes: int
     queue_monitor_start_ns: int
+    queue_monitor_interval_ns: int
     data_loss: DataPlaneLoss | None = None
 
     @property
@@ -270,7 +272,7 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
     )
 
 
-def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int]:
+def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int, int]:
     return (
         _link_rate(document.get("link_rate")),
         _positive_int(
@@ -280,6 +282,10 @@ def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int]:
         _nonnegative_int(
             document.get("queue_monitor_start_ns", 0),
             "network.queue_monitor_start_ns",
+        ),
+        _positive_int(
+            document.get("queue_monitor_interval_ns", 10_000),
+            "network.queue_monitor_interval_ns",
         ),
     )
 
@@ -301,6 +307,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "link_rate",
         "packet_payload_bytes",
         "queue_monitor_start_ns",
+        "queue_monitor_interval_ns",
         "data_loss",
     }
     topology_keys = (
@@ -313,9 +320,12 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
     if missing_keys:
         raise ValueError(f"missing network keys: {sorted(missing_keys)}")
 
-    link_rate, packet_payload_bytes, queue_monitor_start_ns = _common_network_fields(
-        document
-    )
+    (
+        link_rate,
+        packet_payload_bytes,
+        queue_monitor_start_ns,
+        queue_monitor_interval_ns,
+    ) = _common_network_fields(document)
     data_loss = _load_data_loss(document, host_count)
     if packet_payload_bytes > MAX_PACKET_PAYLOAD_BYTES:
         raise ValueError(
@@ -329,6 +339,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             link_rate=link_rate,
             packet_payload_bytes=packet_payload_bytes,
             queue_monitor_start_ns=queue_monitor_start_ns,
+            queue_monitor_interval_ns=queue_monitor_interval_ns,
             data_loss=data_loss,
         )
 
@@ -344,6 +355,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         link_rate=link_rate,
         packet_payload_bytes=packet_payload_bytes,
         queue_monitor_start_ns=queue_monitor_start_ns,
+        queue_monitor_interval_ns=queue_monitor_interval_ns,
         hosts_per_leaf=hosts_per_leaf,
         spine_count=spine_count,
         data_loss=data_loss,

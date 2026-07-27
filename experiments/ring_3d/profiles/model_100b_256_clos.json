@@ -22,7 +22,8 @@
     "spine_count": 16,
     "link_rate": "200Gbps",
     "packet_payload_bytes": 4096,
-    "queue_monitor_start_ns": 20000000
+    "queue_monitor_start_ns": 20000000,
+    "queue_monitor_interval_ns": 100000
   },
   "microburst_bytes": 50000000,
   "microburst_flow_count": 7,

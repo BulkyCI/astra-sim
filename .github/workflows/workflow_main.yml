@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ "master", "dev" ]
   workflow_dispatch:
+    inputs:
+      run_structural_studies:
+        description: Run 100B structural topology studies
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -248,6 +254,7 @@ jobs:
 
   model-100b-256-clos-evaluation:
     name: 100B 256-card Clos structural evaluation
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
     needs: python-quality
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
@@ -262,6 +269,7 @@ jobs:
 
   model-100b-256-ring-evaluation:
     name: 100B 256-card Ring structural evaluation
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
     needs: python-quality
     uses: ./.github/workflows/ns3-evaluation.yml
     with:

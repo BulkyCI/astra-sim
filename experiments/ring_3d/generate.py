@@ -801,6 +801,7 @@ def write_network_config(
     output_dir: Path,
     packet_payload_bytes: int,
     queue_monitor_start_ns: int,
+    queue_monitor_interval_ns: int,
     data_loss: DataPlaneLoss | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -850,6 +851,7 @@ def write_network_config(
             config.write(f"{key} {value}\n")
         config.write(
             f"QLEN_MON_START {queue_monitor_start_ns}\n"
+            f"QLEN_MON_INTERVAL {queue_monitor_interval_ns}\n"
             "QLEN_MON_END 20000\n\n"
             "SIMULATOR_STOP_TIME 40000000000000.00\n\n"
             "CC_MODE 12\nALPHA_RESUME_INTERVAL 1\nRATE_DECREASE_INTERVAL 4\n"
@@ -1078,6 +1080,7 @@ def materialize(
         output_dir / "ns3",
         profile.network.packet_payload_bytes,
         profile.network.queue_monitor_start_ns,
+        profile.network.queue_monitor_interval_ns,
         profile.network.data_loss,
     )
     experiment_config = output_dir / "experiment.json"

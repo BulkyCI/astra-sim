@@ -58,7 +58,7 @@ Failures are reported as invalid or unavailable data; they are never silently re
 ## Conditions
 
 Run every condition with the five fixed paired seeds currently used by `compare.py`.
-The always-on CI Llama condition schedules the five matched pairs independently, then validates and aggregates their retained artifacts. Each pair uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 9,000-second cap for each of its two ns-3 simulator processes. The 30-minute difference reserves job time for setup, artifact upload, and failure reporting.
+The always-on CI Llama condition schedules the five matched pairs independently, then validates and aggregates their retained artifacts. Each pair uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 9,000-second cap for each of its two ns-3 simulator processes. The 30-minute difference reserves job time for setup, artifact upload, and failure reporting. The 100B structural studies run only through a manual CI dispatch that selects **Run 100B structural topology studies**; this preserves their reproducible evaluation path without consuming routine-validation capacity.
 
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ The always-on CI Llama condition schedules the five matched pairs independently,
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |
 | Incast-load scale | 0, 2, 4, and 7 simultaneous sources; fixed 128 MiB source payload | Identify onset and severity of congestion | Report queue/PFC and primary outcomes at every point, including controls with no PFC. |
 
-The checked-in no-incast profile is the executable negative-control configuration. The checked-in Llama 3 70B-class profile is the always-on congested CI condition. The remaining grid must be materialized as explicitly named profile files or an immutable generated profile manifest before execution, and that manifest must be retained with the run artifacts.
+The checked-in no-incast profile is the executable negative-control configuration. The checked-in Llama 3 70B-class profile is the always-on congested CI condition. Its 10 μs queue-sampling cadence is a bounded observability control, not a transport timing parameter. The remaining grid must be materialized as explicitly named profile files or an immutable generated profile manifest before execution, and that manifest must be retained with the run artifacts.
 
 ## Causal-load criterion
 

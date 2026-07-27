@@ -103,6 +103,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "ACK_HIGH_PRIO 1",
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
+            self.assertIn(
+                "QLEN_MON_INTERVAL 10000",
+                (output / "network_config.txt").read_text(encoding="utf-8"),
+            )
 
     def test_llama3_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
@@ -123,6 +127,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
             self.assertIn(
                 "QLEN_MON_START 20000000",
+                (output / "network_config.txt").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "QLEN_MON_INTERVAL 10000",
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
 
@@ -267,6 +275,15 @@ class Ring3DGeneratorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "data_loss.scope"):
                 load_profile(profile_path)
 
+    def test_queue_monitor_interval_must_be_positive(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["queue_monitor_interval_ns"] = 0
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "queue_monitor_interval_ns"):
+                load_profile(profile_path)
+
     def test_materialization_covers_every_profile_training_step(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["steps"] = 6
@@ -395,6 +412,12 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     self.assertEqual(
                         manifest["physical_topology"]["description"],
                         expected["description"],
+                    )
+                    self.assertIn(
+                        "QLEN_MON_INTERVAL 100000",
+                        (output / "network_config.txt").read_text(
+                            encoding="utf-8"
+                        ),
                     )
                     self.assertEqual(
                         manifest["model_trace"]["parameter_count"], 100_000_000_000

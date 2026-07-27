@@ -19,6 +19,7 @@ paper term in a profile, report, or code symbol.
 | `microburst_bytes` | Bytes required by one synthetic background RDMA flow | 128 MiB | Profile JSON | Background `flow_events.csv` row |
 | `microburst_flow_count` | Number of background flows | 7 | Profile JSON | Background flow rows |
 | `microburst_offset_spacing_ns` | Start offset increment among background flows | 0 ns | Profile JSON | `start_time_ns` |
+| `network.queue_monitor_interval_ns` | Period between switch egress-byte samples written to `qlen.txt` | 10 μs | Profile JSON | Queue peak in `summary.json`; cadence in the materialized network config |
 | `provenance_control_bytes` | Physical payload for a selected logical payload's reliable control QP | 64 B | Generated `experiment.json` | `physical_bytes` |
 | natural buffer drop | Switch MMU-admission or egress-queue rejection under offered load | Native calibration pending | `switch_admission_drop` or `switch_egress_queue_drop` in ns-3 | `data_natural_buffer_drop_count` and control counterpart |
 | `decision_hash` | Stable selection hash over seed, run, operation, endpoints, and tag | Deterministic | `ExperimentConfig.hh` | `flow_events.csv` |
@@ -38,6 +39,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads | 16 MiB, 0, 1 GiB | Separate from physical transport overhead |
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
+| `network.queue_monitor_interval_ns` | Positive periodic queue-sampling interval | 10,000 ns | Prevents observability work from scaling with every packet event |
 | `network.data_loss` | Optional physical data-only impairment plus bounded go-back-$N$ recovery | Absent | Requires probability, time window, scope, RNG stream, retransmission timeout, and retry budget; separate from logical selection thresholds |
 | `selection_policy` | Typed low/high logical-admission selection knobs | `p_low=0.005`, `p_high=0.1` | Profile, manifest, and `experiment.json` | Materialized selection probabilities |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |

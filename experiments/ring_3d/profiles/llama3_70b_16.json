@@ -22,7 +22,8 @@
     "spine_count": 4,
     "link_rate": "400Gbps",
     "packet_payload_bytes": 4096,
-    "queue_monitor_start_ns": 20000000
+    "queue_monitor_start_ns": 20000000,
+    "queue_monitor_interval_ns": 10000
   },
   "microburst_enabled": true,
   "microburst_bytes": 134217728,

@@ -39,6 +39,7 @@ try:
     from .generate_clr_schedule import (
         ClrSchedule,
         ClrScheduleParameters,
+        generate_explicit_clr_schedule,
         generate_clr_schedule,
         schedule_metadata,
         write_clr_mask,
@@ -55,6 +56,7 @@ except ImportError:
     from generate_clr_schedule import (
         ClrSchedule,
         ClrScheduleParameters,
+        generate_explicit_clr_schedule,
         generate_clr_schedule,
         schedule_metadata,
         write_clr_mask,
@@ -84,12 +86,14 @@ REQUIRED_PROFILE_KEYS = {
     "microburst_bytes",
 }
 OPTIONAL_PROFILE_KEYS = {
+    "clr_schedule",
     "microburst_flow_count",
     "microburst_destination_rank",
     "microburst_offset_spacing_ns",
     "microburst_source_ranks",
     "microburst_enabled",
     "model",
+    "workload",
 }
 EXPECTED_PROFILE_KEYS = REQUIRED_PROFILE_KEYS | OPTIONAL_PROFILE_KEYS
 EXPECTED_MODEL_TRACE_KEYS = {
@@ -117,6 +121,8 @@ GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
     "gradient_accumulation_steps",
 }
 MAX_P_LOW = 0.01
+DEFAULT_WORKLOAD_KIND = "three_dimensional_overlap"
+SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD = "sequential_dp_all_reduce"
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,20 @@ class SelectionPolicy:
 
 
 @dataclass(frozen=True)
+class Workload:
+    """Trace-shape selector retained in the profile provenance."""
+
+    kind: str
+
+
+@dataclass(frozen=True)
+class ExplicitClrSchedule:
+    """One-based CLR labels imported from an external phase schedule."""
+
+    critical_steps: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     tp: int
@@ -181,6 +201,8 @@ class Profile:
     dp_all_reduce_bytes: int
     seed: int
     selection_policy: SelectionPolicy
+    workload: Workload
+    explicit_clr_schedule: ExplicitClrSchedule | None
     network: PhysicalNetwork
     microburst_bytes: int
     microburst_flow_count: int
@@ -235,6 +257,49 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     if p_high < p_low:
         raise ValueError("selection_policy.p_high must be at least p_low")
     return SelectionPolicy(p_low=p_low, p_high=p_high)
+
+
+def _load_workload(document: dict[str, Any]) -> Workload:
+    """Load an explicit trace shape while preserving the 3D default."""
+    value = document.get("workload")
+    if value is None:
+        return Workload(DEFAULT_WORKLOAD_KIND)
+    if not isinstance(value, dict) or set(value) != {"kind"}:
+        raise ValueError("workload must contain exactly ['kind']")
+    kind = value["kind"]
+    if kind not in {DEFAULT_WORKLOAD_KIND, SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD}:
+        raise ValueError(
+            "workload.kind must be one of "
+            f"{sorted({DEFAULT_WORKLOAD_KIND, SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD})}"
+        )
+    return Workload(kind)
+
+
+def _load_explicit_clr_schedule(
+    document: dict[str, Any], steps: int
+) -> ExplicitClrSchedule | None:
+    """Load a strict externally derived phase mask when one is supplied."""
+    value = document.get("clr_schedule")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"kind", "critical_steps"}:
+        raise ValueError(
+            "clr_schedule must contain exactly ['critical_steps', 'kind']"
+        )
+    if value["kind"] != "explicit_critical_steps":
+        raise ValueError("clr_schedule.kind must be 'explicit_critical_steps'")
+    critical_steps = value["critical_steps"]
+    if not isinstance(critical_steps, list):
+        raise ValueError("clr_schedule.critical_steps must be an array")
+    validated_steps = tuple(
+        _require_positive_int(step, "clr_schedule.critical_steps entry")
+        for step in critical_steps
+    )
+    if len(set(validated_steps)) != len(validated_steps):
+        raise ValueError("clr_schedule.critical_steps must not contain duplicates")
+    if any(step > steps for step in validated_steps):
+        raise ValueError("clr_schedule.critical_steps entry is outside the profile")
+    return ExplicitClrSchedule(critical_steps=validated_steps)
 
 
 def _load_model_workload(
@@ -359,6 +424,8 @@ def load_profile(profile_path: Path) -> Profile:
     dp = _require_positive_int(parallelism["dp"], "parallelism.dp")
     ranks = tp * pp * dp
     selection_policy = _load_selection_policy(document)
+    workload = _load_workload(document)
+    explicit_clr_schedule = _load_explicit_clr_schedule(document, steps)
     network = load_network(document.get("network"), ranks)
     microburst_flow_count = _require_positive_int(
         document.get("microburst_flow_count", min(2, ranks // 2)),
@@ -407,10 +474,10 @@ def load_profile(profile_path: Path) -> Profile:
         pp=pp,
         dp=dp,
         steps=steps,
-        compute_duration_us=_require_positive_int(
+        compute_duration_us=_require_nonnegative_int(
             document.get("compute_duration_us"), "compute_duration_us"
         ),
-        tp_all_reduce_bytes=_require_positive_int(
+        tp_all_reduce_bytes=_require_nonnegative_int(
             document.get("tp_all_reduce_bytes"), "tp_all_reduce_bytes"
         ),
         pp_bytes=_require_nonnegative_int(document.get("pp_bytes"), "pp_bytes"),
@@ -419,6 +486,8 @@ def load_profile(profile_path: Path) -> Profile:
         ),
         seed=_require_positive_int(document.get("seed"), "seed"),
         selection_policy=selection_policy,
+        workload=workload,
+        explicit_clr_schedule=explicit_clr_schedule,
         network=network,
         microburst_bytes=_require_positive_int(
             document.get("microburst_bytes"), "microburst_bytes"
@@ -433,6 +502,26 @@ def load_profile(profile_path: Path) -> Profile:
         microburst_enabled=microburst_enabled,
         model=model,
     )
+    if profile.workload.kind == SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD:
+        if profile.tp != 1 or profile.pp != 1:
+            raise ValueError(
+                "sequential_dp_all_reduce requires TP=1 and PP=1"
+            )
+        if profile.compute_duration_us != 0:
+            raise ValueError(
+                "sequential_dp_all_reduce requires compute_duration_us to be zero"
+            )
+        if profile.tp_all_reduce_bytes != 0 or profile.pp_bytes != 0:
+            raise ValueError(
+                "sequential_dp_all_reduce requires TP and PP payload bytes to be zero"
+            )
+        if profile.model is not None:
+            raise ValueError("sequential_dp_all_reduce cannot include model metadata")
+    elif profile.compute_duration_us == 0 or profile.tp_all_reduce_bytes == 0:
+        raise ValueError(
+            "three-dimensional overlap workloads require positive compute_duration_us "
+            "and tp_all_reduce_bytes"
+        )
     if profile.pp > 1 and profile.pp_bytes == 0:
         raise ValueError("pp_bytes must be positive when PP is greater than one")
     if isinstance(profile.model, (ModelTrace, GradientBucketSample)):
@@ -674,6 +763,20 @@ class TraceWriter:
                 [dp_reduce_zero, dp_reduce_one],
             )
 
+    def _build_sequential_dp_all_reduce_trace(self) -> None:
+        """Emit the historical Phase-1 shape: one chained DP All-Reduce per step."""
+        _, _, _, dp_groups = self.groups
+        predecessor: int | None = None
+        for step in range(1, self.profile.steps + 1):
+            predecessor = self.all_reduce(
+                f"step_{step}_dp_all_reduce",
+                [] if predecessor is None else [predecessor],
+                "dp",
+                dp_groups[str(self.rank)],
+                self.profile.dp_all_reduce_bytes,
+                step,
+            )
+
     def _build_gradient_bucket_sample_trace(self) -> None:
         """Emit a bounded, production-shaped DP/TP event window.
 
@@ -896,7 +999,9 @@ class TraceWriter:
             )
 
     def build(self) -> None:
-        if self.profile.model is None:
+        if self.profile.workload.kind == SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD:
+            self._build_sequential_dp_all_reduce_trace()
+        elif self.profile.model is None:
             self._build_smoke_trace()
         elif isinstance(self.profile.model, GradientBucketSample):
             self._build_gradient_bucket_sample_trace()
@@ -1200,10 +1305,18 @@ def materialize(
     profile_config = output_dir / "profile.json"
     shutil.copyfile(profile_path, profile_config)
     clr_mask = output_dir / "clr_mask.csv"
-    clr_schedule = generate_clr_schedule(
-        profile.steps,
-        profile.seed,
-        clr_schedule_parameters or ClrScheduleParameters(),
+    clr_schedule = (
+        generate_explicit_clr_schedule(
+            profile.steps,
+            profile.seed,
+            profile.explicit_clr_schedule.critical_steps,
+        )
+        if profile.explicit_clr_schedule is not None
+        else generate_clr_schedule(
+            profile.steps,
+            profile.seed,
+            clr_schedule_parameters or ClrScheduleParameters(),
+        )
     )
     write_clr_mask(clr_mask, clr_schedule)
 
@@ -1267,6 +1380,15 @@ def materialize(
             "p_low": selection_policy.p_low,
             "p_high": selection_policy.p_high,
         },
+        "workload": {"kind": profile.workload.kind},
+        "clr_schedule_source": (
+            {
+                "kind": "explicit_critical_steps",
+                "critical_steps": list(profile.explicit_clr_schedule.critical_steps),
+            }
+            if profile.explicit_clr_schedule is not None
+            else {"kind": "decay_and_spike_proxy"}
+        ),
         "physical_topology": physical_topology.manifest(),
         "data_plane_loss": (
             profile.network.data_loss.manifest()

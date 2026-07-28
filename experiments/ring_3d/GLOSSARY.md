@@ -8,7 +8,8 @@ paper term in a profile, report, or code symbol.
 
 | Term | Meaning in this repository | Current 70B condition | Configuration / code | Measured artifact |
 | --- | --- | --- | --- | --- |
-| `clr_mask` | Immutable step-to-phase input, not simulator-detected gradients | Generated from a seeded decay/spike proxy | `generate_clr_schedule.py` to `clr_mask.csv` | `clr_mask.csv`, `manifest.json` |
+| `clr_mask` | Immutable step-to-phase input, not simulator-detected gradients | Generated from a seeded decay/spike proxy or explicit profile labels | `generate_clr_schedule.py` to `clr_mask.csv` | `clr_mask.csv`, `manifest.json` |
+| `clr_schedule.kind: "explicit_critical_steps"` | Exact one-based CLR labels imported into a profile | Phase-1 reference steps 1, 2, 153, 166 | `clr_schedule.critical_steps` | `clr_mask.csv`, `manifest.json` |
 | CLR | `is_clr=1` selects the strict policy threshold | Step-dependent | `ExperimentConfig.hh` | `experiment.json`, flow rows |
 | `selection_policy.p_low` | Logical-payload selection probability in CLR; **not paper $P_\mathrm{low}$ residual loss** | 0.5% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
 | `selection_policy.p_high` | Logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 10% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
@@ -54,10 +55,16 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `microburst_offset_spacing_ns` | Flow start staggering | 0 | Zero means simultaneous scheduling |
 | `model.gradient_accumulation_steps` | Accumulation microbatches represented by the 70B sampled layer window | 8 | The generator emits the sampled TP pattern for each accumulation microbatch; it does not replay every model layer |
 | `model` | Structural or bounded event-window metadata | 70B BF16/FP16 sample | Validated against trace shape |
+| `workload.kind: "sequential_dp_all_reduce"` | Communication-only trace with one chained DP All-Reduce per step | 64-rank Phase-1 reference | Requires $TP=PP=1$, zero compute/TP/PP bytes, and no model metadata |
 
 `selection_policy` is a strict profile object. `compare.py` holds the fixed-low
 baseline at `p_low` for both phases, then compares it with a policy that uses
 `p_low` in CLR and `p_high` outside CLR. The low value must be in $(0, 1\%]$.
+
+An omitted `clr_schedule` uses the seeded decay-and-spike proxy. An explicit
+schedule is the profile's exact phase input and takes precedence over any
+decay/spike command-line values. It transfers phase labels only; it does not
+transfer a gradient detector, packet-loss event, or DBLP residual-loss rule.
 
 ## Background microburst
 

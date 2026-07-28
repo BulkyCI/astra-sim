@@ -67,14 +67,28 @@ Failures are reported as invalid or unavailable data; they are never silently re
 
 ## Conditions
 
-Run every condition with the five fixed paired seeds currently used by `compare.py`.
-The always-on CI Llama condition schedules the five matched pairs independently, then validates and aggregates their retained artifacts. Each pair uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a 9,000-second cap for each of its two ns-3 simulator processes. The 30-minute difference reserves job time for setup, artifact upload, and failure reporting. The matrix has five jobs; native integration and the two manual 100B topology studies bring the maximum simultaneous evaluation count to eight, below the account-level concurrency limit of ten. The structural studies run only through a manual CI dispatch that selects **Run 100B structural topology studies**; each reserves a 16,200-second simulator cap in a 320-minute wrapper budget, preserving 40 minutes of the six-hour job for setup, reporting, and artifacts.
+Run every primary condition with the five fixed paired seeds currently used by `compare.py`.
+The historical Phase-1 native reference is the declared exception: it is one
+fixed-seed transport-scaling/reproducibility pair, not a multi-seed primary
+policy result. The always-on CI Llama condition schedules the five matched pairs
+independently, then validates and aggregates their retained artifacts. Each pair
+uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a
+9,000-second cap for each of its two ns-3 simulator processes. The 30-minute
+difference reserves job time for setup, artifact upload, and failure reporting.
+The Llama matrix and the historical reference job have six concurrent jobs;
+native integration and the two manual 100B topology studies bring the maximum
+simultaneous evaluation count to nine, below the account-level concurrency limit
+of ten. The structural studies run only through a manual CI dispatch that selects
+**Run 100B structural topology studies**; each reserves a 16,200-second
+simulator cap in a 320-minute wrapper budget, preserving 40 minutes of the
+six-hour job for setup, reporting, and artifacts.
 
 | Condition | Profile / parameterization | Purpose | Required interpretation |
 | --- | --- | --- | --- |
 | Negative control | `profiles/no_incast_8.json`, fixed 0.5% versus phase-aware 0.5%/10% selection | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
 | Congested baseline | `profiles/llama3_70b_16.json`, fixed 0.5% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and at least one completed PFC pause interval. This calibrates pressure, not finite-buffer loss, until natural data drops are observed. |
 | Congested policy | `profiles/llama3_70b_16.json`, 0.5% CLR and 10% stable-convergence selection under the fixed decay-and-spike mask | Measure the phase-aware selection proxy under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction. |
+| Historical Phase-1 native reference | `profiles/dblp_phase1_effnet_64dp.json`, fixed 0.8% versus phase-aware 0.8%/40.8% logical selection with the imported four-step CLR mask | Reproduce the old 64-rank, 186-round communication-only trace shape through the native packet/RDMA path | One fixed-seed pair; no microburst, packet loss, or congestion gate. It is not a DBLP residual-loss or accuracy result. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one two-step 256-card structural policy run with the shared step-two incast | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, the identical two-step workload and incast schedule | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |

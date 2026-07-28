@@ -20,6 +20,7 @@ logical-payload-substitution ablation, not a DBLP packet-loss reproduction.
 - [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
 - [profiles/retry_exhaustion_8.json](profiles/retry_exhaustion_8.json): a native regression fixture that deterministically exhausts a one-retry, data-only impairment budget; it must fail while retaining explicit terminal-QP telemetry and is never a primary-analysis result.
 - [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a two-step, production-shaped Llama 3 70B-class event window with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, a 400 Gb/s two-leaf Clos, and the retained step-two $7\times128$ MiB incast stressor.
+- [profiles/dblp_phase1_effnet_64dp.json](profiles/dblp_phase1_effnet_64dp.json): a 64-rank, communication-only native reference for the historical Phase-1 EfficientNet trace: 186 chained 21,200,000-byte DP All-Reduces on a 400 Gb/s physical switch ring, with no microburst or configured data loss.
 - [profiles/model_100b_256_clos.json](profiles/model_100b_256_clos.json): a two-step 100B-parameter structural window on 256 accelerator cards and a 16-leaf × 16-spine Clos, with the shared step-two seven-source incast.
 - [profiles/model_100b_256_ring.json](profiles/model_100b_256_ring.json): the identical 100B window and incast schedule on a 256-switch host-attached physical ring, retained to measure the physical Clos-versus-ring topology difference.
 
@@ -59,6 +60,12 @@ $$
 
 then samples the whole Boolean mask with a fixed NumPy generator seed. Defaults are $\lambda=1.5$, $T_{\mathrm{epoch}}=2$ steps, $\sigma=0.5$ steps, and $A=1.0$. The first zero-indexed step is therefore always a CLR; narrow epoch-boundary spikes restore CLR state at configured shifts. `manifest.json` retains all parameters, the seed, and the CLR-step count.
 
+A profile may instead retain an explicit, externally derived static mask through
+`clr_schedule.kind: "explicit_critical_steps"`. This is an immutable phase
+label input, not a detector or probability fit. The historical Phase-1 native
+reference uses one-based steps 1, 2, 153, and 166: this is the exact 186-step
+mapping produced by the old 1,860-round schedule's index-scaling rule.
+
 Generate only the immutable schedule with:
 
 ```sh
@@ -88,7 +95,32 @@ uv run --locked python experiments/ring_3d/compare.py \
 
 The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor the current policy, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, at least one completed PFC pause interval, and an eligible native collective/FCT/terminal ledger. After calibration demonstrates actual packet loss, add `--require-finite-buffer-data-drop`; it additionally requires at least one data-plane switch admission or egress-queue rejection and does not treat PFC alone as loss evidence.
 
-The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the five pairs independently and then validates and aggregates their artifacts. A pair reserves $2\times150=300$ minutes for its two ns-3 processes inside a 330-minute command guard; the hosted-job limit is 360 minutes, leaving 30 minutes for setup, build, reports, and artifacts. The matrix permits five pairs concurrently. With native integration and the two manually dispatched structural jobs, the workflow reaches at most eight active evaluation jobs, below the account-level limit of ten.
+The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the five pairs independently and then validates and aggregates their artifacts. A pair reserves $2\times150=300$ minutes for its two ns-3 processes inside a 330-minute command guard; the hosted-job limit is 360 minutes, leaving 30 minutes for setup, build, reports, and artifacts. The matrix permits five pairs concurrently. The separate historical Phase-1 reference pair runs concurrently; together with native integration and the two manually dispatched structural jobs, the workflow reaches at most nine active evaluation jobs, below the account-level limit of ten.
+
+## Historical Phase-1 64-rank native reference
+
+`dblp_phase1_effnet_64dp.json` makes the old analytical trace shape auditable
+in the packet-level path. It uses $TP=PP=1$, $DP=64$, and emits exactly one
+21,200,000-byte DP All-Reduce per rank for each of 186 sequential steps; no
+compute, TP, PP, microburst, or configured physical data-loss event is emitted.
+The 50 GB/s analytical Ring is represented as a 400 Gb/s host-attached,
+bidirectional physical switch ring, so packet queues and RDMA transport are
+modeled rather than analytical link timing alone. The payload, round count, and
+phase-mask mapping come from the historical `af8d809f9f4f0a7b09ac043b86202be54f59a95d`
+Phase-1 configuration.
+
+Its 0.8% low and 40.8% high values deliberately match the old Phase-1 command
+line, but remain **logical whole-payload selection probabilities** here. They
+are not DBLP residual-loss bounds, packet-loss rate $q$, or evidence of
+accuracy preservation. The profile's static CLR labels preserve only the old
+phase-mask mapping. It does not recreate the original server's gradient-norm
+detector, packet-loss burst, bitmap recovery, or Stop/Probe control protocol.
+
+CI runs one fixed-seed matched baseline/policy pair for this expensive native
+reference concurrently with the five Llama incast pairs. It does not require
+the Llama queue/PFC congestion gate because its historical source trace had no
+background microburst. It is a reproducibility and transport-scaling reference,
+not a multi-seed primary policy result.
 
 ## Empirical-validation protocol
 

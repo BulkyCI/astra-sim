@@ -46,7 +46,8 @@ class ClrSchedule:
     probabilities: np.ndarray
     is_clr: np.ndarray
     seed: int
-    parameters: ClrScheduleParameters
+    parameters: ClrScheduleParameters | None
+    model: str = "exponential_decay_with_gaussian_epoch_spikes"
 
     def rows(self) -> Iterable[tuple[int, bool, float]]:
         return (
@@ -135,6 +136,44 @@ def generate_clr_schedule(
     return ClrSchedule(step_ids, probabilities, mask, seed, parameters)
 
 
+def generate_explicit_clr_schedule(
+    total_steps: int,
+    seed: int,
+    critical_steps: Iterable[int],
+) -> ClrSchedule:
+    """Build an immutable one-based CLR mask from explicit phase labels.
+
+    This preserves externally derived phase labels exactly. Unlike the default
+    decay-and-spike schedule, it performs no probabilistic phase sampling.
+    """
+    total_steps = _require_positive_int(total_steps, "total_steps")
+    seed = _require_nonnegative_int(seed, "seed")
+    steps = tuple(critical_steps)
+    if any(isinstance(step, bool) or not isinstance(step, int) for step in steps):
+        raise ValueError("critical_steps entries must be integers")
+    if any(step < 1 or step > total_steps for step in steps):
+        raise ValueError("critical_steps entries must be within the training-step range")
+    if len(set(steps)) != len(steps):
+        raise ValueError("critical_steps entries must be unique")
+
+    step_ids = np.arange(1, total_steps + 1, dtype=np.uint64)
+    probabilities = np.zeros(total_steps, dtype=np.float64)
+    mask = np.zeros(total_steps, dtype=np.bool_)
+    for step in steps:
+        probabilities[step - 1] = 1.0
+        mask[step - 1] = True
+    for values in (step_ids, probabilities, mask):
+        values.setflags(write=False)
+    return ClrSchedule(
+        step_ids,
+        probabilities,
+        mask,
+        seed,
+        None,
+        "explicit_critical_steps",
+    )
+
+
 def write_clr_mask(path: Path, schedule: ClrSchedule) -> None:
     """Write a simulator-readable static step-to-CLR mapping."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,18 +186,34 @@ def write_clr_mask(path: Path, schedule: ClrSchedule) -> None:
         )
 
 
-def schedule_metadata(schedule: ClrSchedule) -> dict[str, int | float | str]:
+def schedule_metadata(
+    schedule: ClrSchedule,
+) -> dict[str, int | float | str | list[int]]:
     """Return JSON-safe provenance for a materialized schedule."""
-    return {
-        "model": "exponential_decay_with_gaussian_epoch_spikes",
+    metadata: dict[str, int | float | str | list[int]] = {
+        "model": schedule.model,
         "seed": schedule.seed,
         "steps": int(schedule.step_ids.size),
         "clr_step_count": int(np.count_nonzero(schedule.is_clr)),
-        "decay_rate": schedule.parameters.decay_rate,
-        "epoch_steps": schedule.parameters.epoch_steps,
-        "spike_stddev_steps": schedule.parameters.spike_stddev_steps,
-        "spike_amplitude": schedule.parameters.spike_amplitude,
     }
+    if schedule.parameters is not None:
+        metadata.update(
+            {
+                "decay_rate": schedule.parameters.decay_rate,
+                "epoch_steps": schedule.parameters.epoch_steps,
+                "spike_stddev_steps": schedule.parameters.spike_stddev_steps,
+                "spike_amplitude": schedule.parameters.spike_amplitude,
+            }
+        )
+    else:
+        metadata["critical_steps"] = [
+            int(step_id)
+            for step_id, is_clr in zip(
+                schedule.step_ids, schedule.is_clr, strict=True
+            )
+            if is_clr
+        ]
+    return metadata
 
 
 def main() -> int:

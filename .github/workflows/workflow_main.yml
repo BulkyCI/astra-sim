@@ -186,8 +186,9 @@ jobs:
     needs: python-quality
     strategy:
       fail-fast: false
-      # Five matched pairs, plus native integration and two manually
-      # dispatched structural studies, yield at most eight active jobs.
+      # Five matched pairs, the separate historical Phase-1 reference, native
+      # integration, and two manually dispatched structural studies yield at
+      # most nine active jobs.
       # This remains below the account-level concurrency limit of ten.
       max-parallel: 5
       matrix:
@@ -205,6 +206,25 @@ jobs:
       execution_timeout_minutes: 330
       simulation_timeout_seconds: 9000
       require_congestion: true
+
+  historical-phase1-native-reference:
+    name: Historical Phase-1 64-rank native reference pair
+    needs: python-quality
+    # This independent, communication-only reference pair deliberately runs
+    # alongside the Llama congestion matrix. Its profile reproduces the old
+    # 64-rank/186-round trace shape, so it has the same six-hour budget as one
+    # Llama pair but no background-incast gate.
+    uses: ./.github/workflows/ns3-evaluation.yml
+    with:
+      evaluation_name: Historical Phase-1 64-rank native reference pair
+      profile: experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json
+      run_directory: runs/ring_3d/dblp_phase1_effnet_64dp_comparison
+      artifact_name: ring-3d-dblp-phase1-effnet-64dp-comparison
+      comparison: true
+      comparison_seed: 314159265
+      execution_timeout_minutes: 330
+      simulation_timeout_seconds: 9000
+      require_congestion: false
 
   aggregate-llama3-evaluation:
     name: Aggregate five-seed Llama 3 70B congestion evaluation

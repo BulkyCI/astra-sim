@@ -434,6 +434,76 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1})
             self.assertEqual(tp_collectives_by_step, {1: 16, 2: 16})
 
+    def test_phase1_reference_profile_materializes_exact_sequential_dp_trace(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json"
+        )
+        profile = load_profile(profile_path)
+        self.assertEqual((profile.tp, profile.pp, profile.dp), (1, 1, 64))
+        self.assertEqual(profile.steps, 186)
+        self.assertEqual(profile.workload.kind, "sequential_dp_all_reduce")
+        self.assertEqual(profile.dp_all_reduce_bytes, 21_200_000)
+        self.assertEqual(
+            profile.explicit_clr_schedule.critical_steps,
+            (1, 2, 153, 166),
+        )
+        self.assertFalse(profile.microburst_enabled)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+            self.assertEqual(manifest["workload"], {"kind": "sequential_dp_all_reduce"})
+            self.assertEqual(
+                manifest["clr_schedule_source"],
+                {
+                    "kind": "explicit_critical_steps",
+                    "critical_steps": [1, 2, 153, 166],
+                },
+            )
+            self.assertEqual(
+                manifest["clr_schedule"],
+                {
+                    "model": "explicit_critical_steps",
+                    "seed": 314159265,
+                    "steps": 186,
+                    "clr_step_count": 4,
+                    "critical_steps": [1, 2, 153, 166],
+                },
+            )
+            self.assertEqual(
+                (output / "topology.txt").read_text(encoding="utf-8").splitlines()[0],
+                "128 64 128",
+            )
+
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertEqual(policy["selection_probability_by_step"]["1"], 0.008)
+            self.assertEqual(policy["selection_probability_by_step"]["3"], 0.408)
+            self.assertEqual(policy["selection_probability_by_step"]["153"], 0.008)
+            self.assertFalse(policy["microburst"]["enabled"])
+            self.assertEqual(policy["microburst"]["flows"], [])
+
+            nodes: list[Node] = []
+            with (output / "workload/ring_3d.0.et").open("rb") as trace:
+                metadata = GlobalMetadata()
+                self.assertTrue(decodeMessage(trace, metadata))
+                while True:
+                    node = Node()
+                    if not decodeMessage(trace, node):
+                        break
+                    nodes.append(node)
+            self.assertEqual(len(nodes), 186)
+            for index, node in enumerate(nodes, start=1):
+                attributes = {attribute.name: attribute for attribute in node.attr}
+                self.assertEqual(node.name, f"step_{index}_dp_all_reduce")
+                self.assertEqual(
+                    attributes["parallelism_domain"].string_val,
+                    "dp",
+                )
+                self.assertEqual(attributes["training_step"].uint64_val, index)
+                self.assertEqual(attributes["comm_size"].uint64_val, 21_200_000)
+                self.assertEqual(list(node.ctrl_deps), [] if index == 1 else [index - 1])
+
     def test_100b_profiles_materialize_topologies_with_exact_nonuniform_buckets(self) -> None:
         expected_topologies = {
             "model_100b_256_clos.json": {

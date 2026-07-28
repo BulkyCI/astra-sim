@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-dblp-phase1-effnet-64dp-native-reference",
+  "parallelism": {
+    "tp": 1,
+    "pp": 1,
+    "dp": 64
+  },
+  "workload": {
+    "kind": "sequential_dp_all_reduce"
+  },
+  "steps": 186,
+  "compute_duration_us": 0,
+  "tp_all_reduce_bytes": 0,
+  "pp_bytes": 0,
+  "dp_all_reduce_bytes": 21200000,
+  "seed": 314159265,
+  "clr_schedule": {
+    "kind": "explicit_critical_steps",
+    "critical_steps": [1, 2, 153, 166]
+  },
+  "selection_policy": {
+    "p_low": 0.008,
+    "p_high": 0.408
+  },
+  "network": {
+    "topology": "ring",
+    "link_rate": "400Gbps",
+    "packet_payload_bytes": 4096,
+    "queue_monitor_start_ns": 0,
+    "queue_monitor_interval_ns": 1000000
+  },
+  "microburst_enabled": false,
+  "microburst_bytes": 21200000
+}

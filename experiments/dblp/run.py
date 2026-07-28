@@ -96,7 +96,6 @@ def run_dblp_profile(
         f"--logical-topology-configuration={manifest['logical_topology']}",
         f"--comm-group-configuration={manifest['communicator_groups']}",
         f"--experiment-configuration={manifest['experiment_config']}",
-        f"--clr-mask-configuration={manifest['clr_mask']}",
         f"--experiment-output-dir={manifest['telemetry_dir']}",
         f"--ns3-rng-seed={ns3_rng_seed}",
         f"--ns3-rng-run={ns3_rng_run}",

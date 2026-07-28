@@ -90,8 +90,7 @@ class Ring3DComparisonTests(unittest.TestCase):
         )
         profile = json.loads(
             (
-                REPOSITORY_ROOT
-                / "experiments/ring_3d/profiles/llama3_70b_16.json"
+                REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
             ).read_text(encoding="utf-8")
         )
         self.assertEqual(profile["seed"], DEFAULT_SEEDS[0])
@@ -109,8 +108,14 @@ class Ring3DComparisonTests(unittest.TestCase):
 
     def test_aggregate_and_report_include_paired_uncertainty(self) -> None:
         per_seed = [
-            {"seed": 1, "metrics": compare_summaries(summary(1_000, 100), summary(900, 90))},
-            {"seed": 2, "metrics": compare_summaries(summary(1_000, 100), summary(800, 80))},
+            {
+                "seed": 1,
+                "metrics": compare_summaries(summary(1_000, 100), summary(900, 90)),
+            },
+            {
+                "seed": 2,
+                "metrics": compare_summaries(summary(1_000, 100), summary(800, 80)),
+            },
         ]
         aggregate = aggregate_comparisons(per_seed)
         comparison = {"aggregate": aggregate}
@@ -155,12 +160,8 @@ class Ring3DComparisonTests(unittest.TestCase):
             comparison = aggregate_comparison_artifacts([second, first])
 
         self.assertEqual(comparison["seeds"], [1, 2])
-        self.assertEqual(
-            [entry["seed"] for entry in comparison["per_seed"]], [1, 2]
-        )
-        self.assertEqual(
-            comparison["aggregate"]["makespan_ns"]["paired_seed_count"], 2
-        )
+        self.assertEqual([entry["seed"] for entry in comparison["per_seed"]], [1, 2])
+        self.assertEqual(comparison["aggregate"]["makespan_ns"]["paired_seed_count"], 2)
         self.assertEqual(
             comparison["selection_policy"]["baseline"],
             {"p_low": 0.005, "p_high": 0.005},
@@ -169,14 +170,20 @@ class Ring3DComparisonTests(unittest.TestCase):
     def test_congestion_gate_requires_queue_and_pfc_evidence(self) -> None:
         evidence = congestion_evidence(congested_summary())
         self.assertTrue(evidence["congestion_established"])
-        self.assertTrue(require_congestion(congested_summary(), "test run")["congestion_established"])
+        self.assertTrue(
+            require_congestion(congested_summary(), "test run")[
+                "congestion_established"
+            ]
+        )
 
         uncongested = congested_summary()
         uncongested["ns3_observability"] = {
             "queue": {"status": "available", "max_queue_bytes": 0},
             "pfc": {"status": "available", "completed_pause_interval_count": 0},
         }
-        with self.assertRaisesRegex(ValueError, "did not establish required congestion"):
+        with self.assertRaisesRegex(
+            ValueError, "did not establish required congestion"
+        ):
             require_congestion(uncongested, "test run")
 
     def test_finite_buffer_drop_gate_requires_natural_data_drop(self) -> None:
@@ -187,9 +194,7 @@ class Ring3DComparisonTests(unittest.TestCase):
             1,
         )
         no_drop = congested_summary()
-        no_drop["ns3_observability"]["transport"][
-            "data_natural_buffer_drop_count"
-        ] = 0
+        no_drop["ns3_observability"]["transport"]["data_natural_buffer_drop_count"] = 0
         with self.assertRaisesRegex(ValueError, "finite-buffer data loss"):
             require_finite_buffer_data_drop(no_drop, "test run")
 

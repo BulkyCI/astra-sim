@@ -58,13 +58,16 @@ class Ring3DRunnerTests(unittest.TestCase):
             self.assertIn("--expected-rank-count", analyzer_command)
             self.assertIn("8", analyzer_command)
             self.assertEqual(subprocess_run.call_args_list[0].kwargs["timeout"], 960)
-            self.assertEqual(returned["execution"], {
-                "dblp_selection_seed": 17,
-                "ns3_rng_seed": 9,
-                "ns3_rng_run": 17,
-                "simulation_timeout_seconds": 960,
-                "clr_mask": "/tmp/clr_mask.csv",
-            })
+            self.assertEqual(
+                returned["execution"],
+                {
+                    "dblp_selection_seed": 17,
+                    "ns3_rng_seed": 9,
+                    "ns3_rng_run": 17,
+                    "simulation_timeout_seconds": 960,
+                    "clr_mask": "/tmp/clr_mask.csv",
+                },
+            )
             self.assertEqual(
                 json.loads((output / "execution.json").read_text(encoding="utf-8")),
                 returned["execution"],

@@ -12,7 +12,6 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from experiments.ring_3d.analyze import summarize
 
-
 FLOW_FIELDS = [
     "flow_kind",
     "decision",
@@ -70,7 +69,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
         directory.mkdir(parents=True)
         if isinstance(flows, dict):
             flows = [flows]
-        with (directory / "flow_events.csv").open("w", newline="", encoding="utf-8") as handle:
+        with (directory / "flow_events.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
             writer = csv.DictWriter(handle, fieldnames=FLOW_FIELDS)
             writer.writeheader()
             writer.writerows(flows)
@@ -212,7 +213,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(summary["flow_completion_time_ns"]["all"]["p95_ns"], 50)
             self.assertEqual(summary["rank_completion_time_ns"]["p50_ns"], 120)
             self.assertEqual(summary["rank_completion_time_ns"]["max_ns"], 140)
-            self.assertEqual(summary["ns3_observability"]["queue"]["max_queue_bytes"], 240)
+            self.assertEqual(
+                summary["ns3_observability"]["queue"]["max_queue_bytes"], 240
+            )
             self.assertEqual(summary["ns3_observability"]["pfc"]["event_count"], 2)
             self.assertEqual(summary["ns3_observability"]["pfc"]["total_paused_ns"], 10)
             self.assertEqual(
@@ -307,35 +310,44 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(trim["conversion_count"], 1)
             self.assertEqual(trim["trimmed_payload_bytes"], 1000)
             self.assertEqual(trim["ftd_conversion_count"], 1)
-            self.assertEqual(
-                summary["transport_recovery"]["trim_ftd_repair_count"], 1
-            )
+            self.assertEqual(summary["transport_recovery"]["trim_ftd_repair_count"], 1)
 
     def test_summary_requires_exact_expected_rank_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "telemetry"
-            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (1, 120)])
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), [(0, 100), (1, 120)]
+            )
 
             summary = summarize(telemetry, expected_rank_count=2)
 
-            self.assertEqual(summary["rank_completion_status"], {
-                "status": "verified",
-                "recorded_rank_count": 2,
-                "expected_rank_count": 2,
-            })
+            self.assertEqual(
+                summary["rank_completion_status"],
+                {
+                    "status": "verified",
+                    "recorded_rank_count": 2,
+                    "expected_rank_count": 2,
+                },
+            )
             self.assertEqual(
                 summary["primary_analysis_eligibility"]["status"], "ineligible"
             )
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "telemetry"
-            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (2, 120)])
-            with self.assertRaisesRegex(ValueError, "does not cover every expected rank"):
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), [(0, 100), (2, 120)]
+            )
+            with self.assertRaisesRegex(
+                ValueError, "does not cover every expected rank"
+            ):
                 summarize(telemetry, expected_rank_count=2)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "telemetry"
-            self.write_telemetry(telemetry, self.valid_shed_flow(), [(0, 100), (0, 120)])
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), [(0, 100), (0, 120)]
+            )
             with self.assertRaisesRegex(ValueError, "duplicate rank"):
                 summarize(telemetry, expected_rank_count=2)
 
@@ -422,7 +434,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "end_time_ns": "180",
                 },
             ]
-            self.write_telemetry(telemetry, self.valid_shed_flow(), collectives=collectives)
+            self.write_telemetry(
+                telemetry, self.valid_shed_flow(), collectives=collectives
+            )
 
             summary = summarize(telemetry)
 
@@ -450,14 +464,18 @@ class Ring3DAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "duplicate"
             self.write_telemetry(
-                telemetry, self.valid_shed_flow(), collectives=[collective, dict(collective)]
+                telemetry,
+                self.valid_shed_flow(),
+                collectives=[collective, dict(collective)],
             )
             with self.assertRaisesRegex(ValueError, "duplicate rank completion"):
                 summarize(telemetry)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             telemetry = Path(temporary_directory) / "reversed"
-            reversed_collective = dict(collective, start_time_ns="161", end_time_ns="160")
+            reversed_collective = dict(
+                collective, start_time_ns="161", end_time_ns="160"
+            )
             self.write_telemetry(
                 telemetry, self.valid_shed_flow(), collectives=[reversed_collective]
             )

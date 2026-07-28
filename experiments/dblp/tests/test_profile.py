@@ -31,7 +31,10 @@ class DblpProfileTests(unittest.TestCase):
             output = Path(temporary_directory) / "run"
             profile, manifest = materialize_dblp_profile(self.profile_path, output)
 
-            self.assertEqual(profile.expectation.terminal_outcome, TerminalExpectation.TransportFailure)
+            self.assertEqual(
+                profile.expectation.terminal_outcome,
+                TerminalExpectation.TransportFailure,
+            )
             self.assertEqual(manifest["selection_policy"], {"semantics": "disabled"})
             self.assertEqual(manifest["microburst"], {"enabled": False})
             self.assertEqual(
@@ -43,7 +46,9 @@ class DblpProfileTests(unittest.TestCase):
                     "queue_loss_treatment": "guard_only",
                 },
             )
-            experiment = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            experiment = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertFalse(experiment["enabled"])
             self.assertFalse(experiment["microburst"]["enabled"])
             resolved = json.loads(
@@ -59,7 +64,9 @@ class DblpProfileTests(unittest.TestCase):
             self.assertIn("DATA_LOSS_PROBABILITY 1", network_config)
             self.assertIn("PACKET_TRIM_MODE disabled", network_config)
 
-    def test_profile_rejects_base_microburst_as_a_second_impairment_source(self) -> None:
+    def test_profile_rejects_base_microburst_as_a_second_impairment_source(
+        self,
+    ) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["base_workload_profile"] = str(
             REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
@@ -79,7 +86,9 @@ class DblpProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "DBLP profile keys"):
                 load_dblp_profile(profile_path)
 
-    def test_execution_validation_requires_only_the_configured_loss_source(self) -> None:
+    def test_execution_validation_requires_only_the_configured_loss_source(
+        self,
+    ) -> None:
         profile = load_dblp_profile(self.profile_path)
         summary = {
             "failed_flow_count": 1,

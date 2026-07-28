@@ -27,7 +27,9 @@ def _transport_observability(summary: dict[str, Any]) -> dict[str, Any]:
     try:
         transport = summary["ns3_observability"]["transport"]
     except KeyError as error:
-        raise ValueError("native DBLP run did not retain transport telemetry") from error
+        raise ValueError(
+            "native DBLP run did not retain transport telemetry"
+        ) from error
     if transport.get("status") != "available":
         raise ValueError("native DBLP run did not retain transport telemetry")
     return transport
@@ -39,7 +41,9 @@ def validate_execution(
     """Validate terminal and single-loss-source invariants from native telemetry."""
     if profile.expectation.terminal_outcome is TerminalExpectation.Completed:
         if returncode != 0:
-            raise ValueError("DBLP profile expected completion but the simulator failed")
+            raise ValueError(
+                "DBLP profile expected completion but the simulator failed"
+            )
         if summary.get("failed_flow_count") != 0:
             raise ValueError("completed DBLP profile retained failed transport flows")
     else:

@@ -10,6 +10,7 @@ from chakra.schema.protobuf.et_def_pb2 import (
     ALL_REDUCE,
 )
 
+
 def main() -> None:
     # metadata
     npus_count = 8  # 8 NPUs
@@ -34,6 +35,7 @@ def main() -> None:
 
             # store Chakra ET file
             encode_message(et, node)
+
 
 if __name__ == "__main__":
     main()

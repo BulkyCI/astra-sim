@@ -16,7 +16,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -39,8 +38,8 @@ try:
     from .generate_clr_schedule import (
         ClrSchedule,
         ClrScheduleParameters,
-        generate_explicit_clr_schedule,
         generate_clr_schedule,
+        generate_explicit_clr_schedule,
         schedule_metadata,
         write_clr_mask,
     )
@@ -56,8 +55,8 @@ except ImportError:
     from generate_clr_schedule import (
         ClrSchedule,
         ClrScheduleParameters,
-        generate_explicit_clr_schedule,
         generate_clr_schedule,
+        generate_explicit_clr_schedule,
         schedule_metadata,
         write_clr_mask,
     )
@@ -245,8 +244,7 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     expected_keys = {"p_low", "p_high"}
     if set(policy) != expected_keys:
         raise ValueError(
-            "selection_policy must contain exactly "
-            f"{sorted(expected_keys)}"
+            f"selection_policy must contain exactly {sorted(expected_keys)}"
         )
     p_low = _probability(policy["p_low"], "selection_policy.p_low")
     p_high = _probability(policy["p_high"], "selection_policy.p_high")
@@ -283,9 +281,7 @@ def _load_explicit_clr_schedule(
     if value is None:
         return None
     if not isinstance(value, dict) or set(value) != {"kind", "critical_steps"}:
-        raise ValueError(
-            "clr_schedule must contain exactly ['critical_steps', 'kind']"
-        )
+        raise ValueError("clr_schedule must contain exactly ['critical_steps', 'kind']")
     if value["kind"] != "explicit_critical_steps":
         raise ValueError("clr_schedule.kind must be 'explicit_critical_steps'")
     critical_steps = value["critical_steps"]
@@ -324,7 +320,9 @@ def _load_model_workload(
             transformer_layers=_require_positive_int(
                 value["transformer_layers"], "model.transformer_layers"
             ),
-            hidden_size=_require_positive_int(value["hidden_size"], "model.hidden_size"),
+            hidden_size=_require_positive_int(
+                value["hidden_size"], "model.hidden_size"
+            ),
             sequence_length=_require_positive_int(
                 value["sequence_length"], "model.sequence_length"
             ),
@@ -346,9 +344,7 @@ def _load_model_workload(
         total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
         shard_count = tp * pp
         if total_gradient_bytes % shard_count:
-            raise ValueError(
-                "model gradient bytes must divide evenly across TP × PP"
-            )
+            raise ValueError("model gradient bytes must divide evenly across TP × PP")
         if (total_gradient_bytes // shard_count) % model.gradient_bucket_count:
             raise ValueError(
                 "per-rank gradient bytes must divide evenly across sample buckets"
@@ -361,7 +357,9 @@ def _load_model_workload(
             f"{sorted(EXPECTED_MODEL_TRACE_KEYS)}"
         )
     model = ModelTrace(
-        parameter_count=_require_positive_int(value["parameter_count"], "model.parameter_count"),
+        parameter_count=_require_positive_int(
+            value["parameter_count"], "model.parameter_count"
+        ),
         parameter_dtype_bytes=_require_positive_int(
             value["parameter_dtype_bytes"], "model.parameter_dtype_bytes"
         ),
@@ -437,7 +435,9 @@ def parse_profile_document(document: Any) -> Profile:
         "microburst_flow_count",
     )
     if microburst_flow_count >= ranks:
-        raise ValueError("microburst_flow_count must leave at least one destination rank")
+        raise ValueError(
+            "microburst_flow_count must leave at least one destination rank"
+        )
     destination_value = document.get("microburst_destination_rank")
     if destination_value is None:
         microburst_destination_rank = None
@@ -460,7 +460,9 @@ def parse_profile_document(document: Any) -> Profile:
         if len(set(microburst_source_ranks)) != len(microburst_source_ranks):
             raise ValueError("microburst_source_ranks must not contain duplicates")
         if any(source >= ranks for source in microburst_source_ranks):
-            raise ValueError("microburst_source_ranks contains a rank outside the profile")
+            raise ValueError(
+                "microburst_source_ranks contains a rank outside the profile"
+            )
         if microburst_destination_rank is None:
             raise ValueError(
                 "microburst_source_ranks requires microburst_destination_rank"
@@ -509,9 +511,7 @@ def parse_profile_document(document: Any) -> Profile:
     )
     if profile.workload.kind == SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD:
         if profile.tp != 1 or profile.pp != 1:
-            raise ValueError(
-                "sequential_dp_all_reduce requires TP=1 and PP=1"
-            )
+            raise ValueError("sequential_dp_all_reduce requires TP=1 and PP=1")
         if profile.compute_duration_us != 0:
             raise ValueError(
                 "sequential_dp_all_reduce requires compute_duration_us to be zero"
@@ -540,7 +540,10 @@ def parse_profile_document(document: Any) -> Profile:
             raise ValueError(
                 "tp_all_reduce_bytes must equal the model activation tensor bytes"
             )
-        if isinstance(profile.model, ModelTrace) and profile.pp_bytes != activation_bytes:
+        if (
+            isinstance(profile.model, ModelTrace)
+            and profile.pp_bytes != activation_bytes
+        ):
             raise ValueError("pp_bytes must equal the model activation tensor bytes")
         gradient_bytes_per_rank = (
             profile.model.parameter_count
@@ -550,9 +553,7 @@ def parse_profile_document(document: Any) -> Profile:
         expected_bucket_bytes = (
             gradient_bytes_per_rank // profile.model.gradient_bucket_count
             if isinstance(profile.model, GradientBucketSample)
-            else (
-                gradient_bytes_per_rank + profile.model.gradient_bucket_count - 1
-            )
+            else (gradient_bytes_per_rank + profile.model.gradient_bucket_count - 1)
             // profile.model.gradient_bucket_count
         )
         if profile.dp_all_reduce_bytes != expected_bucket_bytes:
@@ -565,7 +566,11 @@ def parse_profile_document(document: Any) -> Profile:
 
 def rank_for(tp_rank: int, pp_rank: int, dp_rank: int, profile: Profile) -> int:
     """Return a TP-fastest global rank."""
-    if not (0 <= tp_rank < profile.tp and 0 <= pp_rank < profile.pp and 0 <= dp_rank < profile.dp):
+    if not (
+        0 <= tp_rank < profile.tp
+        and 0 <= pp_rank < profile.pp
+        and 0 <= dp_rank < profile.dp
+    ):
         raise ValueError("parallelism coordinate is outside the profile")
     return ((dp_rank * profile.pp) + pp_rank) * profile.tp + tp_rank
 
@@ -596,7 +601,9 @@ def coordinates_for(rank: int, profile: Profile) -> tuple[int, int, int]:
     return tp_rank, pp_rank, dp_rank
 
 
-def generate_groups(profile: Profile) -> tuple[dict[str, list[int]], dict[str, int], dict[str, int], dict[str, int]]:
+def generate_groups(
+    profile: Profile,
+) -> tuple[dict[str, list[int]], dict[str, int], dict[str, int], dict[str, int]]:
     """Generate explicit TP, PP, and DP communicator membership and lookup IDs."""
     groups: dict[str, list[int]] = {}
     tp_group_for_rank: dict[str, int] = {}
@@ -606,7 +613,10 @@ def generate_groups(profile: Profile) -> tuple[dict[str, list[int]], dict[str, i
 
     for dp_rank in range(profile.dp):
         for pp_rank in range(profile.pp):
-            members = [rank_for(tp_rank, pp_rank, dp_rank, profile) for tp_rank in range(profile.tp)]
+            members = [
+                rank_for(tp_rank, pp_rank, dp_rank, profile)
+                for tp_rank in range(profile.tp)
+            ]
             groups[str(next_group_id)] = members
             for rank in members:
                 tp_group_for_rank[str(rank)] = next_group_id
@@ -614,7 +624,10 @@ def generate_groups(profile: Profile) -> tuple[dict[str, list[int]], dict[str, i
 
     for dp_rank in range(profile.dp):
         for tp_rank in range(profile.tp):
-            members = [rank_for(tp_rank, pp_rank, dp_rank, profile) for pp_rank in range(profile.pp)]
+            members = [
+                rank_for(tp_rank, pp_rank, dp_rank, profile)
+                for pp_rank in range(profile.pp)
+            ]
             groups[str(next_group_id)] = members
             for rank in members:
                 pp_group_for_rank[str(rank)] = next_group_id
@@ -622,13 +635,18 @@ def generate_groups(profile: Profile) -> tuple[dict[str, list[int]], dict[str, i
 
     for pp_rank in range(profile.pp):
         for tp_rank in range(profile.tp):
-            members = [rank_for(tp_rank, pp_rank, dp_rank, profile) for dp_rank in range(profile.dp)]
+            members = [
+                rank_for(tp_rank, pp_rank, dp_rank, profile)
+                for dp_rank in range(profile.dp)
+            ]
             groups[str(next_group_id)] = members
             for rank in members:
                 dp_group_for_rank[str(rank)] = next_group_id
             next_group_id += 1
 
-    expected_group_count = profile.dp * profile.pp + profile.dp * profile.tp + profile.pp * profile.tp
+    expected_group_count = (
+        profile.dp * profile.pp + profile.dp * profile.tp + profile.pp * profile.tp
+    )
     if len(groups) != expected_group_count:
         raise AssertionError("unexpected communicator group count")
     return groups, tp_group_for_rank, pp_group_for_rank, dp_group_for_rank
@@ -639,7 +657,15 @@ def _attribute(name: str, **value: Any) -> AttributeProto:
 
 
 class TraceWriter:
-    def __init__(self, path: Path, rank: int, profile: Profile, groups: tuple[dict[str, list[int]], dict[str, int], dict[str, int], dict[str, int]]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        rank: int,
+        profile: Profile,
+        groups: tuple[
+            dict[str, list[int]], dict[str, int], dict[str, int], dict[str, int]
+        ],
+    ) -> None:
         self.path = path
         self.rank = rank
         self.profile = profile
@@ -661,7 +687,15 @@ class TraceWriter:
         node.attr.append(_attribute("is_cpu_op", bool_val=False))
         return node.id
 
-    def all_reduce(self, name: str, dependencies: Iterable[int], domain: str, group_id: int, size_bytes: int, step: int) -> int:
+    def all_reduce(
+        self,
+        name: str,
+        dependencies: Iterable[int],
+        domain: str,
+        group_id: int,
+        size_bytes: int,
+        step: int,
+    ) -> int:
         node = self._new_node(name, COMM_COLL_NODE, dependencies)
         node.attr.extend(
             [
@@ -675,7 +709,16 @@ class TraceWriter:
         )
         return node.id
 
-    def pipeline_node(self, name: str, node_type: int, dependencies: Iterable[int], src: int, dst: int, tag: int, step: int) -> int:
+    def pipeline_node(
+        self,
+        name: str,
+        node_type: int,
+        dependencies: Iterable[int],
+        src: int,
+        dst: int,
+        tag: int,
+        step: int,
+    ) -> int:
         node = self._new_node(name, node_type, dependencies)
         node.attr.extend(
             [
@@ -890,10 +933,7 @@ class TraceWriter:
             forward_pipeline: list[int] = []
             for microbatch in range(model.pipeline_microbatches):
                 pipeline_tag = (
-                    step * 10_000_000
-                    + microbatch * 100_000
-                    + dp_rank * 1_000
-                    + tp_rank
+                    step * 10_000_000 + microbatch * 100_000 + dp_rank * 1_000 + tp_rank
                 )
                 dependencies = [forward_tail] if forward_tail is not None else []
                 if pp_rank > 0:
@@ -910,9 +950,7 @@ class TraceWriter:
                         )
                     )
                 if pp_rank < self.profile.pp - 1:
-                    destination = rank_for(
-                        tp_rank, pp_rank + 1, dp_rank, self.profile
-                    )
+                    destination = rank_for(tp_rank, pp_rank + 1, dp_rank, self.profile)
                     forward_pipeline.append(
                         self.pipeline_node(
                             f"step_{step}_microbatch_{microbatch}_pp_forward_send",
@@ -984,9 +1022,7 @@ class TraceWriter:
                         )
                     )
                 if pp_rank > 0:
-                    destination = rank_for(
-                        tp_rank, pp_rank - 1, dp_rank, self.profile
-                    )
+                    destination = rank_for(tp_rank, pp_rank - 1, dp_rank, self.profile)
                     backward_pipeline.append(
                         self.pipeline_node(
                             f"step_{step}_microbatch_{microbatch}_pp_backward_send",
@@ -1120,7 +1156,9 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
         return []
     if profile.microburst_destination_rank is None:
         cross_rack_base = profile.ranks // 2
-        destinations = [cross_rack_base + index for index in range(profile.microburst_flow_count)]
+        destinations = [
+            cross_rack_base + index for index in range(profile.microburst_flow_count)
+        ]
         if any(destination >= profile.ranks for destination in destinations):
             raise ValueError(
                 "microburst_flow_count requires microburst_destination_rank "
@@ -1134,7 +1172,9 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
             if profile.microburst_source_ranks is not None
             else [rank for rank in range(profile.ranks) if rank != destination]
         )
-        endpoints = [(source, destination) for source in sources[: profile.microburst_flow_count]]
+        endpoints = [
+            (source, destination) for source in sources[: profile.microburst_flow_count]
+        ]
     return [
         {
             "src": source,
@@ -1154,11 +1194,15 @@ def resolve_selection_policy(
     p_high: float | None = None,
 ) -> SelectionPolicy:
     """Resolve optional command-line overrides against the typed profile policy."""
-    resolved_low = profile.selection_policy.p_low if p_low is None else _probability(
-        p_low, "p_low"
+    resolved_low = (
+        profile.selection_policy.p_low
+        if p_low is None
+        else _probability(p_low, "p_low")
     )
     resolved_high = (
-        profile.selection_policy.p_high if p_high is None else _probability(p_high, "p_high")
+        profile.selection_policy.p_high
+        if p_high is None
+        else _probability(p_high, "p_high")
     )
     if resolved_low == 0.0 or resolved_low > MAX_P_LOW:
         raise ValueError("p_low must be greater than zero and at most 0.01")
@@ -1172,11 +1216,7 @@ def _selection_probabilities_for_schedule(
     policy: SelectionPolicy,
 ) -> dict[str, float]:
     return {
-        step: (
-            policy.p_low
-            if is_clr
-            else policy.p_high
-        )
+        step: (policy.p_low if is_clr else policy.p_high)
         for step, is_clr in schedule.is_clr_by_step().items()
     }
 
@@ -1302,7 +1342,9 @@ def materialize(
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
     if seed_override is not None:
-        profile = replace(profile, seed=_require_positive_int(seed_override, "seed_override"))
+        profile = replace(
+            profile, seed=_require_positive_int(seed_override, "seed_override")
+        )
     selection_policy = resolve_selection_policy(profile, p_low=p_low, p_high=p_high)
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
@@ -1353,9 +1395,7 @@ def materialize(
         profile.network.packet_trimming,
     )
     experiment_config = output_dir / "experiment.json"
-    write_experiment_config(
-        experiment_config, profile, clr_schedule, selection_policy
-    )
+    write_experiment_config(experiment_config, profile, clr_schedule, selection_policy)
     system_config = output_dir / "system.json"
     write_system_config(system_config)
     (output_dir / "communicator_groups.json").write_text(
@@ -1437,7 +1477,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
+    parser.add_argument(
+        "--clean", action="store_true", help="replace an existing output directory"
+    )
     parser.add_argument("--seed", type=int, help="override the profile seed")
     parser.add_argument(
         "--p-low",

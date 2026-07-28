@@ -13,7 +13,6 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from experiments.ring_3d.report import render_report
 
-
 FLOW_FIELDS = [
     "flow_kind",
     "decision",
@@ -40,7 +39,9 @@ FLOW_FIELDS = [
 
 class Ring3DReportTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+        self.profile_path = (
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+        )
 
     def _write_completed_run(self, run_dir: Path) -> None:
         telemetry_dir = run_dir / "telemetry"
@@ -343,11 +344,15 @@ class Ring3DReportTests(unittest.TestCase):
                 "end_time_ns": "200",
             },
         ]
-        with (telemetry_dir / "flow_events.csv").open("w", newline="", encoding="utf-8") as handle:
+        with (telemetry_dir / "flow_events.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
             writer = csv.DictWriter(handle, fieldnames=FLOW_FIELDS)
             writer.writeheader()
             writer.writerows(flows)
-        with (telemetry_dir / "rank_completion.csv").open("w", newline="", encoding="utf-8") as handle:
+        with (telemetry_dir / "rank_completion.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
             writer = csv.writer(handle)
             writer.writerow(["rank", "completion_time_ns"])
             writer.writerows((rank, 2_500) for rank in range(8))
@@ -394,7 +399,9 @@ class Ring3DReportTests(unittest.TestCase):
 
     def test_report_explains_missing_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            report = render_report(Path(temporary_directory) / "absent", self.profile_path)
+            report = render_report(
+                Path(temporary_directory) / "absent", self.profile_path
+            )
 
             self.assertIn("results unavailable", report)
             self.assertIn("TP=2 × PP=2 × DP=2", report)

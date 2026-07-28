@@ -11,10 +11,13 @@ from typing import Any
 
 from experiments.ring_3d.generate import (
     Profile as WorkloadProfile,
+)
+from experiments.ring_3d.generate import (
     materialize as materialize_ring_3d,
+)
+from experiments.ring_3d.generate import (
     parse_profile_document,
 )
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _PROFILE_KEYS = {
@@ -100,7 +103,9 @@ def _resolve_base_profile(value: Any, profile_path: Path) -> Path:
     try:
         base_path.relative_to(REPOSITORY_ROOT)
     except ValueError as error:
-        raise ValueError("base_workload_profile must remain inside the repository") from error
+        raise ValueError(
+            "base_workload_profile must remain inside the repository"
+        ) from error
     if base_path.suffix != ".json" or not base_path.is_file():
         raise ValueError("base_workload_profile must name an existing JSON profile")
     return base_path
@@ -108,7 +113,9 @@ def _resolve_base_profile(value: Any, profile_path: Path) -> Path:
 
 def _parse_expectation(value: Any) -> DblpExpectation:
     if not isinstance(value, dict) or set(value) != _EXPECTATION_KEYS:
-        raise ValueError("expectation must contain exactly " f"{sorted(_EXPECTATION_KEYS)}")
+        raise ValueError(
+            f"expectation must contain exactly {sorted(_EXPECTATION_KEYS)}"
+        )
     try:
         terminal_outcome = TerminalExpectation(value["terminal_outcome"])
     except (TypeError, ValueError) as error:
@@ -140,8 +147,7 @@ def _project_workload_document(
     if not isinstance(network, dict):
         raise ValueError("base_workload_profile.network must be an object")
     if any(
-        key in network
-        for key in ("data_loss", "transport_recovery", "packet_trimming")
+        key in network for key in ("data_loss", "transport_recovery", "packet_trimming")
     ):
         raise ValueError(
             "base_workload_profile must not configure loss, recovery, or trimming"

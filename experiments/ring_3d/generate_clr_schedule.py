@@ -21,7 +21,6 @@ from typing import Iterable
 
 import numpy as np
 
-
 DEFAULT_DECAY_RATE = 1.5
 DEFAULT_EPOCH_STEPS = 2
 DEFAULT_SPIKE_STDDEV_STEPS = 0.5
@@ -152,7 +151,9 @@ def generate_explicit_clr_schedule(
     if any(isinstance(step, bool) or not isinstance(step, int) for step in steps):
         raise ValueError("critical_steps entries must be integers")
     if any(step < 1 or step > total_steps for step in steps):
-        raise ValueError("critical_steps entries must be within the training-step range")
+        raise ValueError(
+            "critical_steps entries must be within the training-step range"
+        )
     if len(set(steps)) != len(steps):
         raise ValueError("critical_steps entries must be unique")
 
@@ -208,9 +209,7 @@ def schedule_metadata(
     else:
         metadata["critical_steps"] = [
             int(step_id)
-            for step_id, is_clr in zip(
-                schedule.step_ids, schedule.is_clr, strict=True
-            )
+            for step_id, is_clr in zip(schedule.step_ids, schedule.is_clr, strict=True)
             if is_clr
         ]
     return metadata
@@ -220,13 +219,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--steps", type=int, required=True, help="training-step count")
     parser.add_argument("--seed", type=int, required=True, help="fixed sampling seed")
-    parser.add_argument("--output", type=Path, required=True, help="output clr_mask.csv")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="output clr_mask.csv"
+    )
     parser.add_argument("--decay-rate", type=float, default=DEFAULT_DECAY_RATE)
     parser.add_argument("--epoch-steps", type=int, default=DEFAULT_EPOCH_STEPS)
     parser.add_argument(
         "--spike-stddev-steps", type=float, default=DEFAULT_SPIKE_STDDEV_STEPS
     )
-    parser.add_argument("--spike-amplitude", type=float, default=DEFAULT_SPIKE_AMPLITUDE)
+    parser.add_argument(
+        "--spike-amplitude", type=float, default=DEFAULT_SPIKE_AMPLITUDE
+    )
     arguments = parser.parse_args()
     parameters = ClrScheduleParameters(
         decay_rate=arguments.decay_rate,

@@ -12,7 +12,6 @@ from math import isfinite
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_PACKET_PAYLOAD_BYTES = 1_000
 MAX_PACKET_PAYLOAD_BYTES = 9_000
 HOST_TO_SWITCH_DELAY = "0.005ms"
@@ -169,7 +168,9 @@ class TopologyLayout:
                 raise ValueError("topology links must not contain self-loops")
             edge = tuple(sorted((link.source, link.destination)))
             if edge in undirected_edges:
-                raise ValueError("topology must not declare duplicate bidirectional links")
+                raise ValueError(
+                    "topology must not declare duplicate bidirectional links"
+                )
             undirected_edges.add(edge)
 
     def write(self, path: Path) -> None:
@@ -258,8 +259,7 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
     scope = loss["scope"]
     if not isinstance(scope, str) or scope not in DATA_LOSS_SCOPES:
         raise ValueError(
-            "network.data_loss.scope must be one of "
-            f"{sorted(DATA_LOSS_SCOPES)}"
+            f"network.data_loss.scope must be one of {sorted(DATA_LOSS_SCOPES)}"
         )
     duration_ns = _positive_int(loss["duration_ns"], "network.data_loss.duration_ns")
     rng_stream = _positive_int(loss["rng_stream"], "network.data_loss.rng_stream")
@@ -272,7 +272,9 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
         loss.get("destination_host"), "network.data_loss.destination_host", host_count
     )
     if source_host is not None and source_host == destination_host:
-        raise ValueError("network.data_loss source_host and destination_host must differ")
+        raise ValueError(
+            "network.data_loss source_host and destination_host must differ"
+        )
     receiver_node = loss.get("receiver_node")
     if receiver_node is not None:
         receiver_node = _nonnegative_int(
@@ -299,8 +301,7 @@ def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | No
     required = {"retransmission_timeout_ns", "max_retransmission_retries"}
     if set(recovery) != required:
         raise ValueError(
-            "network.transport_recovery must contain exactly "
-            f"{sorted(required)}"
+            f"network.transport_recovery must contain exactly {sorted(required)}"
         )
     return TransportRecovery(
         retransmission_timeout_ns=_positive_int(
@@ -323,8 +324,7 @@ def _load_packet_trimming(document: dict[str, Any]) -> PacketTrimming | None:
     mode = trimming["mode"]
     if not isinstance(mode, str) or mode not in PACKET_TRIM_MODES:
         raise ValueError(
-            "network.packet_trimming.mode must be one of "
-            f"{sorted(PACKET_TRIM_MODES)}"
+            f"network.packet_trimming.mode must be one of {sorted(PACKET_TRIM_MODES)}"
         )
     return PacketTrimming(mode=mode)
 
@@ -369,9 +369,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "transport_recovery",
         "packet_trimming",
     }
-    topology_keys = (
-        {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
-    )
+    topology_keys = {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
     unknown_keys = set(document) - common_keys - topology_keys
     if unknown_keys:
         raise ValueError(f"unknown network keys: {sorted(unknown_keys)}")
@@ -388,7 +386,9 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
     data_loss = _load_data_loss(document, host_count)
     transport_recovery = _load_transport_recovery(document)
     packet_trimming = _load_packet_trimming(document)
-    if (data_loss is not None or packet_trimming is not None) and transport_recovery is None:
+    if (
+        data_loss is not None or packet_trimming is not None
+    ) and transport_recovery is None:
         raise ValueError(
             "network.transport_recovery is required when data_loss or packet_trimming is enabled"
         )
@@ -410,12 +410,12 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             packet_trimming=packet_trimming,
         )
 
-    hosts_per_leaf = _positive_int(
-        document["hosts_per_leaf"], "network.hosts_per_leaf"
-    )
+    hosts_per_leaf = _positive_int(document["hosts_per_leaf"], "network.hosts_per_leaf")
     spine_count = _positive_int(document["spine_count"], "network.spine_count")
     if host_count % hosts_per_leaf:
-        raise ValueError("parallelism product must be divisible by network.hosts_per_leaf")
+        raise ValueError(
+            "parallelism product must be divisible by network.hosts_per_leaf"
+        )
     if spine_count > 255:
         raise ValueError("network.spine_count must not exceed 255")
     return ClosNetwork(

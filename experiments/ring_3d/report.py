@@ -84,8 +84,7 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     rendered = ["| " + " | ".join(headers) + " |"]
     rendered.append("| " + " | ".join("---" for _ in headers) + " |")
     rendered.extend(
-        "| " + " | ".join(_escape_cell(value) for value in row) + " |"
-        for row in rows
+        "| " + " | ".join(_escape_cell(value) for value in row) + " |" for row in rows
     )
     return rendered
 
@@ -145,9 +144,7 @@ def _display_path(path: Path) -> str:
         return path.as_posix()
 
 
-def _physical_network_rows(
-    network: Any, physical_topology: Any
-) -> list[list[Any]]:
+def _physical_network_rows(network: Any, physical_topology: Any) -> list[list[Any]]:
     """Return a stable physical-network table from materialized metadata."""
     rows: list[list[Any]] = []
     if isinstance(physical_topology, dict):
@@ -258,7 +255,9 @@ def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
         ["Parameter dtype", f"{get('parameter_dtype_bytes', 'unknown')} B"],
         [
             "Total gradient bytes per DP replica",
-            _format_optional_bytes(get("total_gradient_bytes_per_data_parallel_replica")),
+            _format_optional_bytes(
+                get("total_gradient_bytes_per_data_parallel_replica")
+            ),
         ],
         [
             "Gradient bytes per rank",
@@ -268,7 +267,10 @@ def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
     ]
     if "gradient_bucket_bytes" in model_trace:
         rows.append(
-            ["Gradient bucket payload", _format_optional_bytes(get("gradient_bucket_bytes"))]
+            [
+                "Gradient bucket payload",
+                _format_optional_bytes(get("gradient_bucket_bytes")),
+            ]
         )
     if "gradient_bucket_min_bytes" in model_trace:
         rows.append(
@@ -364,10 +366,30 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 ["Parallelism", f"TP={tp} × PP={pp} × DP={dp}"],
                 ["Ranks", expected_ranks],
                 ["Training steps", profile.get("steps", "unknown")],
-                ["TP All-Reduce payload", _format_bytes(_as_int(profile.get("tp_all_reduce_bytes"), "tp_all_reduce_bytes"))],
-                ["PP payload", _format_bytes(_as_int(profile.get("pp_bytes"), "pp_bytes"))],
-                ["DP All-Reduce payload", _format_bytes(_as_int(profile.get("dp_all_reduce_bytes"), "dp_all_reduce_bytes"))],
-                ["Compute per trace node", f"{profile.get('compute_duration_us', 'unknown')} μs"],
+                [
+                    "TP All-Reduce payload",
+                    _format_bytes(
+                        _as_int(
+                            profile.get("tp_all_reduce_bytes"), "tp_all_reduce_bytes"
+                        )
+                    ),
+                ],
+                [
+                    "PP payload",
+                    _format_bytes(_as_int(profile.get("pp_bytes"), "pp_bytes")),
+                ],
+                [
+                    "DP All-Reduce payload",
+                    _format_bytes(
+                        _as_int(
+                            profile.get("dp_all_reduce_bytes"), "dp_all_reduce_bytes"
+                        )
+                    ),
+                ],
+                [
+                    "Compute per trace node",
+                    f"{profile.get('compute_duration_us', 'unknown')} μs",
+                ],
                 ["Random seed", profile.get("seed", "unknown")],
             ],
         )
@@ -388,25 +410,25 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     )
     network_rows = _physical_network_rows(network, physical_topology)
     network_rows.extend(
-        _transport_contract_rows(
-            data_plane_loss, transport_recovery, packet_trimming
-        )
+        _transport_contract_rows(data_plane_loss, transport_recovery, packet_trimming)
     )
     if network_rows:
         lines.extend(["", "## Physical network", ""])
         lines.extend(_markdown_table(["Field", "Value"], network_rows))
 
-    if (model_rows := _model_trace_rows(model_trace)):
+    if model_rows := _model_trace_rows(model_trace):
         lines.extend(["", "## Materialized model workload", ""])
         lines.extend(_markdown_table(["Field", "Value"], model_rows))
 
-    if (execution_rows := _execution_rows(execution)):
+    if execution_rows := _execution_rows(execution):
         lines.extend(["", "## Execution controls", ""])
         lines.extend(_markdown_table(["Field", "Value"], execution_rows))
 
     lines.extend(["", "## Admission policy", ""])
     if policy is None:
-        lines.append("Policy output is unavailable because the smoke run did not materialize `experiment.json`.")
+        lines.append(
+            "Policy output is unavailable because the smoke run did not materialize `experiment.json`."
+        )
     else:
         provenance = policy.get("provenance", {})
         microburst = policy.get("microburst", {})
@@ -424,7 +446,10 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 ["Field", "Configured value"],
                 [
                     ["Eligibility", policy.get("eligibility", "unknown")],
-                    ["Default priority group", policy.get("default_priority_group", "unknown")],
+                    [
+                        "Default priority group",
+                        policy.get("default_priority_group", "unknown"),
+                    ],
                     [
                         "Provenance replacement QP",
                         (
@@ -444,10 +469,26 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             else "not recorded"
                         ),
                     ],
-                    ["Background microburst", "enabled" if microburst.get("enabled") else "disabled"],
-                    ["Microburst trigger step", microburst.get("trigger_step", "not applicable")],
-                    ["Microburst flows", len(microburst_flows) if microburst.get("enabled") else "not applicable"],
-                    ["Total microburst bytes", _format_bytes(microburst_bytes) if microburst.get("enabled") else "not applicable"],
+                    [
+                        "Background microburst",
+                        "enabled" if microburst.get("enabled") else "disabled",
+                    ],
+                    [
+                        "Microburst trigger step",
+                        microburst.get("trigger_step", "not applicable"),
+                    ],
+                    [
+                        "Microburst flows",
+                        len(microburst_flows)
+                        if microburst.get("enabled")
+                        else "not applicable",
+                    ],
+                    [
+                        "Total microburst bytes",
+                        _format_bytes(microburst_bytes)
+                        if microburst.get("enabled")
+                        else "not applicable",
+                    ],
                 ],
             )
         )
@@ -456,9 +497,13 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             lines.extend(["", "Materialized logical-selection probabilities:", ""])
             threshold_rows = [
                 [step, _format_probability(probability)]
-                for step, probability in sorted(thresholds.items(), key=lambda item: int(item[0]))
+                for step, probability in sorted(
+                    thresholds.items(), key=lambda item: int(item[0])
+                )
             ]
-            lines.extend(_markdown_table(["Training step", "Threshold"], threshold_rows))
+            lines.extend(
+                _markdown_table(["Training step", "Threshold"], threshold_rows)
+            )
 
     lines.extend(["", "## Run integrity", ""])
     if summary is None:
@@ -470,7 +515,10 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         )
     else:
         completed_ranks = {_as_int(row.get("rank"), "rank") for row in completions}
-        complete = len(completed_ranks) == expected_ranks and len(completions) == expected_ranks
+        complete = (
+            len(completed_ranks) == expected_ranks
+            and len(completions) == expected_ranks
+        )
         fct_join = summary.get("fct_join")
         if isinstance(fct_join, dict) and fct_join.get("status") == "verified":
             fct_join_status = (
@@ -487,12 +535,29 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             else "not available"
         )
         integrity_rows = [
-            ["Telemetry analyzer", "PASS — DP-only shedding and nonzero provenance control were validated before this report was written"],
-            ["Rank completion", f"{len(completed_ranks)} unique / {expected_ranks} expected ({'complete' if complete else 'incomplete'})"],
-            ["Flow telemetry", f"{len(flows)} rows / {summary.get('flow_count', 'unknown')} summarized"],
+            [
+                "Telemetry analyzer",
+                "PASS — DP-only shedding and nonzero provenance control were validated before this report was written",
+            ],
+            [
+                "Rank completion",
+                f"{len(completed_ranks)} unique / {expected_ranks} expected ({'complete' if complete else 'incomplete'})",
+            ],
+            [
+                "Flow telemetry",
+                f"{len(flows)} rows / {summary.get('flow_count', 'unknown')} summarized",
+            ],
             ["Telemetry ↔ ns-3 FCT join", fct_join_status],
             ["Primary-analysis eligibility", eligibility_status],
-            ["Maximum rank completion time", _format_duration_ns(_as_int(summary.get("completion_time_ns_max", 0), "completion_time_ns_max"))],
+            [
+                "Maximum rank completion time",
+                _format_duration_ns(
+                    _as_int(
+                        summary.get("completion_time_ns_max", 0),
+                        "completion_time_ns_max",
+                    )
+                ),
+            ],
         ]
         lines.extend(_markdown_table(["Check", "Result"], integrity_rows))
 
@@ -536,10 +601,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             if not isinstance(types, dict):
                                 continue
                             for collective_type, values in sorted(types.items()):
-                                if (row := _timing_table_row(
-                                    f"{domain} / {collective_type} per-rank",
-                                    values,
-                                )) is not None:
+                                if (
+                                    row := _timing_table_row(
+                                        f"{domain} / {collective_type} per-rank",
+                                        values,
+                                    )
+                                ) is not None:
                                     collective_rows.append(row)
                 if isinstance(operation_span, dict):
                     by_domain_and_type = operation_span.get(
@@ -550,10 +617,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             if not isinstance(types, dict):
                                 continue
                             for collective_type, values in sorted(types.items()):
-                                if (row := _timing_table_row(
-                                    f"{domain} / {collective_type} all-rank span",
-                                    values,
-                                )) is not None:
+                                if (
+                                    row := _timing_table_row(
+                                        f"{domain} / {collective_type} all-rank span",
+                                        values,
+                                    )
+                                ) is not None:
                                     collective_rows.append(row)
                 lines.extend(["", "## Logical collective-completion latency", ""])
                 lines.append(
@@ -569,7 +638,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         )
                     )
                 else:
-                    lines.append("No completed logical collective events were observed.")
+                    lines.append(
+                        "No completed logical collective events were observed."
+                    )
 
         lines.extend(["", "## Measured traffic", ""])
         lines.extend(
@@ -577,10 +648,37 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 ["Metric", "Value"],
                 [
                     ["Observed flows", summary.get("flow_count", "unknown")],
-                    ["Admission-suppressed DP flows", summary.get("shed_flow_count", "unknown")],
-                    ["Logical modeled bytes", _format_bytes(_as_int(summary.get("total_logical_bytes", 0), "total_logical_bytes"))],
-                    ["Physical transport bytes", _format_bytes(_as_int(summary.get("total_physical_bytes", 0), "total_physical_bytes"))],
-                    ["Suppressed logical DP bytes", _format_bytes(_as_int(summary.get("shed_logical_bytes", 0), "shed_logical_bytes"))],
+                    [
+                        "Admission-suppressed DP flows",
+                        summary.get("shed_flow_count", "unknown"),
+                    ],
+                    [
+                        "Logical modeled bytes",
+                        _format_bytes(
+                            _as_int(
+                                summary.get("total_logical_bytes", 0),
+                                "total_logical_bytes",
+                            )
+                        ),
+                    ],
+                    [
+                        "Physical transport bytes",
+                        _format_bytes(
+                            _as_int(
+                                summary.get("total_physical_bytes", 0),
+                                "total_physical_bytes",
+                            )
+                        ),
+                    ],
+                    [
+                        "Suppressed logical DP bytes",
+                        _format_bytes(
+                            _as_int(
+                                summary.get("shed_logical_bytes", 0),
+                                "shed_logical_bytes",
+                            )
+                        ),
+                    ],
                 ],
             )
         )
@@ -589,7 +687,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
         if isinstance(step_data, dict):
             lines.extend(["", "### By training step", ""])
             step_rows: list[list[Any]] = []
-            for step, values in sorted(step_data.items(), key=lambda item: int(item[0])):
+            for step, values in sorted(
+                step_data.items(), key=lambda item: int(item[0])
+            ):
                 if not isinstance(values, dict):
                     raise ValueError("training-step summary must contain objects")
                 step_rows.append(
@@ -597,8 +697,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         step,
                         values.get("flows", "unknown"),
                         values.get("shed_flows", "unknown"),
-                        _format_bytes(_as_int(values.get("logical_bytes", 0), "logical_bytes")),
-                        _format_bytes(_as_int(values.get("physical_bytes", 0), "physical_bytes")),
+                        _format_bytes(
+                            _as_int(values.get("logical_bytes", 0), "logical_bytes")
+                        ),
+                        _format_bytes(
+                            _as_int(values.get("physical_bytes", 0), "physical_bytes")
+                        ),
                     ]
                 )
             lines.extend(
@@ -659,7 +763,13 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             ]
             lines.extend(
                 _markdown_table(
-                    ["Domain", "Flows", "Suppressed", "Logical bytes", "Physical bytes"],
+                    [
+                        "Domain",
+                        "Flows",
+                        "Suppressed",
+                        "Logical bytes",
+                        "Physical bytes",
+                    ],
                     domain_rows,
                 )
             )
@@ -676,7 +786,13 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             ]
             lines.extend(
                 _markdown_table(
-                    ["Flow kind", "Flows", "Suppressed", "Logical bytes", "Physical bytes"],
+                    [
+                        "Flow kind",
+                        "Flows",
+                        "Suppressed",
+                        "Logical bytes",
+                        "Physical bytes",
+                    ],
                     kind_rows,
                 )
             )
@@ -692,14 +808,14 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 for kind, values in by_kind.items():
                     if (row := _timing_table_row(kind, values)) is not None:
                         timing_rows.append(row)
-            by_domain_and_kind = flow_timing.get(
-                "by_parallelism_domain_and_flow_kind"
-            )
+            by_domain_and_kind = flow_timing.get("by_parallelism_domain_and_flow_kind")
             if isinstance(by_domain_and_kind, dict):
                 dp_timing = by_domain_and_kind.get("dp")
                 if isinstance(dp_timing, dict):
                     for kind, values in dp_timing.items():
-                        if (row := _timing_table_row(f"dp / {kind}", values)) is not None:
+                        if (
+                            row := _timing_table_row(f"dp / {kind}", values)
+                        ) is not None:
                             timing_rows.append(row)
             if timing_rows:
                 lines.extend(["", "## Per-QP flow-completion time", ""])
@@ -718,7 +834,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
             if isinstance(by_step, dict):
                 step_timing_rows = [
                     row
-                    for step, values in sorted(by_step.items(), key=lambda item: int(item[0]))
+                    for step, values in sorted(
+                        by_step.items(), key=lambda item: int(item[0])
+                    )
                     if (row := _timing_table_row(f"Step {step}", values)) is not None
                 ]
                 if step_timing_rows:
@@ -740,8 +858,16 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 or isinstance(pfc, dict)
                 or isinstance(transport, dict)
             ):
-                queue_status = queue.get("status", "not available") if isinstance(queue, dict) else "not available"
-                pfc_status = pfc.get("status", "not available") if isinstance(pfc, dict) else "not available"
+                queue_status = (
+                    queue.get("status", "not available")
+                    if isinstance(queue, dict)
+                    else "not available"
+                )
+                pfc_status = (
+                    pfc.get("status", "not available")
+                    if isinstance(pfc, dict)
+                    else "not available"
+                )
                 queue_value = (
                     f"{queue.get('sample_count', 0)} samples; "
                     f"{queue.get('observed_queue_count', 0)} queues; peak "
@@ -786,7 +912,10 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         [
                             ["Queue telemetry", queue_value],
                             ["PFC trace", pfc_value],
-                            ["Configured / natural data-control drops", transport_value],
+                            [
+                                "Configured / natural data-control drops",
+                                transport_value,
+                            ],
                             ["UEC-style trim conversions", trim_value],
                         ],
                     )
@@ -864,9 +993,18 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                                 )
                             ),
                         ],
-                        ["Trim notifications", recovery.get("trim_notification_count", 0)],
-                        ["FTD repair controls", recovery.get("trim_ftd_repair_count", 0)],
-                        ["BTS notifications", recovery.get("trim_bts_notification_count", 0)],
+                        [
+                            "Trim notifications",
+                            recovery.get("trim_notification_count", 0),
+                        ],
+                        [
+                            "FTD repair controls",
+                            recovery.get("trim_ftd_repair_count", 0),
+                        ],
+                        [
+                            "BTS notifications",
+                            recovery.get("trim_bts_notification_count", 0),
+                        ],
                         [
                             "Stale trim notifications",
                             recovery.get("stale_trim_notification_count", 0),
@@ -893,14 +1031,28 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             [
                                 label,
                                 values.get("flow_count", "unknown"),
-                                _format_bytes(_as_int(values.get("logical_bytes", 0), "logical_bytes")),
-                                _format_bytes(_as_int(values.get("physical_bytes", 0), "physical_bytes")),
+                                _format_bytes(
+                                    _as_int(
+                                        values.get("logical_bytes", 0), "logical_bytes"
+                                    )
+                                ),
+                                _format_bytes(
+                                    _as_int(
+                                        values.get("physical_bytes", 0),
+                                        "physical_bytes",
+                                    )
+                                ),
                             ]
                         )
             if mix_rows:
                 lines.extend(
                     _markdown_table(
-                        ["Traffic population", "Flows", "Logical bytes", "Physical bytes"],
+                        [
+                            "Traffic population",
+                            "Flows",
+                            "Logical bytes",
+                            "Physical bytes",
+                        ],
                         mix_rows,
                     )
                 )
@@ -925,10 +1077,12 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     if (run_profile := run_dir / "profile.json").is_file():
         lines.append(f"- Materialized profile copy: `{_display_path(run_profile)}`")
     lines.append(f"- Generated run directory: `{_display_path(run_dir)}`")
-    if (revision := os.environ.get("GITHUB_SHA")):
+    if revision := os.environ.get("GITHUB_SHA"):
         lines.append(f"- Source revision: `{revision}`")
-    if (artifact_url := _artifact_url()):
-        lines.append(f"- [Download the raw telemetry and generated inputs]({artifact_url})")
+    if artifact_url := _artifact_url():
+        lines.append(
+            f"- [Download the raw telemetry and generated inputs]({artifact_url})"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -937,7 +1091,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--profile", type=Path, required=True)
-    parser.add_argument("--output", type=Path, help="write Markdown to this path instead of stdout")
+    parser.add_argument(
+        "--output", type=Path, help="write Markdown to this path instead of stdout"
+    )
     arguments = parser.parse_args()
 
     report = render_report(arguments.run_dir.resolve(), arguments.profile.resolve())

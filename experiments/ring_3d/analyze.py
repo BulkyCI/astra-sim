@@ -143,7 +143,9 @@ def _summarize_collectives(
     per_rank_by_domain_and_type: dict[str, dict[str, list[int]]] = defaultdict(
         lambda: defaultdict(list)
     )
-    operations: dict[tuple[str, str, int, int], list[dict[str, str]]] = defaultdict(list)
+    operations: dict[tuple[str, str, int, int], list[dict[str, str]]] = defaultdict(
+        list
+    )
     seen_rank_events: set[tuple[str, str, int, int, int]] = set()
 
     for row in collective_rows:
@@ -153,11 +155,15 @@ def _summarize_collectives(
         node_id = _as_int(row, "workload_node_id")
         rank = _as_int(row, "rank")
         if rank < 0 or _as_int(row, "logical_bytes") < 0:
-            raise ValueError("collective telemetry rank and logical bytes must be nonnegative")
+            raise ValueError(
+                "collective telemetry rank and logical bytes must be nonnegative"
+            )
         duration = _collective_duration_ns(row)
         event_key = (domain, collective_type, training_step, node_id, rank)
         if event_key in seen_rank_events:
-            raise ValueError("collective telemetry contains a duplicate rank completion")
+            raise ValueError(
+                "collective telemetry contains a duplicate rank completion"
+            )
         seen_rank_events.add(event_key)
         per_rank_durations.append(duration)
         per_rank_by_domain[domain].append(duration)
@@ -274,11 +280,22 @@ def _fct_node_id(encoded_address: str) -> int:
 
 def _load_fct_records(path: Path) -> dict[tuple[int, int, int], dict[str, int]]:
     records: dict[tuple[int, int, int], dict[str, int]] = {}
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         fields = line.split()
         if len(fields) != 8:
             raise ValueError(f"invalid FCT record at {path}:{line_number}")
-        source, destination, source_port, _destination_port, size, start, duration, standalone = fields
+        (
+            source,
+            destination,
+            source_port,
+            _destination_port,
+            size,
+            start,
+            duration,
+            standalone,
+        ) = fields
         key = (_fct_node_id(source), _fct_node_id(destination), int(source_port))
         if key in records:
             raise ValueError("FCT records contain a duplicate flow key")
@@ -290,16 +307,16 @@ def _load_fct_records(path: Path) -> dict[tuple[int, int, int], dict[str, int]]:
                 "standalone_fct_ns": int(standalone),
             }
         except ValueError as error:
-            raise ValueError(f"invalid numeric FCT record at {path}:{line_number}") from error
+            raise ValueError(
+                f"invalid numeric FCT record at {path}:{line_number}"
+            ) from error
     return records
 
 
 def _verify_fct_join(
     flow_rows: list[dict[str, str]], fct_path: Path
 ) -> dict[str, int | str]:
-    completed_rows = [
-        row for row in flow_rows if _terminal_outcome(row) == "completed"
-    ]
+    completed_rows = [row for row in flow_rows if _terminal_outcome(row) == "completed"]
     failed_flow_count = len(flow_rows) - len(completed_rows)
     if not fct_path.is_file():
         return {
@@ -395,9 +412,9 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "plane_bytes": {plane: plane_bytes[plane] for plane in ("data", "control")},
         "data_injected_drop_count": events["data_injected_drop"],
         "control_injected_drop_count": 0,
-        "data_switch_admission_drop_count": event_plane_counts[
-            "switch_admission_drop"
-        ]["data"],
+        "data_switch_admission_drop_count": event_plane_counts["switch_admission_drop"][
+            "data"
+        ],
         "control_switch_admission_drop_count": event_plane_counts[
             "switch_admission_drop"
         ]["control"],
@@ -433,8 +450,7 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
                 for event in ("trim_bts_admission", "trim_bts_egress_queue")
             ),
             "admission_conversion_count": sum(
-                events[event]
-                for event in ("trim_ftd_admission", "trim_bts_admission")
+                events[event] for event in ("trim_ftd_admission", "trim_bts_admission")
             ),
             "egress_queue_conversion_count": sum(
                 events[event]
@@ -458,7 +474,9 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
             if not fields:
                 continue
             if len(fields) < 6 or fields[0] != "time" or (len(fields) - 3) % 3:
-                raise ValueError(f"invalid queue telemetry at {queue_path}:{line_number}")
+                raise ValueError(
+                    f"invalid queue telemetry at {queue_path}:{line_number}"
+                )
             try:
                 switch = int(fields[2])
                 for index in range(3, len(fields), 3):
@@ -529,7 +547,10 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
                 raise ValueError(
                     f"invalid PFC telemetry at {pfc_path}:{line_number}"
                 ) from error
-            if min(timestamp_ns, node_id, node_kind, port_id) < 0 or event not in (0, 1):
+            if min(timestamp_ns, node_id, node_kind, port_id) < 0 or event not in (
+                0,
+                1,
+            ):
                 raise ValueError(f"invalid PFC telemetry at {pfc_path}:{line_number}")
             key = (node_id, port_id, queue_id)
             affected[key] = node_kind
@@ -537,7 +558,9 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
             if event == 1:
                 pause_count += 1
                 if queue_id is not None and active_pauses[key]:
-                    raise ValueError("PFC pause was received before the previous resume")
+                    raise ValueError(
+                        "PFC pause was received before the previous resume"
+                    )
                 active_pauses[key].append(timestamp_ns)
             else:
                 resume_count += 1
@@ -572,7 +595,9 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
             "active_pause_count_at_end": sum(
                 len(starts) for starts in active_pauses.values()
             ),
-            "queue_identity_status": "available" if uses_queue_identity else "not_available",
+            "queue_identity_status": "available"
+            if uses_queue_identity
+            else "not_available",
             "pause_duration_status": (
                 "exact" if uses_queue_identity else "estimated_without_queue_identity"
             ),
@@ -633,9 +658,7 @@ def summarize(
 
     total_logical_bytes = sum(_as_int(row, "logical_bytes") for row in flow_rows)
     total_physical_bytes = sum(_as_int(row, "physical_bytes") for row in flow_rows)
-    completed_rows = [
-        row for row in flow_rows if _terminal_outcome(row) == "completed"
-    ]
+    completed_rows = [row for row in flow_rows if _terminal_outcome(row) == "completed"]
     failed_rows = [row for row in flow_rows if _terminal_outcome(row) == "failed"]
     for row in completed_rows:
         if row.get("failure_reason"):
@@ -647,10 +670,16 @@ def summarize(
         if _optional_nonnegative_int(row, "trim_notifications") and (
             _optional_nonnegative_int(row, "trimmed_payload_bytes") == 0
         ):
-            raise ValueError("trim notification must identify undelivered payload bytes")
-        if _optional_nonnegative_int(row, "trim_notifications") and _terminal_outcome(row) == "completed" and (
-            _optional_nonnegative_int(row, "data_attempted_bytes")
-            < _as_int(row, "physical_bytes")
+            raise ValueError(
+                "trim notification must identify undelivered payload bytes"
+            )
+        if (
+            _optional_nonnegative_int(row, "trim_notifications")
+            and _terminal_outcome(row) == "completed"
+            and (
+                _optional_nonnegative_int(row, "data_attempted_bytes")
+                < _as_int(row, "physical_bytes")
+            )
         ):
             raise ValueError("completed flow cannot deliver more bytes than attempted")
     shed_rows = [row for row in flow_rows if row.get("decision") == "shed"]
@@ -667,7 +696,9 @@ def summarize(
         )
     ]
     if invalid_sheds:
-        raise ValueError("shedding policy affected a flow outside DP All-Reduce payloads")
+        raise ValueError(
+            "shedding policy affected a flow outside DP All-Reduce payloads"
+        )
 
     invalid_provenance = [
         row
@@ -705,8 +736,7 @@ def summarize(
     foreground_logical_rows = [
         row
         for row in flow_rows
-        if row.get("flow_kind")
-        in ("foreground_payload", "provenance_control")
+        if row.get("flow_kind") in ("foreground_payload", "provenance_control")
     ]
     dp_all_reduce_rows = [
         row
@@ -758,12 +788,15 @@ def summarize(
                 for row in flow_rows
             ),
             "recovery_event_count": sum(
-                _optional_nonnegative_int(row, "recovery_events")
-                for row in flow_rows
+                _optional_nonnegative_int(row, "recovery_events") for row in flow_rows
             ),
             "failed_by_reason": {
-                reason: sum(1 for row in failed_rows if row.get("failure_reason") == reason)
-                for reason in sorted({row.get("failure_reason", "") for row in failed_rows})
+                reason: sum(
+                    1 for row in failed_rows if row.get("failure_reason") == reason
+                )
+                for reason in sorted(
+                    {row.get("failure_reason", "") for row in failed_rows}
+                )
             },
             "trimmed_payload_bytes": sum(
                 _optional_nonnegative_int(row, "trimmed_payload_bytes")
@@ -774,8 +807,7 @@ def summarize(
                 for row in flow_rows
             ),
             "trim_ftd_repair_count": sum(
-                _optional_nonnegative_int(row, "trim_ftd_repairs")
-                for row in flow_rows
+                _optional_nonnegative_int(row, "trim_ftd_repairs") for row in flow_rows
             ),
             "trim_bts_notification_count": sum(
                 _optional_nonnegative_int(row, "trim_bts_notifications")
@@ -831,7 +863,9 @@ def main() -> int:
         type=int,
         help="require exactly one rank-completion row for every rank in [0, count)",
     )
-    parser.add_argument("--output", type=Path, help="write the JSON summary to this path")
+    parser.add_argument(
+        "--output", type=Path, help="write the JSON summary to this path"
+    )
     arguments = parser.parse_args()
     summary = summarize(
         arguments.telemetry_dir.resolve(),

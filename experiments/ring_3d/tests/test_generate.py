@@ -11,6 +11,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from chakra.schema.protobuf.et_def_pb2 import GlobalMetadata, Node
+from chakra.src.third_party.utils.protolib import decodeMessage
+
 from experiments.ring_3d.generate import (
     REPOSITORY_ROOT,
     coordinates_for,
@@ -20,13 +23,13 @@ from experiments.ring_3d.generate import (
     rank_for,
 )
 from experiments.ring_3d.topology import build_topology
-from chakra.schema.protobuf.et_def_pb2 import GlobalMetadata, Node
-from chakra.src.third_party.utils.protolib import decodeMessage
 
 
 class Ring3DGeneratorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+        self.profile_path = (
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+        )
         self.profile = load_profile(self.profile_path)
 
     def test_rank_mapping_is_bijective(self) -> None:
@@ -56,18 +59,26 @@ class Ring3DGeneratorTests(unittest.TestCase):
             manifest = materialize(self.profile_path, output)
 
             self.assertEqual(len(list((output / "workload").glob("ring_3d.*.et"))), 8)
-            topology_lines = (output / "topology.txt").read_text(encoding="utf-8").splitlines()
+            topology_lines = (
+                (output / "topology.txt").read_text(encoding="utf-8").splitlines()
+            )
             node_count, switch_count, edge_count = map(int, topology_lines[0].split())
             self.assertEqual((node_count, switch_count, edge_count), (16, 8, 24))
             self.assertEqual(len(topology_lines), edge_count + 2)
-            self.assertEqual((output / "ns3/flow.txt").read_text(encoding="utf-8"), "0\n")
-            self.assertEqual((output / "ns3/trace.txt").read_text(encoding="utf-8"), "0\n")
+            self.assertEqual(
+                (output / "ns3/flow.txt").read_text(encoding="utf-8"), "0\n"
+            )
+            self.assertEqual(
+                (output / "ns3/trace.txt").read_text(encoding="utf-8"), "0\n"
+            )
             self.assertEqual(
                 json.loads((output / "profile.json").read_text(encoding="utf-8")),
                 json.loads(self.profile_path.read_text(encoding="utf-8")),
             )
 
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")
             self.assertEqual(
                 policy["selection_probability_by_step"],
@@ -108,19 +119,27 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
 
-    def test_llama3_profile_materializes_production_event_window_and_incast(self) -> None:
-        profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
+    def test_llama3_profile_materializes_production_event_window_and_incast(
+        self,
+    ) -> None:
+        profile_path = (
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
+        )
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"
             materialize(profile_path, output)
 
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             flows = policy["microburst"]["flows"]
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(len(flows), 7)
             self.assertEqual({flow["dst"] for flow in flows}, {8})
             self.assertEqual({flow["src"] for flow in flows}, set(range(7)))
-            self.assertEqual({flow["size_bytes"] for flow in flows}, {128 * 1024 * 1024})
+            self.assertEqual(
+                {flow["size_bytes"] for flow in flows}, {128 * 1024 * 1024}
+            )
             self.assertEqual({flow["offset_ns"] for flow in flows}, {0})
             self.assertIn(
                 "PACKET_PAYLOAD_SIZE 4096",
@@ -141,7 +160,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             output = Path(temporary_directory) / "experiment"
             materialize(profile_path, output)
 
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertFalse(policy["microburst"]["enabled"])
             self.assertEqual(policy["microburst"]["flows"], [])
             self.assertEqual(
@@ -159,7 +180,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 p_high=0.005,
             )
 
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertTrue(policy["enabled"])
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(
@@ -220,9 +243,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     "max_retransmission_retries": 3,
                 },
             )
-            network_config = (output / "network_config.txt").read_text(
-                encoding="utf-8"
-            )
+            network_config = (output / "network_config.txt").read_text(encoding="utf-8")
             self.assertIn("DATA_LOSS_PROBABILITY 0.25", network_config)
             self.assertIn("DATA_LOSS_SCOPE host_to_switch", network_config)
             self.assertIn("DATA_LOSS_RECEIVER_NODE 8", network_config)
@@ -240,8 +261,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
     def test_retry_exhaustion_profile_is_a_data_only_failure_fixture(self) -> None:
         profile_path = (
-            REPOSITORY_ROOT
-            / "experiments/ring_3d/profiles/retry_exhaustion_8.json"
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/retry_exhaustion_8.json"
         )
         profile = load_profile(profile_path)
 
@@ -269,7 +289,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "invalid.json"
             profile_path.write_text(json.dumps(document), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "transport_recovery.retransmission_timeout_ns"):
+            with self.assertRaisesRegex(
+                ValueError, "transport_recovery.retransmission_timeout_ns"
+            ):
                 load_profile(profile_path)
 
     def test_data_loss_rejects_non_string_scope(self) -> None:
@@ -291,7 +313,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "data_loss.scope"):
                 load_profile(profile_path)
 
-    def test_packet_trimming_materializes_both_standard_notification_modes(self) -> None:
+    def test_packet_trimming_materializes_both_standard_notification_modes(
+        self,
+    ) -> None:
         for mode in ("ftd", "bts"):
             document = json.loads(self.profile_path.read_text(encoding="utf-8"))
             document["network"]["packet_trimming"] = {"mode": mode}
@@ -359,8 +383,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
             with (output / "clr_mask.csv").open(newline="", encoding="utf-8") as handle:
                 mask_rows = list(csv.DictReader(handle))
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
-            self.assertEqual([row["step_id"] for row in mask_rows], [str(step) for step in range(1, 7)])
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                [row["step_id"] for row in mask_rows],
+                [str(step) for step in range(1, 7)],
+            )
             self.assertEqual(
                 set(policy["selection_probability_by_step"]),
                 {str(step) for step in range(1, 7)},
@@ -368,7 +397,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(manifest["clr_schedule"]["steps"], 6)
 
     def test_llama3_profile_samples_production_sized_dp_and_tp_events(self) -> None:
-        profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
+        profile_path = (
+            REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
+        )
         profile = load_profile(profile_path)
         self.assertIsNotNone(profile.model)
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -376,9 +407,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             manifest = materialize(profile_path, output)
 
             self.assertEqual(manifest["ranks"], 16)
-            self.assertEqual(
-                manifest["model_trace"]["parameter_count"], 70_000_000_000
-            )
+            self.assertEqual(manifest["model_trace"]["parameter_count"], 70_000_000_000)
             self.assertEqual(
                 manifest["model_trace"]["gradient_bytes_per_rank"], 17_500_000_000
             )
@@ -390,8 +419,12 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 manifest["model_trace"]["gradient_accumulation_steps"],
                 8,
             )
-            self.assertEqual(manifest["model_trace"]["sampled_tp_all_reduces_per_step"], 16)
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["model_trace"]["sampled_tp_all_reduces_per_step"], 16
+            )
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(len(policy["microburst"]["flows"]), 7)
 
@@ -412,9 +445,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         and attributes["parallelism_domain"].string_val == "dp"
                     ):
                         step = attributes["training_step"].uint64_val
-                        dp_bytes_by_step[step] = dp_bytes_by_step.get(step, 0) + attributes[
-                            "comm_size"
-                        ].uint64_val
+                        dp_bytes_by_step[step] = (
+                            dp_bytes_by_step.get(step, 0)
+                            + attributes["comm_size"].uint64_val
+                        )
                         dp_buckets_by_step[step] = dp_buckets_by_step.get(step, 0) + 1
                     if (
                         attributes.get("parallelism_domain")
@@ -434,7 +468,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1})
             self.assertEqual(tp_collectives_by_step, {1: 16, 2: 16})
 
-    def test_phase1_reference_profile_materializes_exact_sequential_dp_trace(self) -> None:
+    def test_phase1_reference_profile_materializes_exact_sequential_dp_trace(
+        self,
+    ) -> None:
         profile_path = (
             REPOSITORY_ROOT
             / "experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json"
@@ -476,7 +512,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "128 64 128",
             )
 
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(policy["selection_probability_by_step"]["1"], 0.008)
             self.assertEqual(policy["selection_probability_by_step"]["3"], 0.408)
             self.assertEqual(policy["selection_probability_by_step"]["153"], 0.008)
@@ -502,9 +540,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 )
                 self.assertEqual(attributes["training_step"].uint64_val, index)
                 self.assertEqual(attributes["comm_size"].uint64_val, 21_200_000)
-                self.assertEqual(list(node.ctrl_deps), [] if index == 1 else [index - 1])
+                self.assertEqual(
+                    list(node.ctrl_deps), [] if index == 1 else [index - 1]
+                )
 
-    def test_100b_profiles_materialize_topologies_with_exact_nonuniform_buckets(self) -> None:
+    def test_100b_profiles_materialize_topologies_with_exact_nonuniform_buckets(
+        self,
+    ) -> None:
         expected_topologies = {
             "model_100b_256_clos.json": {
                 "kind": "clos",
@@ -543,9 +585,11 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as temporary_directory:
                     output = Path(temporary_directory) / "experiment"
                     manifest = materialize(profile_path, output)
-                    topology_lines = (output / "topology.txt").read_text(
-                        encoding="utf-8"
-                    ).splitlines()
+                    topology_lines = (
+                        (output / "topology.txt")
+                        .read_text(encoding="utf-8")
+                        .splitlines()
+                    )
                     self.assertEqual(
                         tuple(map(int, topology_lines[0].split())), expected["header"]
                     )
@@ -559,9 +603,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     )
                     self.assertIn(
                         "QLEN_MON_INTERVAL 10000",
-                        (output / "network_config.txt").read_text(
-                            encoding="utf-8"
-                        ),
+                        (output / "network_config.txt").read_text(encoding="utf-8"),
                     )
                     self.assertEqual(
                         manifest["model_trace"]["parameter_count"], 100_000_000_000
@@ -617,12 +659,11 @@ class Ring3DGeneratorTests(unittest.TestCase):
                                 attributes["parallelism_domain"].string_val == "dp"
                             ):
                                 step = attributes["training_step"].uint64_val
-                                dp_bucket_count[step] = (
-                                    dp_bucket_count.get(step, 0) + 1
+                                dp_bucket_count[step] = dp_bucket_count.get(step, 0) + 1
+                                dp_bytes[step] = (
+                                    dp_bytes.get(step, 0)
+                                    + attributes["comm_size"].uint64_val
                                 )
-                                dp_bytes[step] = dp_bytes.get(step, 0) + attributes[
-                                    "comm_size"
-                                ].uint64_val
                                 dp_bucket_sizes.add(attributes["comm_size"].uint64_val)
                     self.assertEqual(dp_bucket_count, {1: 96, 2: 96})
                     self.assertEqual(
@@ -671,13 +712,17 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "pp",
             )
             self.assertEqual(
-                attributes["step_1_dp_all_reduce_bucket_0"]["parallelism_domain"].string_val,
+                attributes["step_1_dp_all_reduce_bucket_0"][
+                    "parallelism_domain"
+                ].string_val,
                 "dp",
             )
 
             ids = {node.name: node.id for node in nodes}
             optimizer = next(node for node in nodes if node.name == "step_1_optimizer")
-            bucket_one = next(node for node in nodes if node.name == "step_1_backward_bucket_1")
+            bucket_one = next(
+                node for node in nodes if node.name == "step_1_backward_bucket_1"
+            )
             self.assertIn(ids["step_1_dp_all_reduce_bucket_0"], optimizer.ctrl_deps)
             self.assertIn(ids["step_1_dp_all_reduce_bucket_1"], optimizer.ctrl_deps)
             self.assertNotIn(ids["step_1_dp_all_reduce_bucket_0"], bucket_one.ctrl_deps)

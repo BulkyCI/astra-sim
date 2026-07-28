@@ -19,7 +19,9 @@ except ImportError:
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BINARY_PATTERN = "extern/network_backend/ns-3/build/scratch/*AstraSimNetwork-default"
+DEFAULT_BINARY_PATTERN = (
+    "extern/network_backend/ns-3/build/scratch/*AstraSimNetwork-default"
+)
 
 
 def find_default_binary() -> Path:
@@ -59,13 +61,10 @@ def run_experiment(
         ns3_rng_run = seed if seed is not None else 1
     if ns3_rng_run <= 0:
         raise ValueError("ns3_rng_run must be positive")
-    if (
-        simulation_timeout_seconds is not None
-        and (
-            isinstance(simulation_timeout_seconds, bool)
-            or not isinstance(simulation_timeout_seconds, int)
-            or simulation_timeout_seconds <= 0
-        )
+    if simulation_timeout_seconds is not None and (
+        isinstance(simulation_timeout_seconds, bool)
+        or not isinstance(simulation_timeout_seconds, int)
+        or simulation_timeout_seconds <= 0
     ):
         raise ValueError("simulation_timeout_seconds must be positive when set")
     manifest = materialize(
@@ -79,7 +78,9 @@ def run_experiment(
     )
     binary = binary.resolve() if binary else find_default_binary()
     if not binary.is_file() or not binary.stat().st_mode & 0o111:
-        raise FileNotFoundError(f"ns-3 executable is unavailable or not executable: {binary}")
+        raise FileNotFoundError(
+            f"ns-3 executable is unavailable or not executable: {binary}"
+        )
 
     command = [
         str(binary),
@@ -143,9 +144,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable")
-    parser.add_argument("--clean", action="store_true", help="replace an existing output directory")
-    parser.add_argument("--seed", type=int, help="override the deterministic DBLP selection seed")
+    parser.add_argument(
+        "--binary", type=Path, help="path to an ns-3 AstraSimNetwork executable"
+    )
+    parser.add_argument(
+        "--clean", action="store_true", help="replace an existing output directory"
+    )
+    parser.add_argument(
+        "--seed", type=int, help="override the deterministic DBLP selection seed"
+    )
     parser.add_argument("--ns3-rng-seed", type=int, default=1)
     parser.add_argument("--ns3-rng-run", type=int, help="ns-3 random-stream run number")
     parser.add_argument(
@@ -207,7 +214,11 @@ def main() -> int:
         parser.error("--fixed-p-low-baseline cannot be combined with --p-high")
     if arguments.fixed_p_low_baseline:
         profile = load_profile(arguments.profile.resolve())
-        p_low = profile.selection_policy.p_low if arguments.p_low is None else arguments.p_low
+        p_low = (
+            profile.selection_policy.p_low
+            if arguments.p_low is None
+            else arguments.p_low
+        )
         p_high = p_low
     else:
         p_low = arguments.p_low

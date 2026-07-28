@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "dblp-injected-loss-retry-exhaustion-8",
+  "base_workload_profile": "../../ring_3d/profiles/no_incast_8.json",
+  "loss_source": {
+    "kind": "injected_data",
+    "probability": 1.0,
+    "start_ns": 0,
+    "duration_ns": 100000000,
+    "scope": "all",
+    "rng_stream": 73
+  },
+  "transport_recovery": {
+    "retransmission_timeout_ns": 1000,
+    "max_retransmission_retries": 1
+  },
+  "completion_contract": "reliable_full_delivery",
+  "expectation": {
+    "terminal_outcome": "transport_failure",
+    "minimum_data_injected_drops": 1,
+    "maximum_natural_buffer_drops": 0
+  }
+}

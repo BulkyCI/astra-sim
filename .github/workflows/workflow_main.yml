@@ -45,9 +45,10 @@ jobs:
     - name: Verify lockfile and tooling
       run: |
         uv lock --check
-        uv run --locked python -m compileall -q experiments/ring_3d
+        uv run --locked python -m compileall -q experiments/ring_3d experiments/dblp
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh utils/setup.sh
+        uv run --locked python -m unittest discover -s experiments/dblp/tests -v
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh
         git diff --check
 
   native-integration:
@@ -133,6 +134,9 @@ jobs:
 
     - name: Verify 3D Ring retry-exhaustion telemetry
       run: timeout --foreground 2m bash ./experiments/ring_3d/failure_liveness.sh
+
+    - name: Verify separate DBLP injected-loss profile
+      run: timeout --foreground 2m bash ./experiments/dblp/smoke.sh
 
     - name: Generate Llama 3 70B-class bucket trace
       run: |

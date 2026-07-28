@@ -401,6 +401,11 @@ def _load_model_workload(
 def load_profile(profile_path: Path) -> Profile:
     with profile_path.open(encoding="utf-8") as handle:
         document = json.load(handle)
+    return parse_profile_document(document)
+
+
+def parse_profile_document(document: Any) -> Profile:
+    """Decode one in-memory Ring-3D profile through the canonical validator."""
     if not isinstance(document, dict):
         raise ValueError("profile must be a JSON object")
     unknown_keys = set(document) - EXPECTED_PROFILE_KEYS

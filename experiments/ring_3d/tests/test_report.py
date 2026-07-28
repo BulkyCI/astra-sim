@@ -72,6 +72,11 @@ class Ring3DReportTests(unittest.TestCase):
                         "retransmission_timeout_ns": 500,
                         "max_retransmission_retries": 3,
                     },
+                    "packet_trimming": {
+                        "enabled": True,
+                        "mode": "ftd",
+                        "trigger": "admission_or_egress_queue",
+                    },
                 }
             ),
             encoding="utf-8",
@@ -229,12 +234,23 @@ class Ring3DReportTests(unittest.TestCase):
                             "control_injected_drop_count": 0,
                             "data_natural_buffer_drop_count": 3,
                             "control_natural_buffer_drop_count": 1,
+                            "packet_trimming": {
+                                "conversion_count": 1,
+                                "trimmed_payload_bytes": 1_000,
+                                "ftd_conversion_count": 1,
+                                "bts_conversion_count": 0,
+                            },
                         },
                     },
                     "transport_recovery": {
                         "data_attempted_bytes": 262_144,
                         "retransmitted_bytes": 65_536,
                         "recovery_event_count": 1,
+                        "trimmed_payload_bytes": 1_000,
+                        "trim_notification_count": 1,
+                        "trim_ftd_repair_count": 1,
+                        "trim_bts_notification_count": 0,
+                        "stale_trim_notification_count": 0,
                         "failed_by_reason": {},
                     },
                     "physical_traffic_bytes": {
@@ -361,7 +377,9 @@ class Ring3DReportTests(unittest.TestCase):
             self.assertIn("Simulated rank-completion distribution", report)
             self.assertIn("ns-3 congestion observability", report)
             self.assertIn("Configured / natural data-control drops", report)
+            self.assertIn("UEC-style trim conversions", report)
             self.assertIn("Transport recovery", report)
+            self.assertIn("Trimmed payload (undelivered)", report)
             self.assertIn("Terminal failures", report)
             self.assertIn("Logical collective-completion latency", report)
             self.assertIn("Causal traffic mix", report)

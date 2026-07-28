@@ -357,6 +357,10 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "switch_route_drop",
         "switch_admission_drop",
         "switch_egress_queue_drop",
+        "trim_ftd_admission",
+        "trim_ftd_egress_queue",
+        "trim_bts_admission",
+        "trim_bts_egress_queue",
     }
     for row in rows:
         event = row.get("event")
@@ -367,6 +371,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             raise ValueError("configured data impairment dropped a control packet")
         if event.startswith("control_") and plane != "control":
             raise ValueError("invalid control transport event plane")
+        if event.startswith("trim_") and plane != "data":
+            raise ValueError("trim conversion must account for undelivered data")
         packet_bytes = _as_int(row, "packet_bytes")
         if packet_bytes < 0:
             raise ValueError("transport event packet bytes must be nonnegative")
@@ -409,6 +415,32 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             event_plane_counts["switch_admission_drop"]["control"]
             + event_plane_counts["switch_egress_queue_drop"]["control"]
         ),
+        "packet_trimming": {
+            "conversion_count": sum(
+                events[event] for event in valid_events if event.startswith("trim_")
+            ),
+            "trimmed_payload_bytes": sum(
+                bytes_by_event[event]
+                for event in valid_events
+                if event.startswith("trim_")
+            ),
+            "ftd_conversion_count": sum(
+                events[event]
+                for event in ("trim_ftd_admission", "trim_ftd_egress_queue")
+            ),
+            "bts_conversion_count": sum(
+                events[event]
+                for event in ("trim_bts_admission", "trim_bts_egress_queue")
+            ),
+            "admission_conversion_count": sum(
+                events[event]
+                for event in ("trim_ftd_admission", "trim_bts_admission")
+            ),
+            "egress_queue_conversion_count": sum(
+                events[event]
+                for event in ("trim_ftd_egress_queue", "trim_bts_egress_queue")
+            ),
+        },
     }
 
 
@@ -611,6 +643,16 @@ def summarize(
     for row in failed_rows:
         if not row.get("failure_reason"):
             raise ValueError("failed flow must record a failure reason")
+    for row in flow_rows:
+        if _optional_nonnegative_int(row, "trim_notifications") and (
+            _optional_nonnegative_int(row, "trimmed_payload_bytes") == 0
+        ):
+            raise ValueError("trim notification must identify undelivered payload bytes")
+        if _optional_nonnegative_int(row, "trim_notifications") and _terminal_outcome(row) == "completed" and (
+            _optional_nonnegative_int(row, "data_attempted_bytes")
+            < _as_int(row, "physical_bytes")
+        ):
+            raise ValueError("completed flow cannot deliver more bytes than attempted")
     shed_rows = [row for row in flow_rows if row.get("decision") == "shed"]
     invalid_sheds = [
         row
@@ -723,6 +765,30 @@ def summarize(
                 reason: sum(1 for row in failed_rows if row.get("failure_reason") == reason)
                 for reason in sorted({row.get("failure_reason", "") for row in failed_rows})
             },
+            "trimmed_payload_bytes": sum(
+                _optional_nonnegative_int(row, "trimmed_payload_bytes")
+                for row in flow_rows
+            ),
+            "trim_notification_count": sum(
+                _optional_nonnegative_int(row, "trim_notifications")
+                for row in flow_rows
+            ),
+            "trim_ftd_repair_count": sum(
+                _optional_nonnegative_int(row, "trim_ftd_repairs")
+                for row in flow_rows
+            ),
+            "trim_bts_notification_count": sum(
+                _optional_nonnegative_int(row, "trim_bts_notifications")
+                for row in flow_rows
+            ),
+            "trim_recovery_event_count": sum(
+                _optional_nonnegative_int(row, "trim_recovery_events")
+                for row in flow_rows
+            ),
+            "stale_trim_notification_count": sum(
+                _optional_nonnegative_int(row, "stale_trim_notifications")
+                for row in flow_rows
+            ),
         },
         "collective_completion": collective_completion,
         "physical_traffic_bytes": {

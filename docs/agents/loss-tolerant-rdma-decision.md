@@ -73,6 +73,24 @@ PFC, and simulator/protocol recovery control. New control types must declare
 both their queue/class and loss treatment. Whether a given future protocol uses
 all of those types is an experiment-specific fact, not an assumption.
 
+### UEC-style packet trimming mode
+
+The transport may additionally model congestion-induced packet trimming as an
+explicit loss-notification mechanism. A switch can replace an RDMA UDP packet
+only when switch admission or egress queue capacity rejects it. The retained
+metadata names the original flow, priority group, byte sequence, and missing
+payload length; it never represents delivered payload bytes. The notification
+is strict-priority recovery control and is either forwarded to the destination
+(FTD), which returns repair control to the sender, or returned directly to the
+sender (BTS). Both paths require recovery before cumulative-ACK completion.
+
+The initial model uses bounded go-back-$N$ repair and treats trim as congestion
+evidence where the configured control algorithm supports that signal. It does
+not claim UET/Falcon conformance or model selective retransmission, packet
+spraying, reorder buffering, placeholder bytes, or approximate completion.
+Configured `network.data_loss` remains an independent receive-side impairment;
+its counts must never be merged with congestion-triggered trimming.
+
 For data loss, use $q$ only for an explicitly defined data-plane loss
 probability or process, and $D$ only for an explicit impairment time window.
 Neither is the current whole-payload selection probability, and neither is a
@@ -209,6 +227,7 @@ as implementing this decision, review must establish:
 | Data-loss gate | Seeded test shows only in-scope data packets receive the configured impairment | Out-of-scope data or any control class receives injected loss |
 | Liveness gate | Every issued operation reaches a recorded completion or explicit failure | A lost tail/control event leaves unreported pending work |
 | Telemetry gate | Raw counters reconcile packet/byte attempts, drops, recovery, and terminal states | Summary metrics cannot explain the terminal outcome |
+| Trim semantics gate | A trace shows trim metadata carries a missing range, never payload delivery; completed QPs retransmit then ACK all original bytes | A trim advances receiver data state, is counted as delivered bytes, or permits completion without repair |
 
 No NIC, switch, UET, Falcon, or DBLP protocol implementation is selected before
 these model-level gates pass.

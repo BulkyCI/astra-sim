@@ -191,26 +191,60 @@ def _physical_network_rows(
     return rows
 
 
-def _data_plane_loss_rows(data_loss: Any) -> list[list[Any]]:
-    """Return the physical data-loss and bounded-recovery contract when enabled."""
-    if not isinstance(data_loss, dict) or not data_loss.get("enabled"):
-        return []
-    return [
-        ["Configured data loss", data_loss.get("probability", "unknown")],
-        ["Loss scope", data_loss.get("scope", "unknown")],
-        [
-            "Loss window",
-            f"{data_loss.get('start_ns', 0)} ns + {data_loss.get('duration_ns', 0)} ns",
-        ],
-        [
-            "Retransmission timeout",
-            f"{data_loss.get('retransmission_timeout_ns', 0)} ns",
-        ],
-        [
-            "Maximum retransmission retries",
-            data_loss.get("max_retransmission_retries", "unknown"),
-        ],
-    ]
+def _transport_contract_rows(
+    data_loss: Any, transport_recovery: Any, packet_trimming: Any
+) -> list[list[Any]]:
+    """Return distinct impairment, trim, and recovery model inputs."""
+    rows: list[list[Any]] = []
+    if isinstance(data_loss, dict) and data_loss.get("enabled"):
+        rows.extend(
+            [
+                ["Configured data loss", data_loss.get("probability", "unknown")],
+                ["Loss scope", data_loss.get("scope", "unknown")],
+                [
+                    "Loss window",
+                    f"{data_loss.get('start_ns', 0)} ns + "
+                    f"{data_loss.get('duration_ns', 0)} ns",
+                ],
+            ]
+        )
+    if isinstance(packet_trimming, dict) and packet_trimming.get("enabled"):
+        rows.extend(
+            [
+                ["UEC-style packet trimming", packet_trimming.get("mode", "unknown")],
+                ["Trim trigger", packet_trimming.get("trigger", "unknown")],
+            ]
+        )
+    if isinstance(transport_recovery, dict) and transport_recovery.get("enabled"):
+        rows.extend(
+            [
+                [
+                    "Retransmission timeout",
+                    f"{transport_recovery.get('retransmission_timeout_ns', 0)} ns",
+                ],
+                [
+                    "Maximum retransmission retries",
+                    transport_recovery.get("max_retransmission_retries", "unknown"),
+                ],
+            ]
+        )
+    elif isinstance(data_loss, dict) and data_loss.get("enabled"):
+        # Retain readability for artifacts materialized before recovery became a
+        # shared transport-level configuration object.
+        if "retransmission_timeout_ns" in data_loss:
+            rows.extend(
+                [
+                    [
+                        "Retransmission timeout",
+                        f"{data_loss.get('retransmission_timeout_ns', 0)} ns",
+                    ],
+                    [
+                        "Maximum retransmission retries",
+                        data_loss.get("max_retransmission_retries", "unknown"),
+                    ],
+                ]
+            )
+    return rows
 
 
 def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
@@ -346,8 +380,18 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
     data_plane_loss = (
         manifest.get("data_plane_loss") if isinstance(manifest, dict) else None
     )
+    transport_recovery = (
+        manifest.get("transport_recovery") if isinstance(manifest, dict) else None
+    )
+    packet_trimming = (
+        manifest.get("packet_trimming") if isinstance(manifest, dict) else None
+    )
     network_rows = _physical_network_rows(network, physical_topology)
-    network_rows.extend(_data_plane_loss_rows(data_plane_loss))
+    network_rows.extend(
+        _transport_contract_rows(
+            data_plane_loss, transport_recovery, packet_trimming
+        )
+    )
     if network_rows:
         lines.extend(["", "## Physical network", ""])
         lines.extend(_markdown_table(["Field", "Value"], network_rows))
@@ -722,6 +766,19 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                     if transport.get("status") == "available"
                     else "not available"
                 )
+                trimming = (
+                    transport.get("packet_trimming")
+                    if isinstance(transport, dict)
+                    else None
+                )
+                trim_value = (
+                    f"{trimming.get('conversion_count', 0)} conversions; "
+                    f"{_format_bytes(_as_int(trimming.get('trimmed_payload_bytes', 0), 'trimmed_payload_bytes'))} "
+                    f"undelivered payload; FTD {trimming.get('ftd_conversion_count', 0)}; "
+                    f"BTS {trimming.get('bts_conversion_count', 0)}"
+                    if isinstance(trimming, dict)
+                    else "not available"
+                )
                 lines.extend(["", "## ns-3 congestion observability", ""])
                 lines.extend(
                     _markdown_table(
@@ -730,6 +787,7 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             ["Queue telemetry", queue_value],
                             ["PFC trace", pfc_value],
                             ["Configured / natural data-control drops", transport_value],
+                            ["UEC-style trim conversions", trim_value],
                         ],
                     )
                 )
@@ -796,6 +854,22 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         [
                             "Recovery events",
                             recovery.get("recovery_event_count", 0),
+                        ],
+                        [
+                            "Trimmed payload (undelivered)",
+                            _format_bytes(
+                                _as_int(
+                                    recovery.get("trimmed_payload_bytes", 0),
+                                    "trimmed_payload_bytes",
+                                )
+                            ),
+                        ],
+                        ["Trim notifications", recovery.get("trim_notification_count", 0)],
+                        ["FTD repair controls", recovery.get("trim_ftd_repair_count", 0)],
+                        ["BTS notifications", recovery.get("trim_bts_notification_count", 0)],
+                        [
+                            "Stale trim notifications",
+                            recovery.get("stale_trim_notification_count", 0),
                         ],
                         ["Terminal failures", failure_value],
                     ],

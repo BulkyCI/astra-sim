@@ -43,7 +43,14 @@ try:
         schedule_metadata,
         write_clr_mask,
     )
-    from .topology import DataPlaneLoss, PhysicalNetwork, build_topology, load_network
+    from .topology import (
+        DataPlaneLoss,
+        PacketTrimming,
+        PhysicalNetwork,
+        TransportRecovery,
+        build_topology,
+        load_network,
+    )
 except ImportError:
     from generate_clr_schedule import (
         ClrSchedule,
@@ -52,7 +59,14 @@ except ImportError:
         schedule_metadata,
         write_clr_mask,
     )
-    from topology import DataPlaneLoss, PhysicalNetwork, build_topology, load_network
+    from topology import (
+        DataPlaneLoss,
+        PacketTrimming,
+        PhysicalNetwork,
+        TransportRecovery,
+        build_topology,
+        load_network,
+    )
 
 
 REQUIRED_PROFILE_KEYS = {
@@ -905,6 +919,8 @@ def write_network_config(
     queue_monitor_start_ns: int,
     queue_monitor_interval_ns: int,
     data_loss: DataPlaneLoss | None,
+    transport_recovery: TransportRecovery | None,
+    packet_trimming: PacketTrimming | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     # The bundled ns-3 setup unconditionally opens these legacy input files,
@@ -928,7 +944,6 @@ def write_network_config(
             "DATA_LOSS_DURATION_NS 0\nDATA_LOSS_SCOPE all\n"
             "DATA_LOSS_SOURCE_HOST -1\nDATA_LOSS_DESTINATION_HOST -1\n"
             "DATA_LOSS_RECEIVER_NODE -1\nDATA_LOSS_RNG_STREAM 51\n"
-            "RETRANSMISSION_TIMEOUT_NS 0\nMAX_RETRANSMISSION_RETRIES 0\n"
         )
     else:
         data_loss_settings = (
@@ -941,9 +956,21 @@ def write_network_config(
             f"{data_loss.destination_host if data_loss.destination_host is not None else -1}\n"
             f"DATA_LOSS_RECEIVER_NODE {data_loss.receiver_node if data_loss.receiver_node is not None else -1}\n"
             f"DATA_LOSS_RNG_STREAM {data_loss.rng_stream}\n"
-            f"RETRANSMISSION_TIMEOUT_NS {data_loss.retransmission_timeout_ns}\n"
-            f"MAX_RETRANSMISSION_RETRIES {data_loss.max_retransmission_retries}\n"
         )
+    if transport_recovery is None:
+        recovery_settings = (
+            "RETRANSMISSION_TIMEOUT_NS 0\nMAX_RETRANSMISSION_RETRIES 0\n"
+        )
+    else:
+        recovery_settings = (
+            "RETRANSMISSION_TIMEOUT_NS "
+            f"{transport_recovery.retransmission_timeout_ns}\n"
+            "MAX_RETRANSMISSION_RETRIES "
+            f"{transport_recovery.max_retransmission_retries}\n"
+        )
+    trim_settings = (
+        f"PACKET_TRIM_MODE {packet_trimming.mode if packet_trimming else 'disabled'}\n"
+    )
     with path.open("w", encoding="utf-8") as config:
         config.write(
             "ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\n"
@@ -962,7 +989,8 @@ def write_network_config(
             "MIN_RATE 100Mb/s\nDCTCP_RATE_AI 1000Mb/s\n\n"
             "ERROR_RATE_PER_LINK 0.0000\nL2_CHUNK_SIZE 4000\nL2_ACK_INTERVAL 1\n"
             "L2_BACK_TO_ZERO 0\n"
-            f"{data_loss_settings}\nHAS_WIN 1\nGLOBAL_T 0\nVAR_WIN 1\n"
+            f"{data_loss_settings}{recovery_settings}{trim_settings}\n"
+            "HAS_WIN 1\nGLOBAL_T 0\nVAR_WIN 1\n"
             "FAST_REACT 1\nU_TARGET 0.95\nMI_THRESH 0\nINT_MULTI 1\nMULTI_RATE 0\n"
             "SAMPLE_FEEDBACK 0\nPINT_LOG_BASE 1.05\nPINT_PROB 1.0\n"
             "NIC_TOTAL_PAUSE_TIME 0\n\nRATE_BOUND 1\nACK_HIGH_PRIO 1\n"
@@ -1203,6 +1231,8 @@ def materialize(
         profile.network.queue_monitor_start_ns,
         profile.network.queue_monitor_interval_ns,
         profile.network.data_loss,
+        profile.network.transport_recovery,
+        profile.network.packet_trimming,
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(
@@ -1241,6 +1271,16 @@ def materialize(
         "data_plane_loss": (
             profile.network.data_loss.manifest()
             if profile.network.data_loss is not None
+            else {"enabled": False}
+        ),
+        "transport_recovery": (
+            profile.network.transport_recovery.manifest()
+            if profile.network.transport_recovery is not None
+            else {"enabled": False}
+        ),
+        "packet_trimming": (
+            profile.network.packet_trimming.manifest()
+            if profile.network.packet_trimming is not None
             else {"enabled": False}
         ),
         "profile_config": str(profile_config.resolve()),

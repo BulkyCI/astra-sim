@@ -53,6 +53,16 @@ evidence of configured impairment isolation. A run with any failed outcome is
 not eligible for the policy primary estimands, but is a valid transport
 liveness observation when its raw telemetry is retained.
 
+For a profile that enables `network.packet_trimming`, the run must retain
+`transport_events.csv`, identify FTD or BTS mode, and show at least one trim
+conversion caused by switch admission or egress-queue rejection. Each trim
+conversion represents undelivered original payload bytes—not compact data
+delivery—and completed QPs must show repair traffic and ACK-backed completion.
+The conversion, recovery-control delivery or natural control drop, sender
+recovery work, retransmitted bytes, and any `trim_retry_exhausted` outcome must
+remain separately auditable. Trimming and `network.data_loss` are independent:
+their counts must not be combined into one loss rate.
+
 Failures are reported as invalid or unavailable data; they are never silently replaced by a QP-envelope proxy.
 
 ## Conditions

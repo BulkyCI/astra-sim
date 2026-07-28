@@ -46,6 +46,7 @@ simulation has yet supplied the gate evidence below.
 | Scoped reproducible loss | Typed `network.data_loss` materializes window, direction scope, filters, and RNG stream | Deterministic two-run check verifies the retained schedule |
 | Recovery/liveness | Timeout-driven go-back-$N$ retries yield completed or retry-exhausted QP outcomes | Recovery-success and retry-exhaustion scenarios run natively |
 | Observability | Raw transport events and terminal/recovery flow fields are summarized and reported | Event counts reconcile with a native loss run |
+| UEC-style trimming | Switch admission/egress rejections can become FTD/BTS explicit-loss metadata with bounded sender repair | Native congestion run proves no trim metadata advances receiver data state and every trimmed QP repairs or fails explicitly |
 
 The rest of this document is the detailed **pre-implementation** evidence
 record. Its source-line references intentionally document the former unsafe

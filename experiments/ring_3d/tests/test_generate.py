@@ -187,6 +187,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
             "destination_host": 4,
             "receiver_node": 8,
             "rng_stream": 71,
+        }
+        document["network"]["transport_recovery"] = {
             "retransmission_timeout_ns": 500,
             "max_retransmission_retries": 3,
         }
@@ -208,6 +210,12 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     "destination_host": 4,
                     "receiver_node": 8,
                     "rng_stream": 71,
+                },
+            )
+            self.assertEqual(
+                manifest["transport_recovery"],
+                {
+                    "enabled": True,
                     "retransmission_timeout_ns": 500,
                     "max_retransmission_retries": 3,
                 },
@@ -240,7 +248,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
         self.assertFalse(profile.microburst_enabled)
         self.assertIsNotNone(profile.network.data_loss)
         self.assertEqual(profile.network.data_loss.probability, 1.0)
-        self.assertEqual(profile.network.data_loss.max_retransmission_retries, 1)
+        self.assertIsNotNone(profile.network.transport_recovery)
+        self.assertEqual(
+            profile.network.transport_recovery.max_retransmission_retries, 1
+        )
 
     def test_data_loss_requires_bounded_recovery(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
@@ -250,13 +261,15 @@ class Ring3DGeneratorTests(unittest.TestCase):
             "duration_ns": 1,
             "scope": "all",
             "rng_stream": 51,
+        }
+        document["network"]["transport_recovery"] = {
             "retransmission_timeout_ns": 0,
             "max_retransmission_retries": 3,
         }
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "invalid.json"
             profile_path.write_text(json.dumps(document), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "retransmission_timeout_ns"):
+            with self.assertRaisesRegex(ValueError, "transport_recovery.retransmission_timeout_ns"):
                 load_profile(profile_path)
 
     def test_data_loss_rejects_non_string_scope(self) -> None:
@@ -267,6 +280,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
             "duration_ns": 1,
             "scope": ["all"],
             "rng_stream": 51,
+        }
+        document["network"]["transport_recovery"] = {
             "retransmission_timeout_ns": 100,
             "max_retransmission_retries": 1,
         }
@@ -275,6 +290,54 @@ class Ring3DGeneratorTests(unittest.TestCase):
             profile_path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "data_loss.scope"):
                 load_profile(profile_path)
+
+    def test_packet_trimming_materializes_both_standard_notification_modes(self) -> None:
+        for mode in ("ftd", "bts"):
+            document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+            document["network"]["packet_trimming"] = {"mode": mode}
+            document["network"]["transport_recovery"] = {
+                "retransmission_timeout_ns": 500,
+                "max_retransmission_retries": 3,
+            }
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                profile_path = Path(temporary_directory) / f"trim-{mode}.json"
+                output = Path(temporary_directory) / "experiment"
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                manifest = materialize(profile_path, output)
+
+                self.assertEqual(
+                    manifest["packet_trimming"],
+                    {
+                        "enabled": True,
+                        "mode": mode,
+                        "trigger": "switch_admission_or_egress_rejection",
+                    },
+                )
+                network_config = (output / "network_config.txt").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn(f"PACKET_TRIM_MODE {mode}", network_config)
+                self.assertIn("RETRANSMISSION_TIMEOUT_NS 500", network_config)
+
+    def test_packet_trimming_requires_shared_recovery(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["packet_trimming"] = {"mode": "ftd"}
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "transport_recovery"):
+                load_profile(profile_path)
+
+    def test_checked_in_trim_profiles_select_expected_modes(self) -> None:
+        for mode in ("ftd", "bts"):
+            profile = load_profile(
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles"
+                / f"uec_trim_{mode}_8.json"
+            )
+            self.assertIsNotNone(profile.network.packet_trimming)
+            self.assertEqual(profile.network.packet_trimming.mode, mode)
+            self.assertIsNotNone(profile.network.transport_recovery)
 
     def test_queue_monitor_interval_must_be_positive(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))

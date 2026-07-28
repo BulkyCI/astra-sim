@@ -93,7 +93,13 @@ struct FlowRecord {
     uint64_t physical_bytes = 0;
     uint64_t data_attempted_bytes = 0;
     uint64_t retransmitted_bytes = 0;
+    uint64_t trimmed_payload_bytes = 0;
     uint32_t recovery_events = 0;
+    uint32_t trim_notifications = 0;
+    uint32_t trim_ftd_repairs = 0;
+    uint32_t trim_bts_notifications = 0;
+    uint32_t trim_recovery_events = 0;
+    uint32_t stale_trim_notifications = 0;
     uint64_t start_time_ns = 0;
     uint64_t end_time_ns = 0;
     FlowTerminalOutcome terminal_outcome = FlowTerminalOutcome::Pending;
@@ -118,7 +124,9 @@ class ExperimentTelemetry {
                "collective_type,training_step,workload_node_id,"
                "message_sequence,src,dst,tag,source_port,priority_group,"
                "logical_bytes,physical_bytes,data_attempted_bytes,"
-               "retransmitted_bytes,recovery_events,terminal_outcome,"
+               "retransmitted_bytes,trimmed_payload_bytes,recovery_events,"
+               "trim_notifications,trim_ftd_repairs,trim_bts_notifications,"
+               "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
                "failure_reason,decision_hash,start_time_ns,end_time_ns\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
@@ -148,7 +156,13 @@ class ExperimentTelemetry {
                     << ',' << flow.priority_group << ',' << flow.logical_bytes
                     << ',' << flow.physical_bytes << ','
                     << flow.data_attempted_bytes << ','
-                    << flow.retransmitted_bytes << ',' << flow.recovery_events
+                    << flow.retransmitted_bytes << ','
+                    << flow.trimmed_payload_bytes << ',' << flow.recovery_events
+                    << ',' << flow.trim_notifications << ','
+                    << flow.trim_ftd_repairs << ','
+                    << flow.trim_bts_notifications << ','
+                    << flow.trim_recovery_events << ','
+                    << flow.stale_trim_notifications
                     << ',' << terminal_outcome_name(flow.terminal_outcome)
                     << ',' << flow.failure_reason << ',' << flow.decision_hash
                     << ',' << flow.start_time_ns << ',' << flow.end_time_ns

@@ -120,3 +120,24 @@ the [loss-tolerant RDMA decision](../../../docs/agents/loss-tolerant-rdma-decisi
 classify before loss injection, isolate named control traffic from configured
 impairment loss, and use separate typed fields for $q$, $D$, direction/scope,
 recovery policy, and recorded terminal outcome.
+
+## UEC-style packet trimming transport mode
+
+The optional `network.packet_trimming` profile object belongs to the physical
+transport path, not this logical selection policy. It accepts only `ftd` or
+`bts` and requires the shared `network.transport_recovery` timeout/retry
+budget. A switch converts an RDMA UDP packet only when its normal admission or
+egress queue capacity would reject it. Route failures remain drops.
+
+The compact metadata contains the original ports, priority group, byte sequence,
+and payload length. FTD preserves forward routing to the destination, which
+returns repair control to the sender; BTS routes loss metadata directly back to
+the sender. Neither path calls `ReceiverCheckSeq()` or advances receiver state.
+The sender immediately retries from its cumulative ACK point. Completion still
+requires all original bytes to be ACKed; metadata never substitutes for data.
+
+This is a UEC-style mechanism model with bounded go-back-$N$ repair. It does
+not model selective retransmission, packet spraying, reorder buffering,
+placeholder data, approximate completion, or UET/Falcon conformance. Raw trim
+events and sender trim counters are retained separately from independent
+configured receive-side `network.data_loss` impairment.

@@ -359,7 +359,13 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     flow.physical_bytes = q->m_size;
     flow.data_attempted_bytes = q->m_data_attempted_bytes;
     flow.retransmitted_bytes = q->m_retransmitted_bytes;
+    flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
     flow.recovery_events = q->m_recovery_events;
+    flow.trim_notifications = q->m_trim_notifications;
+    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
+    flow.trim_bts_notifications = q->m_trim_bts_notifications;
+    flow.trim_recovery_events = q->m_trim_recovery_events;
+    flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
 
@@ -391,9 +397,9 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     ++completed_qps;
 }
 
-// Registered by common.h::SetupNetwork when bounded timeout recovery exhausts
-// a QP's retry budget. This is a terminal transport outcome, never a logical
-// ASTRA message completion.
+// Registered by common.h::SetupNetwork when bounded recovery exhausts a QP's
+// retry budget. This is a terminal transport outcome, never a logical ASTRA
+// message completion.
 void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     const uint32_t sid = ip_to_node_id(q->sip);
     const uint32_t did = ip_to_node_id(q->dip);
@@ -411,10 +417,21 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     flow.physical_bytes = q->m_size;
     flow.data_attempted_bytes = q->m_data_attempted_bytes;
     flow.retransmitted_bytes = q->m_retransmitted_bytes;
+    flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
     flow.recovery_events = q->m_recovery_events;
+    flow.trim_notifications = q->m_trim_notifications;
+    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
+    flow.trim_bts_notifications = q->m_trim_bts_notifications;
+    flow.trim_recovery_events = q->m_trim_recovery_events;
+    flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Failed;
-    flow.failure_reason = reason == 1 ? "retry_exhausted" : "unknown";
+    flow.failure_reason =
+        reason == static_cast<uint32_t>(RdmaFailureReason::TimeoutRetryExhausted)
+            ? "retry_exhausted"
+            : reason == static_cast<uint32_t>(RdmaFailureReason::TrimRetryExhausted)
+                  ? "trim_retry_exhausted"
+                  : "unknown";
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
         if (pending_background_flows == 0) {

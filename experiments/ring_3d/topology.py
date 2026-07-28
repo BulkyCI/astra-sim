@@ -23,11 +23,41 @@ DATA_LOSS_SCOPES = {
     "switch_to_host",
     "switch_to_switch",
 }
+PACKET_TRIM_MODES = {"ftd", "bts"}
+
+
+@dataclass(frozen=True)
+class TransportRecovery:
+    """Bounded sender recovery shared by loss and trim mechanisms."""
+
+    retransmission_timeout_ns: int
+    max_retransmission_retries: int
+
+    def manifest(self) -> dict[str, int | bool]:
+        return {
+            "enabled": True,
+            "retransmission_timeout_ns": self.retransmission_timeout_ns,
+            "max_retransmission_retries": self.max_retransmission_retries,
+        }
+
+
+@dataclass(frozen=True)
+class PacketTrimming:
+    """Strict UEC-style switch rejection conversion policy."""
+
+    mode: str
+
+    def manifest(self) -> dict[str, str | bool]:
+        return {
+            "enabled": True,
+            "mode": self.mode,
+            "trigger": "switch_admission_or_egress_rejection",
+        }
 
 
 @dataclass(frozen=True)
 class DataPlaneLoss:
-    """Data-only receive impairment and bounded go-back-N recovery policy."""
+    """Data-only receive impairment independent from transport recovery."""
 
     probability: float
     start_ns: int
@@ -37,8 +67,6 @@ class DataPlaneLoss:
     destination_host: int | None
     receiver_node: int | None
     rng_stream: int
-    retransmission_timeout_ns: int
-    max_retransmission_retries: int
 
     def manifest(self) -> dict[str, int | float | str | None]:
         return {
@@ -51,8 +79,6 @@ class DataPlaneLoss:
             "destination_host": self.destination_host,
             "receiver_node": self.receiver_node,
             "rng_stream": self.rng_stream,
-            "retransmission_timeout_ns": self.retransmission_timeout_ns,
-            "max_retransmission_retries": self.max_retransmission_retries,
         }
 
 
@@ -67,6 +93,8 @@ class ClosNetwork:
     hosts_per_leaf: int
     spine_count: int
     data_loss: DataPlaneLoss | None = None
+    transport_recovery: TransportRecovery | None = None
+    packet_trimming: PacketTrimming | None = None
 
     @property
     def kind(self) -> str:
@@ -88,6 +116,8 @@ class RingNetwork:
     queue_monitor_start_ns: int
     queue_monitor_interval_ns: int
     data_loss: DataPlaneLoss | None = None
+    transport_recovery: TransportRecovery | None = None
+    packet_trimming: PacketTrimming | None = None
 
     @property
     def kind(self) -> str:
@@ -217,8 +247,6 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
         "duration_ns",
         "scope",
         "rng_stream",
-        "retransmission_timeout_ns",
-        "max_retransmission_retries",
     }
     optional = {"source_host", "destination_host", "receiver_node"}
     unknown = set(loss) - required - optional
@@ -234,14 +262,6 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
             f"{sorted(DATA_LOSS_SCOPES)}"
         )
     duration_ns = _positive_int(loss["duration_ns"], "network.data_loss.duration_ns")
-    timeout_ns = _positive_int(
-        loss["retransmission_timeout_ns"],
-        "network.data_loss.retransmission_timeout_ns",
-    )
-    max_retries = _positive_int(
-        loss["max_retransmission_retries"],
-        "network.data_loss.max_retransmission_retries",
-    )
     rng_stream = _positive_int(loss["rng_stream"], "network.data_loss.rng_stream")
     if rng_stream > 2**63 - 1:
         raise ValueError("network.data_loss.rng_stream exceeds the ns-3 range")
@@ -267,9 +287,46 @@ def _load_data_loss(document: dict[str, Any], host_count: int) -> DataPlaneLoss 
         destination_host=destination_host,
         receiver_node=receiver_node,
         rng_stream=rng_stream,
-        retransmission_timeout_ns=timeout_ns,
-        max_retransmission_retries=max_retries,
     )
+
+
+def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | None:
+    if "transport_recovery" not in document:
+        return None
+    recovery = document["transport_recovery"]
+    if not isinstance(recovery, dict):
+        raise ValueError("network.transport_recovery must be an object")
+    required = {"retransmission_timeout_ns", "max_retransmission_retries"}
+    if set(recovery) != required:
+        raise ValueError(
+            "network.transport_recovery must contain exactly "
+            f"{sorted(required)}"
+        )
+    return TransportRecovery(
+        retransmission_timeout_ns=_positive_int(
+            recovery["retransmission_timeout_ns"],
+            "network.transport_recovery.retransmission_timeout_ns",
+        ),
+        max_retransmission_retries=_positive_int(
+            recovery["max_retransmission_retries"],
+            "network.transport_recovery.max_retransmission_retries",
+        ),
+    )
+
+
+def _load_packet_trimming(document: dict[str, Any]) -> PacketTrimming | None:
+    if "packet_trimming" not in document:
+        return None
+    trimming = document["packet_trimming"]
+    if not isinstance(trimming, dict) or set(trimming) != {"mode"}:
+        raise ValueError("network.packet_trimming must contain exactly ['mode']")
+    mode = trimming["mode"]
+    if not isinstance(mode, str) or mode not in PACKET_TRIM_MODES:
+        raise ValueError(
+            "network.packet_trimming.mode must be one of "
+            f"{sorted(PACKET_TRIM_MODES)}"
+        )
+    return PacketTrimming(mode=mode)
 
 
 def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int, int]:
@@ -309,6 +366,8 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "queue_monitor_start_ns",
         "queue_monitor_interval_ns",
         "data_loss",
+        "transport_recovery",
+        "packet_trimming",
     }
     topology_keys = (
         {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
@@ -327,6 +386,12 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         queue_monitor_interval_ns,
     ) = _common_network_fields(document)
     data_loss = _load_data_loss(document, host_count)
+    transport_recovery = _load_transport_recovery(document)
+    packet_trimming = _load_packet_trimming(document)
+    if (data_loss is not None or packet_trimming is not None) and transport_recovery is None:
+        raise ValueError(
+            "network.transport_recovery is required when data_loss or packet_trimming is enabled"
+        )
     if packet_payload_bytes > MAX_PACKET_PAYLOAD_BYTES:
         raise ValueError(
             f"network.packet_payload_bytes must not exceed {MAX_PACKET_PAYLOAD_BYTES}"
@@ -341,6 +406,8 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             queue_monitor_start_ns=queue_monitor_start_ns,
             queue_monitor_interval_ns=queue_monitor_interval_ns,
             data_loss=data_loss,
+            transport_recovery=transport_recovery,
+            packet_trimming=packet_trimming,
         )
 
     hosts_per_leaf = _positive_int(
@@ -359,6 +426,8 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         hosts_per_leaf=hosts_per_leaf,
         spine_count=spine_count,
         data_loss=data_loss,
+        transport_recovery=transport_recovery,
+        packet_trimming=packet_trimming,
     )
 
 

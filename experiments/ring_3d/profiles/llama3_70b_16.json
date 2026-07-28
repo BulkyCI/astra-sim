@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-llama3-70b-16",
+  "name": "ring-3d-llama3-70b-16-clos-production-sample",
   "parallelism": {
     "tp": 8,
     "pp": 1,
     "dp": 2
   },
-  "steps": 3,
-  "compute_duration_us": 500,
-  "tp_all_reduce_bytes": 16777216,
+  "steps": 2,
+  "compute_duration_us": 5376,
+  "tp_all_reduce_bytes": 67108864,
   "pp_bytes": 0,
-  "dp_all_reduce_bytes": 1073741824,
+  "dp_all_reduce_bytes": 68359375,
   "seed": 314159265,
   "selection_policy": {
     "p_low": 0.005,
@@ -22,7 +22,7 @@
     "spine_count": 4,
     "link_rate": "400Gbps",
     "packet_payload_bytes": 4096,
-    "queue_monitor_start_ns": 20000000,
+    "queue_monitor_start_ns": 0,
     "queue_monitor_interval_ns": 10000
   },
   "microburst_enabled": true,
@@ -33,6 +33,13 @@
   "model": {
     "parameter_count": 70000000000,
     "parameter_dtype_bytes": 2,
-    "gradient_bucket_count": 140
+    "gradient_bucket_count": 256,
+    "transformer_layers": 80,
+    "hidden_size": 8192,
+    "sequence_length": 4096,
+    "microbatch_size": 1,
+    "activation_dtype_bytes": 2,
+    "tensor_parallel_all_reduces_per_layer": 2,
+    "gradient_accumulation_steps": 8
   }
 }

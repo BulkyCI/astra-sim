@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-model-100b-256-clos",
+  "name": "ring-3d-model-100b-256-clos-production-window",
   "parallelism": {
     "tp": 8,
     "pp": 4,
     "dp": 8
   },
-  "steps": 3,
-  "compute_duration_us": 250,
+  "steps": 2,
+  "compute_duration_us": 960,
   "tp_all_reduce_bytes": 50331648,
   "pp_bytes": 50331648,
-  "dp_all_reduce_bytes": 312500000,
+  "dp_all_reduce_bytes": 65104167,
   "seed": 20260721,
   "selection_policy": {
     "p_low": 0.005,
@@ -20,11 +20,12 @@
     "topology": "clos",
     "hosts_per_leaf": 16,
     "spine_count": 16,
-    "link_rate": "200Gbps",
+    "link_rate": "400Gbps",
     "packet_payload_bytes": 4096,
-    "queue_monitor_start_ns": 20000000,
-    "queue_monitor_interval_ns": 100000
+    "queue_monitor_start_ns": 0,
+    "queue_monitor_interval_ns": 10000
   },
+  "microburst_enabled": true,
   "microburst_bytes": 50000000,
   "microburst_flow_count": 7,
   "microburst_destination_rank": 4,
@@ -34,7 +35,7 @@
     "parameter_count": 100000000000,
     "parameter_dtype_bytes": 2,
     "transformer_layers": 80,
-    "gradient_bucket_count": 20,
+    "gradient_bucket_count": 96,
     "hidden_size": 12288,
     "sequence_length": 2048,
     "microbatch_size": 1,

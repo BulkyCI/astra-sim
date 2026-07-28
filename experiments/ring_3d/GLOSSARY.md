@@ -24,7 +24,7 @@ paper term in a profile, report, or code symbol.
 | natural buffer drop | Switch MMU-admission or egress-queue rejection under offered load | Native calibration pending | `switch_admission_drop` or `switch_egress_queue_drop` in ns-3 | `data_natural_buffer_drop_count` and control counterpart |
 | `decision_hash` | Stable selection hash over seed, run, operation, endpoints, and tag | Deterministic | `ExperimentConfig.hh` | `flow_events.csv` |
 | `kDecisionScale` | Integer probability scale for deterministic selection | 1,000,000 | `ExperimentConfig.hh` | N/A |
-| logical bytes | Original ASTRA payload size | 1 GiB DP bucket | Trace/request | `logical_bytes` |
+| logical bytes | Original ASTRA payload size | 68,359,375 B sampled DP bucket | Trace/request | `logical_bytes` |
 | physical bytes | Bytes of the QP modeled by ns-3 | 64 B if selected; full payload otherwise | `entry.h` | `physical_bytes` |
 
 ## Profile fields
@@ -34,9 +34,9 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | Field | Meaning | 70B example | Notes |
 | --- | --- | --- | --- |
 | `parallelism.tp`, `.pp`, `.dp` | Logical parallel dimensions | 8, 1, 2 | Ranks equal $TP\times PP\times DP$ |
-| `steps` | Simulated training steps | 3 | Too short to establish an empirical CLR distribution |
-| `compute_duration_us` | Synthetic compute between generated operations | 500 | Workload abstraction, not measured framework time |
-| `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads | 16 MiB, 0, 1 GiB | Separate from physical transport overhead |
+| `steps` | Modeled optimizer steps in the bounded experiment window | 2 | Includes the step-two incast; insufficient to characterize training warmup or a CLR distribution |
+| `compute_duration_us` | Simulated compute duration per emitted compute node | 5,376 | Workload abstraction, not measured framework time |
+| `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads per emitted event | 64 MiB, 0, 68,359,375 B | Separate from physical transport overhead |
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
 | `network.queue_monitor_interval_ns` | Positive periodic queue-sampling interval | 10,000 ns | Prevents observability work from scaling with every packet event |
@@ -47,7 +47,8 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `microburst_flow_count` | Background source count | 7 | Must leave a destination rank |
 | `microburst_destination_rank` | Shared background destination | 8 | Creates an incast |
 | `microburst_offset_spacing_ns` | Flow start staggering | 0 | Zero means simultaneous scheduling |
-| `model` | Structural or bucket-sample metadata | 70B FP16 sample | Validated against trace shape |
+| `model.gradient_accumulation_steps` | Accumulation microbatches represented by the 70B sampled layer window | 8 | The generator emits the sampled TP pattern for each accumulation microbatch; it does not replay every model layer |
+| `model` | Structural or bounded event-window metadata | 70B BF16/FP16 sample | Validated against trace shape |
 
 `selection_policy` is a strict profile object. `compare.py` holds the fixed-low
 baseline at `p_low` for both phases, then compares it with a policy that uses
@@ -66,6 +67,11 @@ The trigger is the first eligible step-2 DP All-Reduce request. This defines
 offered background bytes and alignment, not a fixed burst lifetime. Flow end
 time is an ns-3 result affected by queueing, PFC, congestion control, and path
 contention.
+
+The Llama paired condition and both 100B structural topology conditions retain
+their microbursts as explicit, reproducible congestion stressors. The
+no-incast profile is the negative control. Do not characterize the stressor as
+a naturally emitted framework burst or as packet loss.
 
 ## Naming rules
 

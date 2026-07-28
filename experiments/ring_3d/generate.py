@@ -94,6 +94,13 @@ GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
     "parameter_count",
     "parameter_dtype_bytes",
     "gradient_bucket_count",
+    "transformer_layers",
+    "hidden_size",
+    "sequence_length",
+    "microbatch_size",
+    "activation_dtype_bytes",
+    "tensor_parallel_all_reduces_per_layer",
+    "gradient_accumulation_steps",
 }
 MAX_P_LOW = 0.01
 
@@ -116,11 +123,23 @@ class ModelTrace:
 
 @dataclass(frozen=True)
 class GradientBucketSample:
-    """Model-scale metadata for a trace that contains one representative bucket."""
+    """Production-shaped metadata for a bounded representative event window.
+
+    The trace samples one transformer layer across the configured gradient
+    accumulation window and one local DP gradient bucket. It intentionally
+    does not replay every layer or bucket in an optimizer iteration.
+    """
 
     parameter_count: int
     parameter_dtype_bytes: int
     gradient_bucket_count: int
+    transformer_layers: int
+    hidden_size: int
+    sequence_length: int
+    microbatch_size: int
+    activation_dtype_bytes: int
+    tensor_parallel_all_reduces_per_layer: int
+    gradient_accumulation_steps: int
 
 
 @dataclass(frozen=True)
@@ -223,11 +242,37 @@ def _load_model_workload(
             gradient_bucket_count=_require_positive_int(
                 value["gradient_bucket_count"], "model.gradient_bucket_count"
             ),
+            transformer_layers=_require_positive_int(
+                value["transformer_layers"], "model.transformer_layers"
+            ),
+            hidden_size=_require_positive_int(value["hidden_size"], "model.hidden_size"),
+            sequence_length=_require_positive_int(
+                value["sequence_length"], "model.sequence_length"
+            ),
+            microbatch_size=_require_positive_int(
+                value["microbatch_size"], "model.microbatch_size"
+            ),
+            activation_dtype_bytes=_require_positive_int(
+                value["activation_dtype_bytes"], "model.activation_dtype_bytes"
+            ),
+            tensor_parallel_all_reduces_per_layer=_require_positive_int(
+                value["tensor_parallel_all_reduces_per_layer"],
+                "model.tensor_parallel_all_reduces_per_layer",
+            ),
+            gradient_accumulation_steps=_require_positive_int(
+                value["gradient_accumulation_steps"],
+                "model.gradient_accumulation_steps",
+            ),
         )
         total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
-        if total_gradient_bytes % model.gradient_bucket_count:
+        shard_count = tp * pp
+        if total_gradient_bytes % shard_count:
             raise ValueError(
-                "model gradient bytes must divide evenly across nominal gradient buckets"
+                "model gradient bytes must divide evenly across TP × PP"
+            )
+        if (total_gradient_bytes // shard_count) % model.gradient_bucket_count:
+            raise ValueError(
+                "per-rank gradient bytes must divide evenly across sample buckets"
             )
         return model
     if set(value) != EXPECTED_MODEL_TRACE_KEYS:
@@ -267,16 +312,10 @@ def _load_model_workload(
     )
     if model.transformer_layers % pp:
         raise ValueError("model.transformer_layers must be divisible by PP")
-    if model.gradient_bucket_count > model.transformer_layers // pp:
-        raise ValueError(
-            "model.gradient_bucket_count must not exceed transformer layers per PP stage"
-        )
     total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
     shard_count = tp * pp
     if total_gradient_bytes % shard_count:
         raise ValueError("model gradient bytes must divide evenly across TP × PP")
-    if (total_gradient_bytes // shard_count) % model.gradient_bucket_count:
-        raise ValueError("per-rank gradient bytes must divide evenly across buckets")
     return model
 
 
@@ -382,7 +421,7 @@ def load_profile(profile_path: Path) -> Profile:
     )
     if profile.pp > 1 and profile.pp_bytes == 0:
         raise ValueError("pp_bytes must be positive when PP is greater than one")
-    if isinstance(profile.model, ModelTrace):
+    if isinstance(profile.model, (ModelTrace, GradientBucketSample)):
         activation_bytes = (
             profile.model.microbatch_size
             * profile.model.sequence_length
@@ -393,16 +432,25 @@ def load_profile(profile_path: Path) -> Profile:
             raise ValueError(
                 "tp_all_reduce_bytes must equal the model activation tensor bytes"
             )
-        if profile.pp_bytes != activation_bytes:
+        if isinstance(profile.model, ModelTrace) and profile.pp_bytes != activation_bytes:
             raise ValueError("pp_bytes must equal the model activation tensor bytes")
-        gradient_bucket_bytes = (
+        gradient_bytes_per_rank = (
             profile.model.parameter_count
             * profile.model.parameter_dtype_bytes
-            // (profile.tp * profile.pp * profile.model.gradient_bucket_count)
+            // (profile.tp * profile.pp)
         )
-        if profile.dp_all_reduce_bytes != gradient_bucket_bytes:
+        expected_bucket_bytes = (
+            gradient_bytes_per_rank // profile.model.gradient_bucket_count
+            if isinstance(profile.model, GradientBucketSample)
+            else (
+                gradient_bytes_per_rank + profile.model.gradient_bucket_count - 1
+            )
+            // profile.model.gradient_bucket_count
+        )
+        if profile.dp_all_reduce_bytes != expected_bucket_bytes:
             raise ValueError(
-                "dp_all_reduce_bytes must equal the model-derived per-rank gradient bucket bytes"
+                "dp_all_reduce_bytes must equal the model-derived maximum "
+                "per-rank gradient bucket bytes"
             )
     return profile
 
@@ -412,6 +460,22 @@ def rank_for(tp_rank: int, pp_rank: int, dp_rank: int, profile: Profile) -> int:
     if not (0 <= tp_rank < profile.tp and 0 <= pp_rank < profile.pp and 0 <= dp_rank < profile.dp):
         raise ValueError("parallelism coordinate is outside the profile")
     return ((dp_rank * profile.pp) + pp_rank) * profile.tp + tp_rank
+
+
+def _gradient_bucket_sizes(
+    total_gradient_bytes: int,
+    shard_count: int,
+    bucket_count: int,
+) -> tuple[int, ...]:
+    """Partition one local gradient shard into exact, near-equal buckets."""
+    if total_gradient_bytes % shard_count:
+        raise ValueError("model gradient bytes must divide evenly across TP × PP")
+    gradient_bytes_per_rank = total_gradient_bytes // shard_count
+    base, remainder = divmod(gradient_bytes_per_rank, bucket_count)
+    return tuple(
+        base + (1 if bucket_index < remainder else 0)
+        for bucket_index in range(bucket_count)
+    )
 
 
 def coordinates_for(rank: int, profile: Profile) -> tuple[int, int, int]:
@@ -597,27 +661,61 @@ class TraceWriter:
             )
 
     def _build_gradient_bucket_sample_trace(self) -> None:
-        """Emit a packet-accurate representative DP bucket, not a full-model replay."""
+        """Emit a bounded, production-shaped DP/TP event window.
+
+        This samples one transformer's forward/backward collective pattern for
+        every accumulation microbatch, followed by one local DP bucket. It is
+        deliberately smaller than a full-model replay.
+        """
+        assert isinstance(self.profile.model, GradientBucketSample)
+        model = self.profile.model
         _, tp_groups, _, dp_groups = self.groups
         predecessor: int | None = None
+        forward_tp_collectives = max(
+            1, model.tensor_parallel_all_reduces_per_layer // 2
+        )
+        backward_tp_collectives = (
+            model.tensor_parallel_all_reduces_per_layer - forward_tp_collectives
+        )
 
         for step in range(1, self.profile.steps + 1):
-            forward = self.compute(
-                f"step_{step}_forward_compute",
-                [] if predecessor is None else [predecessor],
-            )
-            tp_reduce = self.all_reduce(
-                f"step_{step}_tp_all_reduce",
-                [forward],
-                "tp",
-                tp_groups[str(self.rank)],
-                self.profile.tp_all_reduce_bytes,
-                step,
-            )
-            backward = self.compute(f"step_{step}_backward_bucket_0", [tp_reduce])
+            microbatch_tails: list[int] = []
+            microbatch_predecessor = predecessor
+            for microbatch in range(model.gradient_accumulation_steps):
+                forward = self.compute(
+                    f"step_{step}_microbatch_{microbatch}_layer_sample_forward_compute",
+                    [] if microbatch_predecessor is None else [microbatch_predecessor],
+                )
+                forward_tail = forward
+                for collective in range(forward_tp_collectives):
+                    forward_tail = self.all_reduce(
+                        f"step_{step}_microbatch_{microbatch}_layer_sample_"
+                        f"tp_forward_{collective}",
+                        [forward_tail],
+                        "tp",
+                        tp_groups[str(self.rank)],
+                        self.profile.tp_all_reduce_bytes,
+                        step,
+                    )
+                backward_tail = self.compute(
+                    f"step_{step}_microbatch_{microbatch}_layer_sample_backward_compute",
+                    [forward_tail],
+                )
+                for collective in range(backward_tp_collectives):
+                    backward_tail = self.all_reduce(
+                        f"step_{step}_microbatch_{microbatch}_layer_sample_"
+                        f"tp_backward_{collective}",
+                        [backward_tail],
+                        "tp",
+                        tp_groups[str(self.rank)],
+                        self.profile.tp_all_reduce_bytes,
+                        step,
+                    )
+                microbatch_tails.append(backward_tail)
+                microbatch_predecessor = backward_tail
             dp_reduce = self.all_reduce(
-                f"step_{step}_dp_all_reduce_bucket_0",
-                [backward],
+                f"step_{step}_dp_all_reduce_bucket_sample",
+                microbatch_tails,
                 "dp",
                 dp_groups[str(self.rank)],
                 self.profile.dp_all_reduce_bytes,
@@ -636,7 +734,11 @@ class TraceWriter:
         _, tp_groups, _, dp_groups = self.groups
         tp_rank, pp_rank, dp_rank = self.coords
         local_layers = model.transformer_layers // self.profile.pp
-        gradient_bucket_bytes = self.profile.dp_all_reduce_bytes
+        gradient_bucket_sizes = _gradient_bucket_sizes(
+            model.parameter_count * model.parameter_dtype_bytes,
+            self.profile.tp * self.profile.pp,
+            model.gradient_bucket_count,
+        )
         forward_tp_collectives = max(
             1, model.tensor_parallel_all_reduces_per_layer // 2
         )
@@ -731,7 +833,7 @@ class TraceWriter:
                             [backward_tail],
                             "dp",
                             dp_groups[str(self.rank)],
-                            gradient_bucket_bytes,
+                            gradient_bucket_sizes[emitted_buckets],
                             step,
                         )
                     )
@@ -999,22 +1101,39 @@ def model_trace_metadata(profile: Profile) -> dict[str, int | float | str] | Non
     model = profile.model
     total_gradient_bytes = model.parameter_count * model.parameter_dtype_bytes
     if isinstance(model, GradientBucketSample):
+        gradient_bytes_per_rank = total_gradient_bytes // (profile.tp * profile.pp)
         return {
-            "workload_kind": "representative_gradient_bucket",
+            "workload_kind": "representative_production_event_window",
+            "sampling_contract": (
+                "one transformer-layer collective pattern across every "
+                "accumulation microbatch plus one local DP bucket per step"
+            ),
             "parameter_count": model.parameter_count,
             "parameter_dtype_bytes": model.parameter_dtype_bytes,
             "total_gradient_bytes_per_data_parallel_replica": total_gradient_bytes,
             "gradient_bucket_count": model.gradient_bucket_count,
-            "nominal_model_gradient_bucket_bytes": (
-                total_gradient_bytes // model.gradient_bucket_count
-            ),
-            "gradient_bytes_per_rank": total_gradient_bytes // (profile.tp * profile.pp),
+            "gradient_bytes_per_rank": gradient_bytes_per_rank,
             "simulated_gradient_bucket_bytes": profile.dp_all_reduce_bytes,
             "simulated_gradient_buckets_per_step": 1,
+            "transformer_layers": model.transformer_layers,
+            "activation_bytes_per_microbatch": profile.tp_all_reduce_bytes,
+            "tensor_parallel_all_reduces_per_layer": (
+                model.tensor_parallel_all_reduces_per_layer
+            ),
+            "gradient_accumulation_steps": model.gradient_accumulation_steps,
+            "sampled_tp_all_reduces_per_step": (
+                model.gradient_accumulation_steps
+                * model.tensor_parallel_all_reduces_per_layer
+            ),
             "packet_payload_bytes": profile.network.packet_payload_bytes,
             "queue_monitor_start_ns": profile.network.queue_monitor_start_ns,
         }
     gradient_bytes_per_rank = total_gradient_bytes // (profile.tp * profile.pp)
+    gradient_bucket_sizes = _gradient_bucket_sizes(
+        total_gradient_bytes,
+        profile.tp * profile.pp,
+        model.gradient_bucket_count,
+    )
     return {
         "workload_kind": "structural_transformer_trace",
         "parameter_count": model.parameter_count,
@@ -1022,7 +1141,9 @@ def model_trace_metadata(profile: Profile) -> dict[str, int | float | str] | Non
         "total_gradient_bytes_per_data_parallel_replica": total_gradient_bytes,
         "gradient_bytes_per_rank": gradient_bytes_per_rank,
         "gradient_bucket_count": model.gradient_bucket_count,
-        "gradient_bucket_bytes": profile.dp_all_reduce_bytes,
+        "gradient_bucket_min_bytes": min(gradient_bucket_sizes),
+        "gradient_bucket_max_bytes": max(gradient_bucket_sizes),
+        "gradient_bucket_total_bytes": sum(gradient_bucket_sizes),
         "transformer_layers": model.transformer_layers,
         "transformer_layers_per_pipeline_stage": model.transformer_layers // profile.pp,
         "activation_bytes_per_microbatch": profile.pp_bytes,

@@ -236,6 +236,14 @@ def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
         rows.append(
             ["Gradient bucket payload", _format_optional_bytes(get("gradient_bucket_bytes"))]
         )
+    if "gradient_bucket_min_bytes" in model_trace:
+        rows.append(
+            [
+                "Gradient bucket payload range",
+                f"{_format_optional_bytes(get('gradient_bucket_min_bytes'))} "
+                f"to {_format_optional_bytes(get('gradient_bucket_max_bytes'))}",
+            ]
+        )
     if "simulated_gradient_bucket_bytes" in model_trace:
         rows.append(
             [
@@ -244,9 +252,12 @@ def _model_trace_rows(model_trace: Any) -> list[list[Any]]:
             ]
         )
     for label, field in [
+        ("Sampling contract", "sampling_contract"),
         ("Transformer layers", "transformer_layers"),
         ("Layers per pipeline stage", "transformer_layers_per_pipeline_stage"),
         ("Pipeline microbatches", "pipeline_microbatches"),
+        ("Gradient accumulation steps", "gradient_accumulation_steps"),
+        ("Sampled TP All-Reduces per step", "sampled_tp_all_reduces_per_step"),
         ("TP All-Reduces per layer", "tensor_parallel_all_reduces_per_layer"),
     ]:
         if field in model_trace:

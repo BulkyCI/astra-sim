@@ -48,6 +48,8 @@ jobs:
   evaluate:
     name: ${{ inputs.evaluation_name }}
     runs-on: ubuntu-22.04
+    # The reusable workflow owns a complete hosted job. Callers reserve their
+    # simulator and wrapper budgets below the six-hour GitHub Actions limit.
     timeout-minutes: 360
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache

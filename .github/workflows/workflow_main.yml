@@ -186,6 +186,10 @@ jobs:
     needs: python-quality
     strategy:
       fail-fast: false
+      # Five matched pairs, plus native integration and two manually
+      # dispatched structural studies, yield at most eight active jobs.
+      # This remains below the account-level concurrency limit of ten.
+      max-parallel: 5
       matrix:
         # Consecutive nine-digit chunks of π's decimal expansion. They are
         # deterministic for reproducibility and portable 32-bit seed values.
@@ -263,8 +267,8 @@ jobs:
       run_directory: runs/ring_3d/model_100b_256_clos
       artifact_name: ring-3d-model-100b-256-clos
       comparison: false
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 18000
+      execution_timeout_minutes: 320
+      simulation_timeout_seconds: 16200
       require_congestion: false
 
   model-100b-256-ring-evaluation:
@@ -278,7 +282,7 @@ jobs:
       run_directory: runs/ring_3d/model_100b_256_ring
       artifact_name: ring-3d-model-100b-256-ring
       comparison: false
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 18000
+      execution_timeout_minutes: 320
+      simulation_timeout_seconds: 16200
       require_congestion: false
 

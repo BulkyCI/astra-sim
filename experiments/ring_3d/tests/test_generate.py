@@ -108,7 +108,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
 
-    def test_llama3_profile_materializes_simultaneous_many_to_one_microburst(self) -> None:
+    def test_llama3_profile_materializes_production_event_window_and_incast(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"
@@ -116,6 +116,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
             policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
             flows = policy["microburst"]["flows"]
+            self.assertTrue(policy["microburst"]["enabled"])
             self.assertEqual(len(flows), 7)
             self.assertEqual({flow["dst"] for flow in flows}, {8})
             self.assertEqual({flow["src"] for flow in flows}, set(range(7)))
@@ -126,7 +127,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
             self.assertIn(
-                "QLEN_MON_START 20000000",
+                "QLEN_MON_START 0",
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
             self.assertIn(
@@ -303,7 +304,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
             self.assertEqual(manifest["clr_schedule"]["steps"], 6)
 
-    def test_llama3_profile_has_one_1gib_dp_bucket_per_step(self) -> None:
+    def test_llama3_profile_samples_production_sized_dp_and_tp_events(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/llama3_70b_16.json"
         profile = load_profile(profile_path)
         self.assertIsNotNone(profile.model)
@@ -319,24 +320,22 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 manifest["model_trace"]["gradient_bytes_per_rank"], 17_500_000_000
             )
             self.assertEqual(
-                manifest["model_trace"]["nominal_model_gradient_bucket_bytes"],
-                1_000_000_000,
-            )
-            self.assertEqual(
                 manifest["model_trace"]["simulated_gradient_bucket_bytes"],
-                1_073_741_824,
+                68_359_375,
             )
-            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
-            self.assertEqual([flow["src"] for flow in policy["microburst"]["flows"]], list(range(7)))
-            self.assertEqual({flow["dst"] for flow in policy["microburst"]["flows"]}, {8})
             self.assertEqual(
-                {flow["size_bytes"] for flow in policy["microburst"]["flows"]},
-                {128 * 1024 * 1024},
+                manifest["model_trace"]["gradient_accumulation_steps"],
+                8,
             )
+            self.assertEqual(manifest["model_trace"]["sampled_tp_all_reduces_per_step"], 16)
+            policy = json.loads((output / "experiment.json").read_text(encoding="utf-8"))
+            self.assertTrue(policy["microburst"]["enabled"])
+            self.assertEqual(len(policy["microburst"]["flows"]), 7)
 
             trace_path = output / "workload/ring_3d.8.et"
             dp_bytes_by_step: dict[int, int] = {}
             dp_buckets_by_step: dict[int, int] = {}
+            tp_collectives_by_step: dict[int, int] = {}
             with trace_path.open("rb") as trace:
                 metadata = GlobalMetadata()
                 self.assertTrue(decodeMessage(trace, metadata))
@@ -354,13 +353,25 @@ class Ring3DGeneratorTests(unittest.TestCase):
                             "comm_size"
                         ].uint64_val
                         dp_buckets_by_step[step] = dp_buckets_by_step.get(step, 0) + 1
+                    if (
+                        attributes.get("parallelism_domain")
+                        and attributes["parallelism_domain"].string_val == "tp"
+                    ):
+                        step = attributes["training_step"].uint64_val
+                        tp_collectives_by_step[step] = (
+                            tp_collectives_by_step.get(step, 0) + 1
+                        )
             self.assertEqual(
                 dp_bytes_by_step,
-                {1: 1_073_741_824, 2: 1_073_741_824, 3: 1_073_741_824},
+                {
+                    1: 68_359_375,
+                    2: 68_359_375,
+                },
             )
-            self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1, 3: 1})
+            self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1})
+            self.assertEqual(tp_collectives_by_step, {1: 16, 2: 16})
 
-    def test_100b_profiles_materialize_clos_and_switch_ring(self) -> None:
+    def test_100b_profiles_materialize_topologies_with_exact_nonuniform_buckets(self) -> None:
         expected_topologies = {
             "model_100b_256_clos.json": {
                 "kind": "clos",
@@ -414,7 +425,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         expected["description"],
                     )
                     self.assertIn(
-                        "QLEN_MON_INTERVAL 100000",
+                        "QLEN_MON_INTERVAL 10000",
                         (output / "network_config.txt").read_text(
                             encoding="utf-8"
                         ),
@@ -427,16 +438,38 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         6_250_000_000,
                     )
                     self.assertEqual(
-                        manifest["model_trace"]["gradient_bucket_count"], 20
+                        manifest["model_trace"]["gradient_bucket_count"], 96
                     )
                     self.assertEqual(
-                        manifest["model_trace"]["gradient_bucket_bytes"], 312_500_000
+                        manifest["model_trace"]["gradient_bucket_min_bytes"], 65_104_166
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["gradient_bucket_max_bytes"], 65_104_167
+                    )
+                    self.assertEqual(
+                        manifest["model_trace"]["gradient_bucket_total_bytes"],
+                        6_250_000_000,
+                    )
+                    policy = json.loads(
+                        (output / "experiment.json").read_text(encoding="utf-8")
+                    )
+                    self.assertTrue(policy["microburst"]["enabled"])
+                    self.assertEqual(policy["microburst"]["trigger_step"], 2)
+                    self.assertEqual(len(policy["microburst"]["flows"]), 7)
+                    self.assertEqual(
+                        {flow["src"] for flow in policy["microburst"]["flows"]},
+                        {36, 68, 100, 132, 164, 196, 228},
+                    )
+                    self.assertEqual(
+                        {flow["dst"] for flow in policy["microburst"]["flows"]},
+                        {4},
                     )
                     self.assertEqual(
                         len(list((output / "workload").glob("ring_3d.*.et"))), 256
                     )
                     dp_bucket_count: dict[int, int] = {}
                     dp_bytes: dict[int, int] = {}
+                    dp_bucket_sizes: set[int] = set()
                     with (output / "workload/ring_3d.0.et").open("rb") as trace:
                         metadata = GlobalMetadata()
                         self.assertTrue(decodeMessage(trace, metadata))
@@ -457,11 +490,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
                                 dp_bytes[step] = dp_bytes.get(step, 0) + attributes[
                                     "comm_size"
                                 ].uint64_val
-                    self.assertEqual(dp_bucket_count, {1: 20, 2: 20, 3: 20})
+                                dp_bucket_sizes.add(attributes["comm_size"].uint64_val)
+                    self.assertEqual(dp_bucket_count, {1: 96, 2: 96})
                     self.assertEqual(
                         dp_bytes,
-                        {1: 6_250_000_000, 2: 6_250_000_000, 3: 6_250_000_000},
+                        {1: 6_250_000_000, 2: 6_250_000_000},
                     )
+                    self.assertEqual(dp_bucket_sizes, {65_104_166, 65_104_167})
 
     def test_ring_network_rejects_clos_only_fields(self) -> None:
         profile_path = (

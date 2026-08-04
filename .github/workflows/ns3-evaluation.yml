@@ -19,6 +19,15 @@ on:
         description: Artifact prefix; the workflow appends the GitHub run ID.
         required: true
         type: string
+      ledger_issue:
+        description: Ledger issue number for the calling run; zero disables publication.
+        required: false
+        default: 0
+        type: number
+      ledger_key:
+        description: Stable ledger section identity, reused across re-runs.
+        required: true
+        type: string
       comparison:
         description: Run a matched comparison instead of one structural experiment.
         required: true
@@ -51,9 +60,10 @@ jobs:
     # The reusable workflow owns a complete hosted job. Callers reserve their
     # simulator and wrapper budgets below the six-hour GitHub Actions limit.
     timeout-minutes: 360
+    permissions:
+      contents: read
+      issues: write
     env:
-      CMAKE_C_COMPILER_LAUNCHER: ccache
-      CMAKE_CXX_COMPILER_LAUNCHER: ccache
       EXPERIMENT_PROFILE: ${{ inputs.profile }}
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
 
@@ -64,64 +74,11 @@ jobs:
         submodules: recursive
         persist-credentials: false
 
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
-      with:
-        version: "0.11.28"
-        enable-cache: true
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
 
-    - name: Restore trusted compiler cache
-      id: ccache-restore
-      uses: actions/cache/restore@v6
-      with:
-        path: ${{ runner.temp }}/astra-sim-ccache
-        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
-        restore-keys: |
-          astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-
-
-    - name: Set compiler-cache paths
-      run: |
-        echo "CCACHE_DIR=$RUNNER_TEMP/astra-sim-ccache" >> "$GITHUB_ENV"
-        echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/astra-sim-ccache-config/ccache.conf" >> "$GITHUB_ENV"
-
-    - name: Install native build dependencies
-      run: ./.github/workflows/setup.sh
-
-    - name: Configure compiler cache
-      run: |
-        install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
-        : > "$CCACHE_CONFIGPATH"
-        chmod 600 "$CCACHE_CONFIGPATH"
-        ccache --set-config=cache_dir="$CCACHE_DIR"
-        ccache --set-config=compiler_check=content
-        ccache --set-config=compression=true
-        ccache --set-config=max_size=1G
-        ccache --set-config=sloppiness=
-        ccache --zero-stats
-        ccache --show-config
-
-    - name: Build analytical and ns-3 backends
-      run: bash ./.github/workflows/build.sh
-
-    # Pull-request code can restore only trusted cache entries. Only master/dev
-    # push jobs may publish a new entry consumed by later protected-branch work.
-    - name: Save compiler cache from trusted pushes
-      if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v6
-      with:
-        path: ${{ runner.temp }}/astra-sim-ccache
-        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
-
-    - name: Report compiler-cache statistics
-      if: always()
-      run: |
-        ccache --show-stats
-        {
-          echo '### Compiler cache'
-          echo '```text'
-          ccache --show-stats
-          echo '```'
-        } >> "$GITHUB_STEP_SUMMARY"
+    - name: Build the native backends through the trusted compiler cache
+      uses: ./.github/actions/native-build
 
     - name: Run structural ns-3 experiment
       if: ${{ !inputs.comparison }}
@@ -168,6 +125,16 @@ jobs:
         else
           echo "Paired evaluation did not produce a comparison report; inspect the retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
         fi
+
+    - name: Persist the evaluation report in the ledger
+      if: always()
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ inputs.ledger_issue }}
+        key: ${{ inputs.ledger_key }}
+        title: ${{ inputs.evaluation_name }}
+        body-file: ${{ inputs.run_directory }}/${{ inputs.comparison && 'comparison_report.md' || 'research_report.md' }}
+        status: ${{ job.status }}
 
     - name: Upload reproducibility bundle
       if: always()

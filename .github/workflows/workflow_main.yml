@@ -17,48 +17,79 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A push is an independent experiment whose record must survive, so its group
+  # is unique per run and no earlier run is ever cancelled. A pull-request run
+  # is an iteration of a proposal rather than an experiment, so a newer push to
+  # the same head supersedes the previous attempt and reclaims the runners.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  ledger:
+    name: Open the experiment ledger
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      # `0` is the disabled ledger. Emitting it unconditionally keeps every
+      # downstream `needs:` edge live; a skipped job would silently skip the
+      # whole graph behind it.
+      issue: ${{ steps.open.outputs.issue || 0 }}
+    steps:
+    - name: Check out the ledger tool
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Open the run's ledger issue
+      id: open
+      # A fork pull request holds a read-only token, and a proposal is not an
+      # experiment; those runs are recorded by artifacts and the run summary.
+      if: ${{ github.event_name != 'pull_request' }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PYTHONPATH: ${{ github.workspace }}/.github/scripts
+      run: python3 -m ci_ledger open
+
   python-quality:
     name: Python tooling and experiment tests
     runs-on: ubuntu-22.04
     timeout-minutes: 15
 
     steps:
-    - name: Check out source and submodules
+    - name: Check out source
       uses: actions/checkout@v7
       with:
-        submodules: recursive
+        # This job never touches the native tree. Skipping the recursive
+        # submodule fetch removes the ns-3 clone from the critical path.
+        submodules: false
         persist-credentials: false
 
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
-      with:
-        version: "0.11.28"
-        enable-cache: true
-
-    - name: Synchronize locked Python environment
-      run: ./utils/setup.sh
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
 
     - name: Verify lockfile and tooling
       run: |
         uv lock --check
-        uv run --locked python -m compileall -q experiments/ring_3d experiments/dblp
+        uv run --locked python -m compileall -q experiments/ring_3d experiments/dblp .github/scripts
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
         uv run --locked python -m unittest discover -s experiments/dblp/tests -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh
+        uv run --locked python -m unittest discover -s .github/scripts/tests -t .github/scripts -v
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh
         git diff --check
 
   native-integration:
     name: Native build, regression, and ns-3 smoke
-    needs: python-quality
+    needs: [ python-quality, ledger ]
     runs-on: ubuntu-22.04
     timeout-minutes: 60
-    env:
-      CMAKE_C_COMPILER_LAUNCHER: ccache
-      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    permissions:
+      contents: read
+      issues: write
 
     steps:
     - name: Check out source and submodules
@@ -67,64 +98,11 @@ jobs:
         submodules: recursive
         persist-credentials: false
 
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
-      with:
-        version: "0.11.28"
-        enable-cache: true
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
 
-    - name: Restore trusted compiler cache
-      id: ccache-restore
-      uses: actions/cache/restore@v6
-      with:
-        path: ${{ runner.temp }}/astra-sim-ccache
-        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
-        restore-keys: |
-          astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-
-
-    - name: Set compiler-cache paths
-      run: |
-        echo "CCACHE_DIR=$RUNNER_TEMP/astra-sim-ccache" >> "$GITHUB_ENV"
-        echo "CCACHE_CONFIGPATH=$RUNNER_TEMP/astra-sim-ccache-config/ccache.conf" >> "$GITHUB_ENV"
-
-    - name: Install native build dependencies
-      run: ./.github/workflows/setup.sh
-
-    - name: Configure compiler cache
-      run: |
-        install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
-        : > "$CCACHE_CONFIGPATH"
-        chmod 600 "$CCACHE_CONFIGPATH"
-        ccache --set-config=cache_dir="$CCACHE_DIR"
-        ccache --set-config=compiler_check=content
-        ccache --set-config=compression=true
-        ccache --set-config=max_size=1G
-        ccache --set-config=sloppiness=
-        ccache --zero-stats
-        ccache --show-config
-
-    - name: Build analytical and ns-3 backends
-      run: bash ./.github/workflows/build.sh
-
-    # Only branch pushes can publish cache entries. Pull-request code can read
-    # trusted entries but never writes one that a protected branch can consume.
-    - name: Save compiler cache from trusted pushes
-      if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') && steps.ccache-restore.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v6
-      with:
-        path: ${{ runner.temp }}/astra-sim-ccache
-        key: astra-sim-ccache-v1-${{ runner.os }}-${{ runner.arch }}-gcc-11-${{ github.sha }}
-
-    - name: Report compiler-cache statistics
-      if: always()
-      run: |
-        ccache --show-stats
-        {
-          echo '### Compiler cache'
-          echo '```text'
-          ccache --show-stats
-          echo '```'
-        } >> "$GITHUB_STEP_SUMMARY"
+    - name: Build the native backends through the trusted compiler cache
+      uses: ./.github/actions/native-build
 
     - name: Run analytical regression suite
       run: bash ./.github/workflows/test.sh
@@ -152,6 +130,16 @@ jobs:
           --run-dir runs/ring_3d/smoke_8 \
           --output runs/ring_3d/smoke_8/research_report.md
         cat runs/ring_3d/smoke_8/research_report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Persist the 3D Ring researcher report
+      if: always()
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ needs.ledger.outputs.issue }}
+        key: native-integration
+        title: Native build, regression, and ns-3 smoke
+        body-file: runs/ring_3d/smoke_8/research_report.md
+        status: ${{ job.status }}
 
     - name: Upload 3D Ring researcher report
       if: always()
@@ -187,7 +175,10 @@ jobs:
 
   paired-llama3-evaluation:
     name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
-    needs: python-quality
+    needs: [ python-quality, ledger ]
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       # Five matched pairs, the separate historical Phase-1 reference, native
@@ -205,6 +196,8 @@ jobs:
       profile: experiments/ring_3d/profiles/llama3_70b_16.json
       run_directory: runs/ring_3d/llama3_70b_16_comparison/seed_${{ matrix.seed }}
       artifact_name: ring-3d-llama3-70b-16-comparison-seed-${{ matrix.seed }}
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      ledger_key: llama3-70b-16-seed-${{ matrix.seed }}
       comparison: true
       comparison_seed: ${{ matrix.seed }}
       execution_timeout_minutes: 330
@@ -213,7 +206,10 @@ jobs:
 
   historical-phase1-native-reference:
     name: Historical Phase-1 64-rank native reference pair
-    needs: python-quality
+    needs: [ python-quality, ledger ]
+    permissions:
+      contents: read
+      issues: write
     # This independent, communication-only reference pair deliberately runs
     # alongside the Llama congestion matrix. Its profile reproduces the old
     # 64-rank/186-round trace shape, so it has the same six-hour budget as one
@@ -224,6 +220,8 @@ jobs:
       profile: experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json
       run_directory: runs/ring_3d/dblp_phase1_effnet_64dp_comparison
       artifact_name: ring-3d-dblp-phase1-effnet-64dp-comparison
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      ledger_key: dblp-phase1-effnet-64dp
       comparison: true
       comparison_seed: 314159265
       execution_timeout_minutes: 330
@@ -232,25 +230,22 @@ jobs:
 
   aggregate-llama3-evaluation:
     name: Aggregate five-seed Llama 3 70B congestion evaluation
-    needs: paired-llama3-evaluation
+    needs: [ paired-llama3-evaluation, ledger ]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
 
     steps:
-    - name: Check out source and submodules
+    - name: Check out source
       uses: actions/checkout@v7
       with:
-        submodules: recursive
+        submodules: false
         persist-credentials: false
 
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v9.0.0
-      with:
-        version: "0.11.28"
-        enable-cache: true
-
-    - name: Synchronize locked Python environment
-      run: ./utils/setup.sh
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
 
     - name: Download paired seed artifacts
       uses: actions/download-artifact@v8
@@ -272,6 +267,16 @@ jobs:
         cat runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md \
           >> "$GITHUB_STEP_SUMMARY"
 
+    - name: Persist the aggregate comparison report
+      if: always()
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ needs.ledger.outputs.issue }}
+        key: llama3-70b-16-aggregate
+        title: Aggregate five-seed Llama 3 70B congestion evaluation
+        body-file: runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md
+        status: ${{ job.status }}
+
     - name: Upload aggregate comparison report
       if: always()
       uses: actions/upload-artifact@v7
@@ -283,13 +288,18 @@ jobs:
   model-100b-256-clos-evaluation:
     name: 100B 256-card Clos structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: python-quality
+    needs: [ python-quality, ledger ]
+    permissions:
+      contents: read
+      issues: write
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
       evaluation_name: 100B 256-card Clos structural evaluation
       profile: experiments/ring_3d/profiles/model_100b_256_clos.json
       run_directory: runs/ring_3d/model_100b_256_clos
       artifact_name: ring-3d-model-100b-256-clos
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      ledger_key: model-100b-256-clos
       comparison: false
       execution_timeout_minutes: 320
       simulation_timeout_seconds: 16200
@@ -298,15 +308,61 @@ jobs:
   model-100b-256-ring-evaluation:
     name: 100B 256-card Ring structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: python-quality
+    needs: [ python-quality, ledger ]
+    permissions:
+      contents: read
+      issues: write
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
       evaluation_name: 100B 256-card Ring structural evaluation
       profile: experiments/ring_3d/profiles/model_100b_256_ring.json
       run_directory: runs/ring_3d/model_100b_256_ring
       artifact_name: ring-3d-model-100b-256-ring
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      ledger_key: model-100b-256-ring
       comparison: false
       execution_timeout_minutes: 320
       simulation_timeout_seconds: 16200
       require_congestion: false
 
+  ledger-close:
+    name: Finalize the experiment ledger
+    if: ${{ always() }}
+    needs:
+    - ledger
+    - python-quality
+    - native-integration
+    - paired-llama3-evaluation
+    - historical-phase1-native-reference
+    - aggregate-llama3-evaluation
+    - model-100b-256-clos-evaluation
+    - model-100b-256-ring-evaluation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+    - name: Check out the ledger tool
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Rebuild the index from the published sections and set the state
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PYTHONPATH: ${{ github.workspace }}/.github/scripts
+        LEDGER_ISSUE: ${{ needs.ledger.outputs.issue || 0 }}
+        # A run that did not fully succeed leaves its record open, so the open
+        # `experiment-ledger` issues are exactly the runs still owing attention.
+        KEEP_OPEN: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+      run: |
+        set -euo pipefail
+        arguments=(close --issue "$LEDGER_ISSUE")
+        if [[ "$KEEP_OPEN" == "true" ]]; then
+          arguments+=(--keep-open)
+        fi
+        python3 -m ci_ledger "${arguments[@]}"

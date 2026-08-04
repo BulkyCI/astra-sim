@@ -1,0 +1,39 @@
+name: Python environment
+description: >
+  Install the single pinned uv release and, optionally, materialize the locked
+  project environment. This action is the only definition site for the uv
+  version used by CI; workflows must not pin it again.
+
+inputs:
+  sync:
+    description: Materialize the locked project environment with `uv sync --locked`.
+    required: false
+    default: 'true'
+  cache:
+    description: >
+      Restore and save uv's download cache. Keep this on for trusted refs and
+      pull requests alike: uv verifies every artifact against `uv.lock`, so a
+      cache entry cannot substitute a different distribution.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+  - name: Install pinned uv
+    uses: astral-sh/setup-uv@v9.0.0
+    with:
+      # Must satisfy `required-version` in pyproject.toml.
+      version: "0.11.28"
+      enable-cache: ${{ inputs.cache }}
+      cache-dependency-glob: uv.lock
+
+  - name: Synchronize the locked Python environment
+    if: ${{ inputs.sync == 'true' }}
+    shell: bash
+    run: |
+      set -euo pipefail
+      # Deliberately not utils/setup.sh: that script also re-initializes every
+      # submodule, which actions/checkout has already done. The environment and
+      # the native sources are separate concerns in CI.
+      uv sync --locked

@@ -1,0 +1,53 @@
+name: Publish an experiment-ledger section
+description: >
+  Reconcile one report into the run's permanent ledger issue. Idempotent: the
+  section is keyed, so a re-run edits its comments in place rather than
+  appending duplicates.
+
+inputs:
+  issue:
+    description: Ledger issue number; `0` disables publication.
+    required: true
+  key:
+    description: Stable section identity, reused across re-runs. [A-Za-z0-9._:-]
+    required: true
+  title:
+    description: Human-readable section heading.
+    required: true
+  body-file:
+    description: Markdown report to persist.
+    required: true
+  status:
+    description: success | failure | cancelled | skipped | missing
+    required: false
+    default: success
+  token:
+    description: Token holding the issues write scope on this repository.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+  - name: Reconcile the ledger section
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.token }}
+      # The ledger is stdlib-only and calls the preinstalled `gh`, so it can
+      # still record a run whose Python environment or native build never came
+      # up.
+      PYTHONPATH: ${{ github.workspace }}/.github/scripts
+      # Inputs cross into the shell as data, never as interpolated script text.
+      LEDGER_ISSUE: ${{ inputs.issue }}
+      LEDGER_KEY: ${{ inputs.key }}
+      LEDGER_TITLE: ${{ inputs.title }}
+      LEDGER_BODY_FILE: ${{ inputs.body-file }}
+      LEDGER_STATUS: ${{ inputs.status }}
+    run: |
+      set -euo pipefail
+      python3 -m ci_ledger publish \
+        --issue "$LEDGER_ISSUE" \
+        --key "$LEDGER_KEY" \
+        --title "$LEDGER_TITLE" \
+        --body-file "$LEDGER_BODY_FILE" \
+        --status "$LEDGER_STATUS"

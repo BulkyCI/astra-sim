@@ -1,0 +1,164 @@
+name: Native build with a trusted compiler cache
+description: >
+  Install the native toolchain, build the analytical and ns-3 backends through
+  ccache, and publish the cache only from a trusted ref. Acquire-use-release is
+  bracketed inside this action so no caller can restore a cache without the
+  matching save policy.
+
+inputs:
+  allow-cache-write:
+    description: >
+      Caller-side veto. The effective write permission is this input AND the
+      action's own trust predicate, so a caller can restrict publication but
+      never widen it.
+    required: false
+    default: 'true'
+  cache-version:
+    description: Bump to invalidate every existing compiler-cache entry.
+    required: false
+    default: v2
+  max-size:
+    description: ccache size ceiling before local eviction.
+    required: false
+    default: 2G
+
+outputs:
+  cache-key:
+    description: The content-addressed key this run restored or published.
+    value: ${{ steps.identity.outputs.key }}
+  cache-hit:
+    description: Whether an exact key match was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  trusted:
+    description: Whether this run is permitted to publish a cache entry.
+    value: ${{ steps.identity.outputs.trusted }}
+
+runs:
+  using: composite
+  steps:
+  - name: Install native build dependencies
+    shell: bash
+    run: ./.github/workflows/setup.sh
+
+  - name: Derive the content-addressed cache identity
+    id: identity
+    shell: bash
+    env:
+      CACHE_VERSION: ${{ inputs.cache-version }}
+      ALLOW_CACHE_WRITE: ${{ inputs.allow-cache-write }}
+      EVENT_NAME: ${{ github.event_name }}
+      REF: ${{ github.ref }}
+      IS_FORK: ${{ github.event.repository.fork }}
+    run: |
+      set -euo pipefail
+
+      # Git already content-addresses the build inputs. Deriving the key from
+      # those tree and blob object names makes cache identity a function of the
+      # inputs rather than of the commit that happened to introduce them: two
+      # commits with identical native sources share one entry, and a commit that
+      # changes a single header gets a new one.
+      sources="$(git rev-parse \
+        "HEAD:astra-sim" \
+        "HEAD:build" \
+        "HEAD:extern" \
+        "HEAD:.github/workflows/setup.sh" \
+        "HEAD:.github/actions/native-build/action.yml")"
+
+      toolchain="$(
+        gcc-11 -dumpfullversion
+        g++-11 -dumpfullversion
+        ccache --version | head -n 1
+        cmake --version | head -n 1
+        protoc --version
+      )"
+
+      digest="$(printf '%s\n%s\n' "$toolchain" "$sources" | sha256sum | cut -d' ' -f1)"
+      prefix="astra-sim-ccache-${CACHE_VERSION}-${RUNNER_OS}-${RUNNER_ARCH}"
+
+      # Single definition site for the cache trust boundary. Only a push to a
+      # protected-by-convention branch of the upstream repository may publish an
+      # entry that other refs can restore. Pull-request code, including code
+      # from a fork, restores but never publishes.
+      trusted=false
+      if [[ "$ALLOW_CACHE_WRITE" == "true" && "$EVENT_NAME" == "push" \
+            && "$IS_FORK" != "true" \
+            && ( "$REF" == "refs/heads/master" || "$REF" == "refs/heads/dev" ) ]]; then
+        trusted=true
+      fi
+
+      {
+        echo "key=${prefix}-${digest}"
+        echo "prefix=${prefix}-"
+        echo "trusted=${trusted}"
+      } >> "$GITHUB_OUTPUT"
+
+      {
+        echo "CCACHE_DIR=${RUNNER_TEMP}/astra-sim-ccache"
+        echo "CCACHE_CONFIGPATH=${RUNNER_TEMP}/astra-sim-ccache-config/ccache.conf"
+        echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+      } >> "$GITHUB_ENV"
+
+  - name: Restore trusted compiler cache
+    id: restore
+    uses: actions/cache/restore@v6
+    with:
+      path: ${{ runner.temp }}/astra-sim-ccache
+      key: ${{ steps.identity.outputs.key }}
+      # A near miss still warms the cache: ccache validates every hit against
+      # the preprocessed source and the compiler binary, so a stale or foreign
+      # entry can only ever cause a miss, never a wrong object file.
+      restore-keys: ${{ steps.identity.outputs.prefix }}
+
+  - name: Configure compiler cache
+    shell: bash
+    env:
+      MAX_SIZE: ${{ inputs.max-size }}
+    run: |
+      set -euo pipefail
+      install -d -m 700 "$CCACHE_DIR" "$(dirname "$CCACHE_CONFIGPATH")"
+      : > "$CCACHE_CONFIGPATH"
+      chmod 600 "$CCACHE_CONFIGPATH"
+      ccache --set-config=cache_dir="$CCACHE_DIR"
+      # `compiler_check=content` hashes the compiler binary itself and an empty
+      # `sloppiness` keeps every correctness-relevant input in the hash. Together
+      # they are what make restoring an untrusted entry safe.
+      ccache --set-config=compiler_check=content
+      ccache --set-config=sloppiness=
+      ccache --set-config=compression=true
+      ccache --set-config=max_size="$MAX_SIZE"
+      ccache --zero-stats
+      ccache --show-config
+
+  - name: Build analytical and ns-3 backends
+    shell: bash
+    run: bash ./.github/workflows/build.sh
+
+  - name: Report compiler-cache statistics
+    if: always()
+    shell: bash
+    run: |
+      set -euo pipefail
+      ccache --show-stats
+      {
+        echo '<details><summary>Compiler cache</summary>'
+        echo
+        echo '```text'
+        echo "key:     ${{ steps.identity.outputs.key }}"
+        echo "hit:     ${{ steps.restore.outputs.cache-hit || 'false' }}"
+        echo "trusted: ${{ steps.identity.outputs.trusted }}"
+        ccache --show-stats
+        echo '```'
+        echo
+        echo '</details>'
+      } >> "$GITHUB_STEP_SUMMARY"
+
+  # Saving only on an exact-key miss keeps one entry per distinct build input.
+  # Re-publishing on every commit would churn the 10 GB repository quota and
+  # evict the very entries this cache exists to preserve.
+  - name: Publish compiler cache from a trusted ref
+    if: ${{ steps.identity.outputs.trusted == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+    uses: actions/cache/save@v6
+    with:
+      path: ${{ runner.temp }}/astra-sim-ccache
+      key: ${{ steps.identity.outputs.key }}

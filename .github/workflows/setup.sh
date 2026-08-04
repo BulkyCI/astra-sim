@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PROJ_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+# Native toolchain only. The locked Python environment is a separate concern
+# owned by utils/setup.sh locally and by .github/actions/python-env in CI;
+# installing it from here would re-initialize every submodule that
+# actions/checkout has already materialized.
 
 ### ================== System Setups ======================
 ## Install System Dependencies
@@ -14,7 +16,5 @@ sudo apt-get install --yes --no-install-recommends \
     libboost-dev libboost-program-options-dev \
     libprotobuf-dev protobuf-compiler \
     openmpi-bin openmpi-doc libopenmpi-dev
-
-"${PROJ_DIR}/utils/setup.sh"
 
 ### ======================================================

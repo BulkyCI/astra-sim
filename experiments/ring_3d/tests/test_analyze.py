@@ -37,6 +37,7 @@ FLOW_FIELDS = [
     "trim_notifications",
     "trim_ftd_repairs",
     "trim_bts_notifications",
+    "trim_lasthop_notifications",
     "trim_recovery_events",
     "stale_trim_notifications",
     "terminal_outcome",
@@ -133,6 +134,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "trim_notifications": "0",
             "trim_ftd_repairs": "0",
             "trim_bts_notifications": "0",
+            "trim_lasthop_notifications": "0",
             "trim_recovery_events": "0",
             "stale_trim_notifications": "0",
             "terminal_outcome": "completed",
@@ -310,7 +312,54 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(trim["conversion_count"], 1)
             self.assertEqual(trim["trimmed_payload_bytes"], 1000)
             self.assertEqual(trim["ftd_conversion_count"], 1)
+            self.assertEqual(trim["lasthop_conversion_count"], 0)
+            self.assertEqual(trim["trimmed_queue_drop_count"], 0)
             self.assertEqual(summary["transport_recovery"]["trim_ftd_repair_count"], 1)
+
+    def test_summary_counts_lasthop_trims_and_trimmed_queue_drops(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            trimmed = self.valid_shed_flow()
+            trimmed.update(
+                {
+                    "flow_kind": "foreground_payload",
+                    "decision": "admitted",
+                    "admission_eligible": "false",
+                    "transport_role": "collective_payload",
+                    "logical_bytes": "1024",
+                    "physical_bytes": "1024",
+                    "data_attempted_bytes": "2048",
+                    "retransmitted_bytes": "1024",
+                    "trimmed_payload_bytes": "1000",
+                    "trim_notifications": "1",
+                    "trim_ftd_repairs": "1",
+                    "trim_lasthop_notifications": "1",
+                    "trim_recovery_events": "1",
+                }
+            )
+            self.write_telemetry(telemetry, trimmed)
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_events.csv").write_text(
+                "time_ns,event,plane,protocol,node,node_type,interface,"
+                "source_host,destination_host,source_port,packet_bytes,queue\n"
+                "10,trim_ftd_lasthop_admission,data,17,8,1,-1,0,4,10000,1000,-1\n"
+                "11,switch_trimmed_queue_drop,data,17,8,1,-1,0,4,10000,60,-1\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+            trim = summary["ns3_observability"]["transport"]["packet_trimming"]
+            self.assertEqual(trim["conversion_count"], 1)
+            self.assertEqual(trim["ftd_conversion_count"], 1)
+            self.assertEqual(trim["lasthop_conversion_count"], 1)
+            self.assertEqual(trim["admission_conversion_count"], 1)
+            self.assertEqual(trim["trimmed_queue_drop_count"], 1)
+            self.assertEqual(
+                summary["transport_recovery"]["trim_lasthop_notification_count"], 1
+            )
 
     def test_summary_requires_exact_expected_rank_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -404,6 +453,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "trim_notification_count": 0,
                     "trim_ftd_repair_count": 0,
                     "trim_bts_notification_count": 0,
+                    "trim_lasthop_notification_count": 0,
                     "trim_recovery_event_count": 0,
                     "stale_trim_notification_count": 0,
                 },

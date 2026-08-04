@@ -374,11 +374,19 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "switch_route_drop",
         "switch_admission_drop",
         "switch_egress_queue_drop",
+        # A trimmed packet stays subject to the TC_med drop threshold at the
+        # trimming switch and every downstream hop (UEC 1.0.3 section 4.1).
+        "switch_trimmed_queue_drop",
         "trim_ftd_admission",
         "trim_ftd_egress_queue",
+        "trim_ftd_lasthop_admission",
+        "trim_ftd_lasthop_egress_queue",
         "trim_bts_admission",
         "trim_bts_egress_queue",
+        "trim_bts_lasthop_admission",
+        "trim_bts_lasthop_egress_queue",
     }
+    trim_events = {event for event in valid_events if event.startswith("trim_")}
     for row in rows:
         event = row.get("event")
         plane = row.get("plane")
@@ -433,29 +441,36 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             + event_plane_counts["switch_egress_queue_drop"]["control"]
         ),
         "packet_trimming": {
-            "conversion_count": sum(
-                events[event] for event in valid_events if event.startswith("trim_")
-            ),
+            "conversion_count": sum(events[event] for event in trim_events),
             "trimmed_payload_bytes": sum(
-                bytes_by_event[event]
-                for event in valid_events
-                if event.startswith("trim_")
+                bytes_by_event[event] for event in trim_events
             ),
             "ftd_conversion_count": sum(
                 events[event]
-                for event in ("trim_ftd_admission", "trim_ftd_egress_queue")
+                for event in trim_events
+                if event.startswith("trim_ftd_")
             ),
             "bts_conversion_count": sum(
                 events[event]
-                for event in ("trim_bts_admission", "trim_bts_egress_queue")
+                for event in trim_events
+                if event.startswith("trim_bts_")
             ),
             "admission_conversion_count": sum(
-                events[event] for event in ("trim_ftd_admission", "trim_bts_admission")
+                events[event]
+                for event in trim_events
+                if event.endswith("_admission")
             ),
             "egress_queue_conversion_count": sum(
                 events[event]
-                for event in ("trim_ftd_egress_queue", "trim_bts_egress_queue")
+                for event in trim_events
+                if event.endswith("_egress_queue")
             ),
+            # DSCP_TRIMMED_LAST_HOP conversions are reported separately because
+            # the source must not treat them as a path or NSCC congestion signal.
+            "lasthop_conversion_count": sum(
+                events[event] for event in trim_events if "_lasthop_" in event
+            ),
+            "trimmed_queue_drop_count": events["switch_trimmed_queue_drop"],
         },
     }
 
@@ -811,6 +826,10 @@ def summarize(
             ),
             "trim_bts_notification_count": sum(
                 _optional_nonnegative_int(row, "trim_bts_notifications")
+                for row in flow_rows
+            ),
+            "trim_lasthop_notification_count": sum(
+                _optional_nonnegative_int(row, "trim_lasthop_notifications")
                 for row in flow_rows
             ),
             "trim_recovery_event_count": sum(

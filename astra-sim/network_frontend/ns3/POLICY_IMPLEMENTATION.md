@@ -121,23 +121,61 @@ classify before loss injection, isolate named control traffic from configured
 impairment loss, and use separate typed fields for $q$, $D$, direction/scope,
 recovery policy, and recorded terminal outcome.
 
-## UEC-style packet trimming transport mode
+## Packet trimming (UEC 1.0.3 section 4.1)
 
 The optional `network.packet_trimming` profile object belongs to the physical
-transport path, not this logical selection policy. It accepts only `ftd` or
-`bts` and requires the shared `network.transport_recovery` timeout/retry
-budget. A switch converts an RDMA UDP packet only when its normal admission or
-egress queue capacity would reject it. Route failures remain drops.
+transport path, not this logical selection policy. It requires the shared
+`network.transport_recovery` timeout/retry budget. A switch trims a packet only
+when switch admission or egress queue capacity would reject it. Route failures
+remain drops.
 
-The compact metadata contains the original ports, priority group, byte sequence,
-and payload length. FTD preserves forward routing to the destination, which
-returns repair control to the sender; BTS routes loss metadata directly back to
-the sender. Neither path calls `ReceiverCheckSeq()` or advances receiver state.
-The sender immediately retries from its cumulative ACK point. Completion still
-requires all original bytes to be ACKed; metadata never substitutes for data.
+### Codepoints and traffic classes
 
-This is a UEC-style mechanism model with bounded go-back-$N$ repair. It does
-not model selective retransmission, packet spraying, reorder buffering,
-placeholder data, approximate completion, or UET/Falcon conformance. Raw trim
-events and sender trim counters are retained separately from independent
-configured receive-side `network.data_loss` impairment.
+Data packets are marked `DSCP_TRIMMABLE` (CS1) at the NIC and ACKs, NACKs, and
+trim NACKs are marked `DSCP_CONTROL` (EF), per Table 3-76. A switch only trims
+packets it knows to be trimmable. Trimming rewrites the outer IP header only:
+the DSCP becomes `DSCP_TRIMMED` (CS2), or `DSCP_TRIMMED_LAST_HOP` (AF21) when
+the egress port is a downlink to a directly attached host, and the IP length is
+reduced. ECN bits and TTL are carried through unchanged, and a switch does not
+ECN-mark a trimmed packet (section 4.1.1).
+
+The three traffic classes required by section 4.1.4.1 are realized in the
+egress scheduler: queue 0 is TC_high, `packet_trimming.trimmed_queue`
+(default 2) is TC_med, and data priority groups 1 and 3 are TC_low. TC_med is
+drained ahead of TC_low but is capped at `trimmed_queue_weight` percent of the
+egress bandwidth while TC_low has traffic — the WDRR guard section 4.1
+recommends at 25%, since an unrestricted trimmed class can drive congestion
+collapse. Setting the weight to 100 restores strict priority.
+A trimmed packet is re-admitted as a new DSCP_TRIMMED arrival, so a congested
+TC_med drops it and records `switch_trimmed_queue_drop`; the specification is
+explicit that trimmed delivery is not guaranteed.
+
+### Trim size
+
+`min_trim_size_bytes` (default 24, per Table 4-1 for UET over UDP/IP) is the
+retained IP payload. The trimmed packet is never larger than the original, and a
+packet whose payload is already at or below that bound is dropped instead of
+trimmed — a MAY in section 4.1. The UDP length field is not rewritten, so the
+destination still learns how many payload bytes were discarded.
+
+### Destination and source behavior
+
+`RdmaHw::Receive()` recognizes a trimmed packet by its DSCP before any protocol
+dispatch, so it never reaches `ReceiverCheckSeq()`, never advances receiver
+state, and never establishes flow state. The destination replies with a
+`UET_TRIMMED` / `UET_TRIMMED_LASTHOP` NACK on the control class (Table 3-61),
+and the sender repairs from its cumulative ACK point. A last-hop trim triggers
+repair but is not fed to the congestion-control algorithm, because no alternate
+path avoids destination incast. Completion still requires all original bytes to
+be ACKed; a trim never substitutes for data.
+
+`mode: "bts"` returns the notification directly to the sender. UEC 1.0.3
+section 4.1 explicitly excludes that behavior from the specification, so it is a
+research-only mode; the loader marks it `uec_conformant: false` and the ns-3
+config validator warns. Only `mode: "ftd"` is UET trimming.
+
+This remains a bounded go-back-$N$ repair model. It does not implement selective
+retransmission, packet spraying, reorder buffering, or the optional
+`DSCP_TRIMMABLE_RTX` codepoint for retransmitted data. Raw trim events and
+sender trim counters stay separate from the independent receive-side
+`network.data_loss` impairment.

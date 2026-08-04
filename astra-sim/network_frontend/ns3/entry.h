@@ -364,6 +364,7 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     flow.trim_notifications = q->m_trim_notifications;
     flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
     flow.trim_bts_notifications = q->m_trim_bts_notifications;
+    flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
     flow.trim_recovery_events = q->m_trim_recovery_events;
     flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
@@ -422,6 +423,7 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     flow.trim_notifications = q->m_trim_notifications;
     flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
     flow.trim_bts_notifications = q->m_trim_bts_notifications;
+    flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
     flow.trim_recovery_events = q->m_trim_recovery_events;
     flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();

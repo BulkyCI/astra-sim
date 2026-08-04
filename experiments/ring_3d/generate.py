@@ -1114,9 +1114,16 @@ def write_network_config(
             "MAX_RETRANSMISSION_RETRIES "
             f"{transport_recovery.max_retransmission_retries}\n"
         )
-    trim_settings = (
-        f"PACKET_TRIM_MODE {packet_trimming.mode if packet_trimming else 'disabled'}\n"
-    )
+    if packet_trimming is None:
+        trim_settings = "PACKET_TRIM_MODE disabled\n"
+    else:
+        trim_settings = (
+            f"PACKET_TRIM_MODE {packet_trimming.mode}\n"
+            f"PACKET_TRIM_QUEUE {packet_trimming.trimmed_queue}\n"
+            f"PACKET_TRIM_QUEUE_WEIGHT {packet_trimming.trimmed_queue_weight}\n"
+            f"MIN_TRIM_SIZE {packet_trimming.min_trim_size_bytes}\n"
+            f"PACKET_TRIM_LASTHOP {int(packet_trimming.last_hop_codepoint)}\n"
+        )
     with path.open("w", encoding="utf-8") as config:
         config.write(
             "ENABLE_QCN 1\nUSE_DYNAMIC_PFC_THRESHOLD 1\n\n"

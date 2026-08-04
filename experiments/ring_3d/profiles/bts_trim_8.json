@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-uec-trim-bts-8",
+  "name": "ring-3d-bts-trim-8",
   "parallelism": {
     "tp": 2,
     "pp": 2,

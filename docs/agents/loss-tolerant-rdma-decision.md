@@ -73,21 +73,32 @@ PFC, and simulator/protocol recovery control. New control types must declare
 both their queue/class and loss treatment. Whether a given future protocol uses
 all of those types is an experiment-specific fact, not an assumption.
 
-### UEC-style packet trimming mode
+### Packet trimming mode (UEC 1.0.3 section 4.1)
 
-The transport may additionally model congestion-induced packet trimming as an
-explicit loss-notification mechanism. A switch can replace an RDMA UDP packet
-only when switch admission or egress queue capacity rejects it. The retained
-metadata names the original flow, priority group, byte sequence, and missing
-payload length; it never represents delivered payload bytes. The notification
-is strict-priority recovery control and is either forwarded to the destination
-(FTD), which returns repair control to the sender, or returned directly to the
-sender (BTS). Both paths require recovery before cumulative-ACK completion.
+The transport models congestion-induced packet trimming as an explicit
+loss-notification mechanism. A switch trims a packet only when switch admission
+or egress queue capacity rejects it, and only when the packet carries
+`DSCP_TRIMMABLE`. Trimming truncates the payload to `MIN_TRIM_SIZE` and rewrites
+the outer IP header only; the retained prefix names the original flow, priority
+group, and byte sequence, and the unmodified UDP length reports the discarded
+payload size. A trimmed packet never represents delivered payload bytes.
 
-The initial model uses bounded go-back-$N$ repair and treats trim as congestion
-evidence where the configured control algorithm supports that signal. It does
-not claim UET/Falcon conformance or model selective retransmission, packet
-spraying, reorder buffering, placeholder bytes, or approximate completion.
+Trimmed packets ride TC_med, a distinct traffic class from both TC_low data and
+TC_high control, and they are re-admitted against that queue's threshold, so
+they can still be dropped. TC_med is drained ahead of data but is limited to a
+configured share of the link (default 25%), so a trimmed-header flood cannot
+starve payload. In `ftd` mode — the specified behavior — the trimmed
+packet reaches the destination, which returns a `UET_TRIMMED` NACK. `bts` mode
+returns the notification directly to the sender; UEC 1.0.3 section 4.1
+explicitly excludes back-to-sender from the specification, so it is research
+only. Both paths require recovery before cumulative-ACK completion, and RTO
+remains the backstop when a trimmed packet is itself lost.
+
+The model uses bounded go-back-$N$ repair and treats a non-last-hop trim as
+congestion evidence where the configured control algorithm supports that signal;
+a last-hop trim drives repair only. It does not model selective retransmission,
+packet spraying, reorder buffering, placeholder bytes, approximate completion,
+or the optional `DSCP_TRIMMABLE_RTX` codepoint.
 Configured `network.data_loss` remains an independent receive-side impairment;
 its counts must never be merged with congestion-triggered trimming.
 
@@ -227,7 +238,9 @@ as implementing this decision, review must establish:
 | Data-loss gate | Seeded test shows only in-scope data packets receive the configured impairment | Out-of-scope data or any control class receives injected loss |
 | Liveness gate | Every issued operation reaches a recorded completion or explicit failure | A lost tail/control event leaves unreported pending work |
 | Telemetry gate | Raw counters reconcile packet/byte attempts, drops, recovery, and terminal states | Summary metrics cannot explain the terminal outcome |
-| Trim semantics gate | A trace shows trim metadata carries a missing range, never payload delivery; completed QPs retransmit then ACK all original bytes | A trim advances receiver data state, is counted as delivered bytes, or permits completion without repair |
+| Trim semantics gate | A trace shows a trimmed packet carries a missing range, never payload delivery; completed QPs retransmit then ACK all original bytes | A trim advances receiver data state, is counted as delivered bytes, or permits completion without repair |
+| Trim class gate | Trimmed packets appear on TC_med, are drained ahead of data and behind control, and lost ones are recorded as `switch_trimmed_queue_drop` | Trimmed packets share the control queue or bypass buffer admission |
+| Trim collapse gate | Under sustained incast, TC_med bytes stay within `trimmed_queue_weight` of the link and data goodput does not go to zero | Trimmed headers consume the link while payload starves |
 
 No NIC, switch, UET, Falcon, or DBLP protocol implementation is selected before
 these model-level gates pass.

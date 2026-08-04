@@ -23,6 +23,20 @@ DATA_LOSS_SCOPES = {
     "switch_to_switch",
 }
 PACKET_TRIM_MODES = {"ftd", "bts"}
+# Queue 0 carries DSCP_CONTROL (TC_high) and priority groups 1 and 3 carry UET
+# data (TC_low), so TC_med for DSCP_TRIMMED must avoid all three. UEC 1.0.3
+# section 4.1.4.1 requires trimmed packets to sit in their own traffic class.
+DATA_PRIORITY_GROUPS = frozenset({1, 3})
+CONTROL_PRIORITY_GROUP = 0
+DEFAULT_PACKET_TRIM_QUEUE = 2
+# UEC 1.0.3 Table 4-1: UET over UDP/IP needs 24 B to retain the UDP header and
+# the PDS request header that identify the trimmed packet.
+DEFAULT_MIN_TRIM_SIZE_BYTES = 24
+MAX_PRIORITY_GROUP = 7
+# UEC 1.0.3 section 4.1 recommends WDRR with 25% of the bandwidth allocated to
+# trimmed packets, and caps fair-queueing at 50%, because an unrestricted
+# trimmed class can drive congestion collapse.
+DEFAULT_TRIMMED_QUEUE_WEIGHT = 25
 
 
 @dataclass(frozen=True)
@@ -42,15 +56,36 @@ class TransportRecovery:
 
 @dataclass(frozen=True)
 class PacketTrimming:
-    """Strict UEC-style switch rejection conversion policy."""
+    """UEC 1.0.3 section 4.1 switch packet-trimming policy.
+
+    ``mode: "ftd"`` is the specified behavior: a switch that fails buffer
+    admission truncates the packet to ``min_trim_size_bytes``, remarks it
+    DSCP_TRIMMED, and forwards it to the destination on TC_med, where it is
+    still subject to that queue's drop threshold. ``mode: "bts"`` returns the
+    notification to the sender instead; UEC 1.0.3 section 4.1 explicitly places
+    that outside the specification, so it is a research-only mode.
+    """
 
     mode: str
+    trimmed_queue: int
+    trimmed_queue_weight: int
+    min_trim_size_bytes: int
+    last_hop_codepoint: bool
 
-    def manifest(self) -> dict[str, str | bool]:
+    @property
+    def uec_conformant(self) -> bool:
+        return self.mode == "ftd"
+
+    def manifest(self) -> dict[str, str | int | bool]:
         return {
             "enabled": True,
             "mode": self.mode,
             "trigger": "switch_admission_or_egress_rejection",
+            "trimmed_queue": self.trimmed_queue,
+            "trimmed_queue_weight": self.trimmed_queue_weight,
+            "min_trim_size_bytes": self.min_trim_size_bytes,
+            "last_hop_codepoint": self.last_hop_codepoint,
+            "uec_conformant": self.uec_conformant,
         }
 
 
@@ -319,14 +354,75 @@ def _load_packet_trimming(document: dict[str, Any]) -> PacketTrimming | None:
     if "packet_trimming" not in document:
         return None
     trimming = document["packet_trimming"]
-    if not isinstance(trimming, dict) or set(trimming) != {"mode"}:
-        raise ValueError("network.packet_trimming must contain exactly ['mode']")
+    optional = {
+        "trimmed_queue",
+        "trimmed_queue_weight",
+        "min_trim_size_bytes",
+        "last_hop_codepoint",
+    }
+    if not isinstance(trimming, dict) or not {"mode"} <= set(trimming) <= (
+        {"mode"} | optional
+    ):
+        raise ValueError(
+            "network.packet_trimming must contain 'mode' and may contain "
+            f"{sorted(optional)}"
+        )
     mode = trimming["mode"]
     if not isinstance(mode, str) or mode not in PACKET_TRIM_MODES:
         raise ValueError(
             f"network.packet_trimming.mode must be one of {sorted(PACKET_TRIM_MODES)}"
         )
-    return PacketTrimming(mode=mode)
+    trimmed_queue = _positive_int(
+        trimming.get("trimmed_queue", DEFAULT_PACKET_TRIM_QUEUE),
+        "network.packet_trimming.trimmed_queue",
+    )
+    if trimmed_queue > MAX_PRIORITY_GROUP:
+        raise ValueError(
+            "network.packet_trimming.trimmed_queue must not exceed "
+            f"{MAX_PRIORITY_GROUP}"
+        )
+    # UEC 1.0.3 section 4.1.4.1: DSCP_TRIMMED MUST be distinct from both
+    # DSCP_TRIMMABLE and DSCP_CONTROL, and switches MUST place trimmed packets
+    # into a traffic class other than the one carrying untrimmed data.
+    if trimmed_queue == CONTROL_PRIORITY_GROUP or trimmed_queue in (
+        DATA_PRIORITY_GROUPS
+    ):
+        raise ValueError(
+            "network.packet_trimming.trimmed_queue must differ from the control "
+            f"queue {CONTROL_PRIORITY_GROUP} and the data priority groups "
+            f"{sorted(DATA_PRIORITY_GROUPS)}"
+        )
+    trimmed_queue_weight = _positive_int(
+        trimming.get("trimmed_queue_weight", DEFAULT_TRIMMED_QUEUE_WEIGHT),
+        "network.packet_trimming.trimmed_queue_weight",
+    )
+    if trimmed_queue_weight > 100:
+        raise ValueError(
+            "network.packet_trimming.trimmed_queue_weight is a percentage of "
+            "egress bandwidth and must be in [1,100]"
+        )
+    min_trim_size_bytes = _positive_int(
+        trimming.get("min_trim_size_bytes", DEFAULT_MIN_TRIM_SIZE_BYTES),
+        "network.packet_trimming.min_trim_size_bytes",
+    )
+    if min_trim_size_bytes < DEFAULT_MIN_TRIM_SIZE_BYTES:
+        raise ValueError(
+            "network.packet_trimming.min_trim_size_bytes must be at least "
+            f"{DEFAULT_MIN_TRIM_SIZE_BYTES} so the UDP and PDS request headers "
+            "survive trimming"
+        )
+    last_hop_codepoint = trimming.get("last_hop_codepoint", True)
+    if not isinstance(last_hop_codepoint, bool):
+        raise ValueError(
+            "network.packet_trimming.last_hop_codepoint must be a boolean"
+        )
+    return PacketTrimming(
+        mode=mode,
+        trimmed_queue=trimmed_queue,
+        trimmed_queue_weight=trimmed_queue_weight,
+        min_trim_size_bytes=min_trim_size_bytes,
+        last_hop_codepoint=last_hop_codepoint,
+    )
 
 
 def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int, int]:

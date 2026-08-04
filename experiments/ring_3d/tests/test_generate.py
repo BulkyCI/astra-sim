@@ -335,13 +335,72 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         "enabled": True,
                         "mode": mode,
                         "trigger": "switch_admission_or_egress_rejection",
+                        "trimmed_queue": 2,
+                        "trimmed_queue_weight": 25,
+                        "min_trim_size_bytes": 24,
+                        "last_hop_codepoint": True,
+                        "uec_conformant": mode == "ftd",
                     },
                 )
                 network_config = (output / "network_config.txt").read_text(
                     encoding="utf-8"
                 )
                 self.assertIn(f"PACKET_TRIM_MODE {mode}", network_config)
+                self.assertIn("PACKET_TRIM_QUEUE 2", network_config)
+                self.assertIn("PACKET_TRIM_QUEUE_WEIGHT 25", network_config)
+                self.assertIn("MIN_TRIM_SIZE 24", network_config)
+                self.assertIn("PACKET_TRIM_LASTHOP 1", network_config)
                 self.assertIn("RETRANSMISSION_TIMEOUT_NS 500", network_config)
+
+    def test_trimmed_queue_must_not_collide_with_control_or_data(self) -> None:
+        for queue in (0, 1, 3):
+            document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+            document["network"]["packet_trimming"] = {
+                "mode": "ftd",
+                "trimmed_queue": queue,
+            }
+            document["network"]["transport_recovery"] = {
+                "retransmission_timeout_ns": 500,
+                "max_retransmission_retries": 3,
+            }
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                profile_path = Path(temporary_directory) / "invalid.json"
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "trimmed_queue"):
+                    load_profile(profile_path)
+
+    def test_trimmed_queue_weight_must_be_a_percentage(self) -> None:
+        for weight in (0, 101):
+            document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+            document["network"]["packet_trimming"] = {
+                "mode": "ftd",
+                "trimmed_queue_weight": weight,
+            }
+            document["network"]["transport_recovery"] = {
+                "retransmission_timeout_ns": 500,
+                "max_retransmission_retries": 3,
+            }
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                profile_path = Path(temporary_directory) / "invalid.json"
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "trimmed_queue_weight"):
+                    load_profile(profile_path)
+
+    def test_min_trim_size_must_retain_transport_headers(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["packet_trimming"] = {
+            "mode": "ftd",
+            "min_trim_size_bytes": 16,
+        }
+        document["network"]["transport_recovery"] = {
+            "retransmission_timeout_ns": 500,
+            "max_retransmission_retries": 3,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "min_trim_size_bytes"):
+                load_profile(profile_path)
 
     def test_packet_trimming_requires_shared_recovery(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
@@ -353,14 +412,19 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 load_profile(profile_path)
 
     def test_checked_in_trim_profiles_select_expected_modes(self) -> None:
-        for mode in ("ftd", "bts"):
+        # Only "ftd" is UEC 1.0.3 trimming, so only that profile is named "uec".
+        for mode, filename in (
+            ("ftd", "uec_trim_ftd_8.json"),
+            ("bts", "bts_trim_8.json"),
+        ):
             profile = load_profile(
-                REPOSITORY_ROOT
-                / "experiments/ring_3d/profiles"
-                / f"uec_trim_{mode}_8.json"
+                REPOSITORY_ROOT / "experiments/ring_3d/profiles" / filename
             )
             self.assertIsNotNone(profile.network.packet_trimming)
             self.assertEqual(profile.network.packet_trimming.mode, mode)
+            self.assertEqual(
+                profile.network.packet_trimming.uec_conformant, mode == "ftd"
+            )
             self.assertIsNotNone(profile.network.transport_recovery)
 
     def test_queue_monitor_interval_must_be_positive(self) -> None:

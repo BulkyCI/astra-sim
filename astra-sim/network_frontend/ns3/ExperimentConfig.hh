@@ -98,6 +98,7 @@ struct FlowRecord {
     uint32_t trim_notifications = 0;
     uint32_t trim_ftd_repairs = 0;
     uint32_t trim_bts_notifications = 0;
+    uint32_t trim_lasthop_notifications = 0;
     uint32_t trim_recovery_events = 0;
     uint32_t stale_trim_notifications = 0;
     uint64_t start_time_ns = 0;
@@ -126,6 +127,7 @@ class ExperimentTelemetry {
                "logical_bytes,physical_bytes,data_attempted_bytes,"
                "retransmitted_bytes,trimmed_payload_bytes,recovery_events,"
                "trim_notifications,trim_ftd_repairs,trim_bts_notifications,"
+               "trim_lasthop_notifications,"
                "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
                "failure_reason,decision_hash,start_time_ns,end_time_ns\n";
         rank_completion << "rank,completion_time_ns\n";
@@ -161,6 +163,7 @@ class ExperimentTelemetry {
                     << ',' << flow.trim_notifications << ','
                     << flow.trim_ftd_repairs << ','
                     << flow.trim_bts_notifications << ','
+                    << flow.trim_lasthop_notifications << ','
                     << flow.trim_recovery_events << ','
                     << flow.stale_trim_notifications
                     << ',' << terminal_outcome_name(flow.terminal_outcome)

@@ -82,14 +82,11 @@ jobs:
         bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh
         git diff --check
 
-  native-integration:
-    name: Native build, regression, and ns-3 smoke
-    needs: [ python-quality, ledger ]
+  native-build:
+    name: Build the native backends once
+    needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 60
-    permissions:
-      contents: read
-      issues: write
 
     steps:
     - name: Check out source and submodules
@@ -98,11 +95,52 @@ jobs:
         submodules: recursive
         persist-credentials: false
 
+    - name: Build the native backends through the trusted compiler cache
+      uses: ./.github/actions/native-build
+
+    - name: Package the native runtime
+      run: |
+        set -euo pipefail
+        # tar preserves the executable bit and the analytical build's symlinks;
+        # the artifact uploader's own zip does not.
+        tar -czf native-runtime.tar.gz \
+          extern/network_backend/ns-3/build \
+          build/astra_analytical/build
+        ls -l native-runtime.tar.gz
+
+    - name: Upload the native runtime
+      uses: actions/upload-artifact@v7
+      with:
+        name: native-runtime-${{ github.run_id }}
+        path: native-runtime.tar.gz
+        # Already gzipped; re-compressing costs minutes and saves nothing.
+        compression-level: 0
+        retention-days: 1
+        if-no-files-found: error
+
+  native-integration:
+    name: Analytical regression and ns-3 smoke
+    needs: [ native-build, ledger ]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+    - name: Check out source
+      uses: actions/checkout@v7
+      with:
+        # The prebuilt runtime replaces the native tree, so the expensive
+        # recursive ns-3 clone is not needed here.
+        submodules: false
+        persist-credentials: false
+
     - name: Set up the locked Python environment
       uses: ./.github/actions/python-env
 
-    - name: Build the native backends through the trusted compiler cache
-      uses: ./.github/actions/native-build
+    - name: Unpack the native runtime built once for this run
+      uses: ./.github/actions/native-runtime
 
     - name: Run analytical regression suite
       run: bash ./.github/workflows/test.sh
@@ -137,7 +175,7 @@ jobs:
       with:
         issue: ${{ needs.ledger.outputs.issue }}
         key: native-integration
-        title: Native build, regression, and ns-3 smoke
+        title: Analytical regression and ns-3 smoke
         body-file: runs/ring_3d/smoke_8/research_report.md
         status: ${{ job.status }}
 
@@ -175,7 +213,7 @@ jobs:
 
   paired-llama3-evaluation:
     name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
-    needs: [ python-quality, ledger ]
+    needs: [ native-build, ledger ]
     permissions:
       contents: read
       issues: write
@@ -206,7 +244,7 @@ jobs:
 
   historical-phase1-native-reference:
     name: Historical Phase-1 64-rank native reference pair
-    needs: [ python-quality, ledger ]
+    needs: [ native-build, ledger ]
     permissions:
       contents: read
       issues: write
@@ -288,7 +326,7 @@ jobs:
   model-100b-256-clos-evaluation:
     name: 100B 256-card Clos structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: [ python-quality, ledger ]
+    needs: [ native-build, ledger ]
     permissions:
       contents: read
       issues: write
@@ -308,7 +346,7 @@ jobs:
   model-100b-256-ring-evaluation:
     name: 100B 256-card Ring structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: [ python-quality, ledger ]
+    needs: [ native-build, ledger ]
     permissions:
       contents: read
       issues: write
@@ -331,6 +369,7 @@ jobs:
     needs:
     - ledger
     - python-quality
+    - native-build
     - native-integration
     - paired-llama3-evaluation
     - historical-phase1-native-reference

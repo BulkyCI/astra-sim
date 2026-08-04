@@ -1,0 +1,39 @@
+name: Native runtime from the run's single build
+description: >
+  Install the runtime libraries and unpack the backends that the `native-build`
+  job compiled once for this run. A consumer never compiles, so a run pays for
+  exactly one ns-3 build no matter how many evaluations it schedules.
+
+runs:
+  using: composite
+  steps:
+  # The simulator links openmpi, protobuf, and boost at run time. This installs
+  # the compilers too, which a consumer does not need; the shared package list
+  # is worth more than the ~40 s it costs to keep runtime and build in step.
+  - name: Install runtime libraries
+    shell: bash
+    run: ./.github/workflows/setup.sh
+
+  - name: Download the native runtime
+    uses: actions/download-artifact@v8
+    with:
+      name: native-runtime-${{ github.run_id }}
+
+  - name: Unpack the native runtime
+    shell: bash
+    run: |
+      set -euo pipefail
+      # tar, not the artifact's own archiving: only tar restores the executable
+      # bit and the symlinks the analytical build creates.
+      tar -xzf native-runtime.tar.gz
+      rm -f native-runtime.tar.gz
+
+      # ns-3 bakes an absolute RUNPATH at link time. It resolves here only
+      # because every job on a hosted runner checks out to the same workspace
+      # path; naming the directory removes the dependency on that coincidence.
+      lib="${GITHUB_WORKSPACE}/extern/network_backend/ns-3/build/lib"
+      echo "LD_LIBRARY_PATH=${lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+        >> "$GITHUB_ENV"
+
+      # Fail here, with a readable message, rather than inside an experiment.
+      ls -1 extern/network_backend/ns-3/build/scratch/*AstraSimNetwork-default

@@ -48,7 +48,6 @@ runs:
       ALLOW_CACHE_WRITE: ${{ inputs.allow-cache-write }}
       EVENT_NAME: ${{ github.event_name }}
       REF: ${{ github.ref }}
-      IS_FORK: ${{ github.event.repository.fork }}
     run: |
       set -euo pipefail
 
@@ -75,13 +74,17 @@ runs:
       digest="$(printf '%s\n%s\n' "$toolchain" "$sources" | sha256sum | cut -d' ' -f1)"
       prefix="astra-sim-ccache-${CACHE_VERSION}-${RUNNER_OS}-${RUNNER_ARCH}"
 
-      # Single definition site for the cache trust boundary. Only a push to a
-      # protected-by-convention branch of the upstream repository may publish an
-      # entry that other refs can restore. Pull-request code, including code
-      # from a fork, restores but never publishes.
+      # Single definition site for the cache trust boundary: only a push to a
+      # branch this repository treats as trusted may publish an entry that
+      # other refs can restore. Pull-request code restores but never publishes.
+      #
+      # Deliberately no fork check. GitHub scopes the cache per repository, so
+      # a fork and its parent share no cache at all and cannot contaminate one
+      # another. This repository *is* a fork, so testing
+      # `github.event.repository.fork` would make `trusted` permanently false
+      # and disable the cache outright.
       trusted=false
       if [[ "$ALLOW_CACHE_WRITE" == "true" && "$EVENT_NAME" == "push" \
-            && "$IS_FORK" != "true" \
             && ( "$REF" == "refs/heads/master" || "$REF" == "refs/heads/dev" ) ]]; then
         trusted=true
       fi

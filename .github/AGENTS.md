@@ -21,6 +21,7 @@ workflows/workflow_main.yml     job graph and the ledger lifecycle
 workflows/ns3-evaluation.yml    one hosted evaluation, called per experiment
 actions/python-env/             the only definition site for the uv pin
 actions/native-build/           toolchain + trusted ccache + native build
+actions/native-runtime/         unpack the run's single build; never compiles
 actions/ledger-publish/         reconcile one report into the ledger issue
 scripts/ci_ledger/              the ledger: pure model, `gh` shell, CLI
 ```
@@ -40,16 +41,45 @@ Because runs no longer cancel each other, the account-level ten-job concurrency
 limit is the real budget. `max-parallel` on the paired matrix is what keeps a
 single run inside it; raising it makes concurrent runs starve each other.
 
+## One build per run
+
+`native-build` is the only job that compiles. It packages
+`extern/network_backend/ns-3/build` and `build/astra_analytical/build` into a
+tarball, and every other native job unpacks it through
+`actions/native-runtime`. A push to `dev` schedules seven native jobs; without
+this it paid for seven identical ns-3 builds, because they start together and
+no cache can serve a job that has not finished yet.
+
+Consequences to keep in mind when editing:
+
+- Consumers check out with `submodules: false`. Nothing under `experiments/`
+  references `extern/` outside the build directory, and nothing rebuilds; if
+  that changes, the submodule fetch has to come back.
+- The tarball must be produced with `tar`, not by handing directories to
+  `upload-artifact`, which drops the executable bit and the analytical build's
+  symlinks.
+- ns-3 links with an absolute `RUNPATH`. It resolves only because every hosted
+  job checks out to the same workspace path, so `native-runtime` also exports
+  `LD_LIBRARY_PATH`. A container-based or relocated job would need that export
+  to keep working.
+- Evaluations now start after the build instead of alongside it. That trades a
+  fixed front-loaded delay for six fewer builds — deliberate, since an
+  evaluation runs for hours.
+
 ## Compiler-cache trust boundary
 
 `actions/native-build` owns the entire cache lifecycle — restore, configure,
 build, save — so no caller can restore an entry without the matching save
 policy. Two properties keep it safe:
 
-- **Only a push to `master` or `dev` of the upstream repository publishes an
-  entry.** The predicate has exactly one definition site, in the action's
-  `identity` step. A caller's `allow-cache-write` input can restrict it and can
-  never widen it. Pull-request code restores but never writes.
+- **Only a push to `master` or `dev` publishes an entry.** The predicate has
+  exactly one definition site, in the action's `identity` step. A caller's
+  `allow-cache-write` input can restrict it and can never widen it.
+  Pull-request code restores but never writes. There is deliberately **no fork
+  check**: GitHub scopes caches per repository, so a fork and its parent share
+  no cache and cannot contaminate each other. This repository *is* a fork, so
+  testing `github.event.repository.fork` would hold `trusted` at false forever
+  and silently disable the cache.
 - **A restored entry cannot produce a wrong object file.** ccache runs with
   `compiler_check=content` and an empty `sloppiness`, so every hit is validated
   against the preprocessed source and the compiler binary's own content. A
@@ -140,3 +170,5 @@ is ever interpolated into a shell command.
    finalized before that job publishes.
 4. Keep the run inside the account concurrency limit; the comment above
    `max-parallel` is the accounting.
+5. Depend on `native-build`, not `python-quality`, so the job receives the
+   prebuilt runtime instead of compiling its own.

@@ -68,17 +68,19 @@ jobs:
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
 
     steps:
-    - name: Check out source and submodules
+    - name: Check out source
       uses: actions/checkout@v7
       with:
-        submodules: recursive
+        # The prebuilt runtime replaces the native tree, so the expensive
+        # recursive ns-3 clone is not needed here.
+        submodules: false
         persist-credentials: false
 
     - name: Set up the locked Python environment
       uses: ./.github/actions/python-env
 
-    - name: Build the native backends through the trusted compiler cache
-      uses: ./.github/actions/native-build
+    - name: Unpack the native runtime built once for this run
+      uses: ./.github/actions/native-runtime
 
     - name: Run structural ns-3 experiment
       if: ${{ !inputs.comparison }}

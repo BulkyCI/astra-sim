@@ -1,0 +1,67 @@
+name: Archive a bundle to the run's permanent release
+description: >
+  Download one of the run's Actions artifacts and publish it as an asset on the
+  release opened by the `ledger` job. Actions artifacts expire; release assets
+  do not, and they cost nothing against the storage quota.
+
+inputs:
+  tag:
+    description: >
+      Release tag from the `ledger` job. Empty disables archiving. Never derive
+      this here: the tag is evaluated once per run so a partial re-run lands in
+      the original release.
+    required: true
+  artifact:
+    description: Name of the Actions artifact to archive.
+    required: true
+  asset-name:
+    description: Asset filename within the release, without the .tar.gz suffix.
+    required: true
+  token:
+    description: Token holding the contents write scope on this repository.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+  - name: Download the bundle
+    if: ${{ inputs.tag != '' }}
+    # A cancelled producer leaves no artifact; that is a missing record, not a
+    # reason to fail the sink job that is trying to record what does exist.
+    continue-on-error: true
+    uses: actions/download-artifact@v8
+    with:
+      name: ${{ inputs.artifact }}
+      path: ${{ runner.temp }}/archive/${{ inputs.asset-name }}
+
+  - name: Publish the bundle as a release asset
+    if: ${{ inputs.tag != '' }}
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.token }}
+      # Inputs cross into the shell as data, never as interpolated script text.
+      RELEASE_TAG: ${{ inputs.tag }}
+      ASSET_NAME: ${{ inputs.asset-name }}
+      ARCHIVE_ROOT: ${{ runner.temp }}/archive
+      REPOSITORY: ${{ github.repository }}
+    run: |
+      set -euo pipefail
+
+      source="${ARCHIVE_ROOT}/${ASSET_NAME}"
+      if [[ ! -d "$source" ]] || [[ -z "$(ls -A "$source")" ]]; then
+        echo "No bundle to archive for ${ASSET_NAME}; nothing was produced." \
+          >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+      fi
+
+      asset="${ARCHIVE_ROOT}/${ASSET_NAME}.tar.gz"
+      tar -czf "$asset" -C "$source" .
+
+      # `--clobber` is what makes a re-run idempotent: the asset is replaced in
+      # place rather than rejected as a duplicate name.
+      gh release upload "$RELEASE_TAG" "$asset" --clobber --repo "$REPOSITORY"
+
+      size="$(du -h "$asset" | cut -f1)"
+      echo "Archived \`${ASSET_NAME}.tar.gz\` (${size}) to release \`${RELEASE_TAG}\`." \
+        >> "$GITHUB_STEP_SUMMARY"

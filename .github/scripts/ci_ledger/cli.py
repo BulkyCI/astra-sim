@@ -121,9 +121,45 @@ def command_open(arguments: argparse.Namespace) -> int:
         gh.update_issue(number, context.title, body)
         action = "adopted"
 
+    # The permanent archive is opened here and nowhere else, so its tag is
+    # evaluated exactly once per run and travels downstream as an opaque value.
+    tag = context.release_tag
+    if gh.release_exists(tag):
+        release_action = "adopted"
+    else:
+        gh.create_release(
+            tag, context.sha, context.title, _release_notes(context, number)
+        )
+        release_action = "created"
+
     _emit("issue", str(number))
-    _summarize(f"Experiment ledger {action}: [#{number}]({context.issue_url(number)})")
+    _emit("release_tag", tag)
+    _summarize(
+        f"Experiment ledger {action}: [#{number}]({context.issue_url(number)}) · "
+        f"archive {release_action}: [`{tag}`]({context.release_url(tag)})"
+    )
     return 0
+
+
+def _release_notes(context: RunContext, issue: int) -> str:
+    """Release body: the same backreferences the ledger issue carries."""
+    return "\n".join(
+        (
+            f"Permanent archive for {context.title}.",
+            "",
+            f"- Commit: [`{context.sha}`]({context.commit_url})",
+            (
+                f"- Workflow run: [#{context.run_number}]({context.run_url}) "
+                f"(attempt {context.run_attempt})"
+            ),
+            f"- Ledger: [#{issue}]({context.issue_url(issue)})",
+            "",
+            (
+                "Assets are the reproducibility bundles the run also uploaded "
+                "as Actions artifacts. Those expire; these do not."
+            ),
+        )
+    )
 
 
 def _read_report(path: Path, title: str, declared: Status) -> tuple[str, Status]:

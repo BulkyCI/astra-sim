@@ -39,11 +39,20 @@ class FakeGh:
         self.issues: dict[int, dict[str, object]] = {}
         self.threads: dict[int, list[RemoteComment]] = {}
         self.labels: dict[str, tuple[str, str]] = {}
+        self.releases: dict[str, dict[str, str]] = {}
         self._next_issue = 1
         self._next_comment = 1000
 
     def ensure_label(self, name: str, color: str, description: str) -> None:
         self.labels[name] = (color, description)
+
+    def release_exists(self, tag: str) -> bool:
+        return tag in self.releases
+
+    def create_release(self, tag: str, target: str, title: str, notes: str) -> None:
+        if tag in self.releases:
+            raise AssertionError(f"release {tag} created twice")
+        self.releases[tag] = {"target": target, "title": title, "notes": notes}
 
     def issues_with_label(self, label: str) -> tuple[Mapping[str, object], ...]:
         return tuple(i for i in self.issues.values() if label in i["labels"])
@@ -147,6 +156,18 @@ class LedgerLifecycle(unittest.TestCase):
         cli.main(["open"])
         cli.main(["open"])
         self.assertEqual(len(self.gh.issues), 1)
+        # FakeGh raises if a release is created twice, so this also asserts the
+        # archive is adopted rather than re-created.
+        self.assertEqual(len(self.gh.releases), 1)
+
+    def test_open_creates_the_archive_at_the_commit_under_test(self) -> None:
+        cli.main(["open"])
+        ((tag, release),) = self.gh.releases.items()
+        self.assertEqual(len(tag), 32)
+        self.assertEqual(release["target"], ENVIRONMENT["GITHUB_SHA"])
+        # The release body must point back at the run and the ledger issue.
+        self.assertIn(ENVIRONMENT["GITHUB_SHA"], release["notes"])
+        self.assertIn("/issues/1", release["notes"])
 
     def test_missing_report_records_an_explicit_absence(self) -> None:
         cli.main(["open"])

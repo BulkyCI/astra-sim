@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import unittest
 from collections.abc import Sequence
+from dataclasses import replace
 
 from ci_ledger.model import (
     COMMENT_HARD_LIMIT,
+    RELEASE_TAG_BYTES,
+    RELEASE_TAG_PERSON,
     Create,
     Delete,
     LedgerError,
@@ -134,6 +139,61 @@ class MarkerRoundTrip(unittest.TestCase):
         self.assertEqual(len({status.badge for status in Status}), len(Status))
 
 
+class ReleaseTag(unittest.TestCase):
+    """The run's permanent-archive identity."""
+
+    def test_shape_is_git_legal(self) -> None:
+        tag = CONTEXT.release_tag
+        self.assertEqual(len(tag), 32)
+        self.assertNotIn("=", tag)
+        # Lowercase base32 only: refs are paths, and a case-insensitive
+        # filesystem would collide two tags differing only in case.
+        self.assertTrue(set(tag) <= set("abcdefghijklmnopqrstuvwxyz234567"))
+        self.assertEqual(tag, tag.lower())
+
+    def test_is_a_pure_function_of_the_run(self) -> None:
+        self.assertEqual(CONTEXT.release_tag, replace(CONTEXT).release_tag)
+
+    def test_every_identity_field_changes_the_tag(self) -> None:
+        for field, value in (
+            ("repository", "other/repo"),
+            ("sha", "f" * 40),
+            ("run_id", "999"),
+            ("run_attempt", "7"),
+        ):
+            with self.subTest(field=field):
+                self.assertNotEqual(
+                    CONTEXT.release_tag, replace(CONTEXT, **{field: value}).release_tag
+                )
+
+    def test_presentation_fields_do_not_change_the_tag(self) -> None:
+        # The tag names the run, not how the run is displayed.
+        for field, value in (("actor", "someone-else"), ("workflow", "Other")):
+            with self.subTest(field=field):
+                self.assertEqual(
+                    CONTEXT.release_tag, replace(CONTEXT, **{field: value}).release_tag
+                )
+
+    def test_personalization_separates_the_domain(self) -> None:
+        payload = (
+            f"{CONTEXT.repository}\0{CONTEXT.sha}\0"
+            f"{CONTEXT.run_id}\0{CONTEXT.run_attempt}"
+        ).encode()
+        plain = (
+            base64.b32encode(
+                hashlib.blake2b(payload, digest_size=RELEASE_TAG_BYTES).digest()
+            )
+            .decode()
+            .lower()
+        )
+        self.assertNotEqual(CONTEXT.release_tag, plain)
+
+    def test_person_fits_the_blake2b_limit(self) -> None:
+        # blake2b raises ValueError above 16 bytes; keep that a test, not a
+        # runtime surprise inside a workflow.
+        self.assertLessEqual(len(RELEASE_TAG_PERSON), 16)
+
+
 class RenderSection(unittest.TestCase):
     def test_every_part_fits_the_github_limit(self) -> None:
         parts = render_section(Section("huge", "Huge", "z" * 400_000), CONTEXT)
@@ -231,6 +291,7 @@ class IssueBody(unittest.TestCase):
         self.assertIn(CONTEXT.commit_url, body)
         self.assertIn(CONTEXT.run_url, body)
         self.assertIn(CONTEXT.tree_url, body)
+        self.assertIn(CONTEXT.release_url(CONTEXT.release_tag), body)
         self.assertTrue(issue_matches_run(body, CONTEXT.repository, CONTEXT.run_id))
 
     def test_finalized_body_lists_every_section(self) -> None:

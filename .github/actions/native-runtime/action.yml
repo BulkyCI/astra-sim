@@ -4,6 +4,14 @@ description: >
   job compiled once for this run. A consumer never compiles, so a run pays for
   exactly one ns-3 build no matter how many evaluations it schedules.
 
+inputs:
+  artifact:
+    description: >
+      Name of the artifact published by the `native-build` job. Passed in
+      rather than rebuilt from `github.run_id` so producer and consumer share
+      one definition site.
+    required: true
+
 runs:
   using: composite
   steps:
@@ -17,7 +25,7 @@ runs:
   - name: Download the native runtime
     uses: actions/download-artifact@v8
     with:
-      name: native-runtime-${{ github.run_id }}
+      name: ${{ inputs.artifact }}
 
   - name: Unpack the native runtime
     shell: bash

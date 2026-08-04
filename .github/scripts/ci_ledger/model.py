@@ -19,11 +19,18 @@ Two operations carry the design:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
+
+# 20 bytes render as exactly 32 base32 characters with no `=` padding, drawn
+# from `a-z2-7` once lowercased — every one of them legal in a git ref.
+RELEASE_TAG_BYTES = 20
+# blake2b caps `person` at 16 bytes; this is 13.
+RELEASE_TAG_PERSON = b"astra-sim-run"
 
 # GitHub rejects an issue-comment body longer than 65_536 characters ("Body is
 # too long"). The budget reserves headroom for the marker, heading, and
@@ -34,9 +41,11 @@ COMMENT_BODY_BUDGET = 60_000
 # There is no API for issue file attachments; only the web uploader accepts
 # them. Binary reproducibility bundles therefore stay in Actions artifacts.
 ATTACHMENT_NOTE = (
-    "GitHub has no API for issue file attachments, so binary bundles remain "
-    "Actions artifacts (retention-bound). This issue is the permanent textual "
-    "record; each comment is capped at 65,536 characters and paginated."
+    "GitHub has no API for issue file attachments, so this issue holds the "
+    "permanent textual record — each comment capped at 65,536 characters and "
+    "paginated — while the binary reproducibility bundles are published as "
+    "assets on the release linked above, which does not expire the way an "
+    "Actions artifact does."
 )
 
 _KEY_PATTERN = re.compile(r"\A[A-Za-z0-9._:\-]{1,96}\Z")
@@ -203,6 +212,38 @@ class RunContext:
 
     def issue_url(self, number: int) -> str:
         return f"{self.server_url}/{self.repository}/issues/{number}"
+
+    @property
+    def release_tag(self) -> str:
+        """Git tag naming this run's permanent release.
+
+        A pure function of the run's identity, so anyone holding the
+        repository, commit, run and attempt can derive the tag offline and
+        fetch the release without querying the API first.
+
+        `run_attempt` is part of the identity, so re-running every job mints a
+        new immutable release. Re-running only the failed jobs does not: the
+        job that evaluates this property is not re-executed, its output is
+        reused, and the surviving assets land in the original release. That
+        only holds because the tag is computed once and passed downstream as an
+        opaque value — recomputing it per job would split one experiment across
+        two releases.
+        """
+        payload = f"{self.repository}\0{self.sha}\0{self.run_id}\0{self.run_attempt}"
+        digest = hashlib.blake2b(
+            payload.encode("utf-8"),
+            digest_size=RELEASE_TAG_BYTES,
+            # Domain separation belongs in the hash, not the message: a message
+            # that happens to start with these bytes cannot forge the domain.
+            person=RELEASE_TAG_PERSON,
+        ).digest()
+        # Lowercase is not cosmetic. Refs are stored as paths, so on a
+        # case-insensitive filesystem two tags differing only in case would
+        # collide as loose refs. One case makes that unrepresentable.
+        return base64.b32encode(digest).decode("ascii").lower()
+
+    def release_url(self, tag: str) -> str:
+        return f"{self.server_url}/{self.repository}/releases/tag/{tag}"
 
     @property
     def title(self) -> str:
@@ -415,6 +456,10 @@ def render_issue_body(
         "| --- | --- |",
         f"| Commit | [`{context.sha}`]({context.commit_url}) |",
         f"| Tree | [browse at this commit]({context.tree_url}) |",
+        (
+            f"| Archive | [`{context.release_tag}`]"
+            f"({context.release_url(context.release_tag)}) |"
+        ),
         f"| Workflow run | [#{context.run_number}]({context.run_url}) |",
         f"| Attempt | [{context.run_attempt}]({context.attempt_url}) |",
         f"| Workflow | `{context.workflow}` |",

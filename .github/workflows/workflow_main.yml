@@ -29,14 +29,20 @@ jobs:
     name: Open the experiment ledger
     runs-on: ubuntu-22.04
     timeout-minutes: 5
+    # Opens the run's release as well as its issue, so it needs contents:write.
+    # It runs only `gh` and finishes in under a minute.
     permissions:
-      contents: read
+      contents: write
       issues: write
     outputs:
       # `0` is the disabled ledger. Emitting it unconditionally keeps every
       # downstream `needs:` edge live; a skipped job would silently skip the
       # whole graph behind it.
       issue: ${{ steps.open.outputs.issue || 0 }}
+      # The run's identity, evaluated exactly once. Everything downstream takes
+      # it as an opaque value; recomputing it per job would split a partial
+      # re-run across two releases.
+      release_tag: ${{ steps.open.outputs.release_tag }}
     steps:
     - name: Check out the ledger tool
       uses: actions/checkout@v7
@@ -45,7 +51,7 @@ jobs:
         sparse-checkout: .github/scripts
         sparse-checkout-cone-mode: false
 
-    - name: Open the run's ledger issue
+    - name: Open the run's ledger issue and permanent archive
       id: open
       # A fork pull request holds a read-only token, and a proposal is not an
       # experiment; those runs are recorded by artifacts and the run summary.
@@ -87,6 +93,10 @@ jobs:
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    outputs:
+      # One definition site for the name, the same discipline the ledger issue
+      # and release tag follow. Producer and consumer cannot drift apart.
+      runtime_artifact: native-runtime-${{ github.run_id }}
 
     steps:
     - name: Check out source and submodules
@@ -111,7 +121,7 @@ jobs:
     - name: Upload the native runtime
       uses: actions/upload-artifact@v7
       with:
-        name: native-runtime-${{ github.run_id }}
+        name: ${{ format('native-runtime-{0}', github.run_id) }}
         path: native-runtime.tar.gz
         # Already gzipped; re-compressing costs minutes and saves nothing.
         compression-level: 0
@@ -120,12 +130,13 @@ jobs:
 
   native-integration:
     name: Analytical regression and ns-3 smoke
-    needs: [ native-build, ledger ]
+    needs: native-build
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    # Runs compiled simulator code, so it holds no write scope. Recording
+    # happens in archive-native-integration.
     permissions:
       contents: read
-      issues: write
 
     steps:
     - name: Check out source
@@ -141,6 +152,8 @@ jobs:
 
     - name: Unpack the native runtime built once for this run
       uses: ./.github/actions/native-runtime
+      with:
+        artifact: ${{ needs.native-build.outputs.runtime_artifact }}
 
     - name: Run analytical regression suite
       run: bash ./.github/workflows/test.sh
@@ -168,16 +181,6 @@ jobs:
           --run-dir runs/ring_3d/smoke_8 \
           --output runs/ring_3d/smoke_8/research_report.md
         cat runs/ring_3d/smoke_8/research_report.md >> "$GITHUB_STEP_SUMMARY"
-
-    - name: Persist the 3D Ring researcher report
-      if: always()
-      uses: ./.github/actions/ledger-publish
-      with:
-        issue: ${{ needs.ledger.outputs.issue }}
-        key: native-integration
-        title: Analytical regression and ns-3 smoke
-        body-file: runs/ring_3d/smoke_8/research_report.md
-        status: ${{ job.status }}
 
     - name: Upload 3D Ring researcher report
       if: always()
@@ -211,18 +214,82 @@ jobs:
         path: runs/ring_3d/llama3_70b_16
         if-no-files-found: ignore
 
+  archive-native-integration:
+    name: Record the analytical regression and ns-3 smoke
+    needs: [ native-integration, ledger ]
+    if: ${{ always() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    # A sink job: the only place a write scope exists for this branch of the
+    # graph. It runs `gh` and `tar` over downloaded bundles and executes
+    # nothing from them.
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+    - name: Check out the publishing tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: |
+          .github/actions
+          .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Fetch the researcher report
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: ring-3d-research-report-${{ github.run_id }}
+        path: runs/ring_3d/smoke_8
+
+    - name: Persist the 3D Ring researcher report
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ needs.ledger.outputs.issue }}
+        key: native-integration
+        title: Analytical regression and ns-3 smoke
+        body-file: runs/ring_3d/smoke_8/research_report.md
+        status: ${{ needs.native-integration.result }}
+
+    - name: Archive the 3D Ring smoke bundle
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ring-3d-smoke-results-${{ github.run_id }}
+        asset-name: ring-3d-smoke-results
+
+    - name: Archive the retry-exhaustion bundle
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ring-3d-retry-exhaustion-${{ github.run_id }}
+        asset-name: ring-3d-retry-exhaustion
+
+    - name: Archive the Llama 3 70B-class bucket trace
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ring-3d-llama3-70b-16-trace-${{ github.run_id }}
+        asset-name: ring-3d-llama3-70b-16-trace
+
   paired-llama3-evaluation:
     name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
     needs: [ native-build, ledger ]
+    # Ceiling for the called workflow, not a grant to the simulator. Permissions
+    # can only be reduced down the chain, and ns3-evaluation.yml's `evaluate`
+    # job declares `contents: read`; only its `archive` job takes the write.
     permissions:
-      contents: read
+      contents: write
       issues: write
     strategy:
       fail-fast: false
-      # Five matched pairs, the separate historical Phase-1 reference, native
-      # integration, and two manually dispatched structural studies yield at
-      # most nine active jobs.
-      # This remains below the account-level concurrency limit of ten.
+      # Equal to the matrix size, so this currently constrains nothing; it
+      # takes effect only if seeds are added. The real budget is the account
+      # limit of 20 concurrent jobs on Free (40 on Pro), shared across every
+      # repository in the account:
+      # https://docs.github.com/en/actions/reference/limits
       max-parallel: 5
       matrix:
         # Consecutive nine-digit chunks of π's decimal expansion. They are
@@ -235,6 +302,8 @@ jobs:
       run_directory: runs/ring_3d/llama3_70b_16_comparison/seed_${{ matrix.seed }}
       artifact_name: ring-3d-llama3-70b-16-comparison-seed-${{ matrix.seed }}
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
       ledger_key: llama3-70b-16-seed-${{ matrix.seed }}
       comparison: true
       comparison_seed: ${{ matrix.seed }}
@@ -245,8 +314,9 @@ jobs:
   historical-phase1-native-reference:
     name: Historical Phase-1 64-rank native reference pair
     needs: [ native-build, ledger ]
+    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
     permissions:
-      contents: read
+      contents: write
       issues: write
     # This independent, communication-only reference pair deliberately runs
     # alongside the Llama congestion matrix. Its profile reproduces the old
@@ -259,6 +329,8 @@ jobs:
       run_directory: runs/ring_3d/dblp_phase1_effnet_64dp_comparison
       artifact_name: ring-3d-dblp-phase1-effnet-64dp-comparison
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
       ledger_key: dblp-phase1-effnet-64dp
       comparison: true
       comparison_seed: 314159265
@@ -268,12 +340,11 @@ jobs:
 
   aggregate-llama3-evaluation:
     name: Aggregate five-seed Llama 3 70B congestion evaluation
-    needs: [ paired-llama3-evaluation, ledger ]
+    needs: paired-llama3-evaluation
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: read
-      issues: write
 
     steps:
     - name: Check out source
@@ -305,16 +376,6 @@ jobs:
         cat runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md \
           >> "$GITHUB_STEP_SUMMARY"
 
-    - name: Persist the aggregate comparison report
-      if: always()
-      uses: ./.github/actions/ledger-publish
-      with:
-        issue: ${{ needs.ledger.outputs.issue }}
-        key: llama3-70b-16-aggregate
-        title: Aggregate five-seed Llama 3 70B congestion evaluation
-        body-file: runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md
-        status: ${{ job.status }}
-
     - name: Upload aggregate comparison report
       if: always()
       uses: actions/upload-artifact@v7
@@ -323,12 +384,56 @@ jobs:
         path: runs/ring_3d/llama3_70b_16_comparison/aggregate
         if-no-files-found: ignore
 
+  archive-aggregate-llama3-evaluation:
+    name: Record the five-seed aggregate evaluation
+    needs: [ aggregate-llama3-evaluation, ledger ]
+    if: ${{ always() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+    - name: Check out the publishing tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: |
+          .github/actions
+          .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Fetch the aggregate report
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_16_comparison/aggregate
+
+    - name: Persist the aggregate comparison report
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ needs.ledger.outputs.issue }}
+        key: llama3-70b-16-aggregate
+        title: Aggregate five-seed Llama 3 70B congestion evaluation
+        body-file: runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md
+        status: ${{ needs.aggregate-llama3-evaluation.result }}
+
+    - name: Archive the aggregate bundle
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
+        asset-name: ring-3d-llama3-70b-16-comparison-aggregate
+
   model-100b-256-clos-evaluation:
     name: 100B 256-card Clos structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
     needs: [ native-build, ledger ]
+    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
     permissions:
-      contents: read
+      contents: write
       issues: write
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
@@ -337,6 +442,8 @@ jobs:
       run_directory: runs/ring_3d/model_100b_256_clos
       artifact_name: ring-3d-model-100b-256-clos
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
       ledger_key: model-100b-256-clos
       comparison: false
       execution_timeout_minutes: 320
@@ -347,8 +454,9 @@ jobs:
     name: 100B 256-card Ring structural evaluation
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
     needs: [ native-build, ledger ]
+    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
     permissions:
-      contents: read
+      contents: write
       issues: write
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
@@ -357,6 +465,8 @@ jobs:
       run_directory: runs/ring_3d/model_100b_256_ring
       artifact_name: ring-3d-model-100b-256-ring
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
       ledger_key: model-100b-256-ring
       comparison: false
       execution_timeout_minutes: 320
@@ -371,9 +481,11 @@ jobs:
     - python-quality
     - native-build
     - native-integration
+    - archive-native-integration
     - paired-llama3-evaluation
     - historical-phase1-native-reference
     - aggregate-llama3-evaluation
+    - archive-aggregate-llama3-evaluation
     - model-100b-256-clos-evaluation
     - model-100b-256-ring-evaluation
     runs-on: ubuntu-22.04

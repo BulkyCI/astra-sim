@@ -76,6 +76,32 @@ class IssueCommands(unittest.TestCase):
         self.assertIn("--force", command)
 
 
+class ReleaseCommands(unittest.TestCase):
+    def test_create_pins_the_commit_and_never_becomes_latest(self) -> None:
+        runner = RecordingRunner()
+        _gh(runner).create_release("abc32", "deadbeef", "Run 42", "notes body")
+        command, stdin = runner.calls[0]
+        self.assertEqual(command[:4], ["gh", "release", "create", "abc32"])
+        self.assertEqual(command[command.index("--target") + 1], "deadbeef")
+        # An experiment must never displace the repository's real release.
+        self.assertIn("--prerelease", command)
+        self.assertIn("--latest=false", command)
+        self.assertEqual(command[command.index("--notes-file") + 1], "-")
+        self.assertEqual(stdin, "notes body")
+
+    def test_existence_check_is_total(self) -> None:
+        self.assertTrue(
+            _gh(RecordingRunner(stdout='{"tagName":"abc32"}')).release_exists("abc32")
+        )
+        # `gh release view` exits non-zero when absent; that is an answer, not
+        # an error to propagate.
+        self.assertFalse(
+            _gh(
+                RecordingRunner(returncode=1, stderr="release not found")
+            ).release_exists("abc32")
+        )
+
+
 class CommentCommands(unittest.TestCase):
     def test_listing_slurps_every_page_into_one_document(self) -> None:
         pages = json.dumps(

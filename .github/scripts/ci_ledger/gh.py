@@ -117,6 +117,39 @@ class Gh:
         else:
             self._run(self._repo("issue", "reopen", str(number)))
 
+    # -- releases --------------------------------------------------------
+
+    def release_exists(self, tag: str) -> bool:
+        try:
+            self._run(self._repo("release", "view", tag) + ["--json", "tagName"])
+        except GhError:
+            # `gh release view` exits non-zero only when the release is absent
+            # or unreadable; either way this run must create it.
+            return False
+        return True
+
+    def create_release(self, tag: str, target: str, title: str, notes: str) -> None:
+        """Open the run's permanent archive at a specific commit.
+
+        `--prerelease --latest=false` keeps an experiment from ever displacing
+        the repository's real "Latest" release, and `--target` pins the tag to
+        the exact commit under test rather than to the default branch.
+        """
+        self._run(
+            self._repo("release", "create", tag)
+            + [
+                "--target",
+                target,
+                "--title",
+                title,
+                "--notes-file",
+                "-",
+                "--prerelease",
+                "--latest=false",
+            ],
+            stdin=notes,
+        )
+
     # `gh` has porcelain for creating a comment but not for listing, editing, or
     # deleting one, so those three fall through to `gh api`.
 

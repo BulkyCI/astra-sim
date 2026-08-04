@@ -47,6 +47,7 @@ class NS3BackendCompletionTracker {
     NS3BackendCompletionTracker(int num_ranks) {
         num_ranks_ = num_ranks;
         num_unfinished_ranks_ = num_ranks;
+        last_unfinished_rank_count_ = num_ranks;
         completion_tracker_ = vector<int>(num_ranks, 0);
     }
 
@@ -77,7 +78,20 @@ class NS3BackendCompletionTracker {
 
   private:
     static constexpr uint64_t kLivenessCheckpointIntervalNs = 10000000;
+    // A run whose network is idle can still be making progress inside the
+    // system layer, but only for as long as compute and memory events take.
+    // Ten simulated seconds of an idle network with no completion at all is a
+    // deadlock, not slow progress, and the checkpoint is the only event left
+    // to observe it: without this the simulator advances its clock forever at
+    // no wall-clock cost and the job dies on its CI timeout with no diagnosis.
+    static constexpr uint64_t kQuiescentCheckpointsBeforeStall = 1000;
     static const Time kLivenessCheckpointInterval;
+
+    bool is_quiescent() const {
+        return active_qp_count() == 0 && !has_pending_background_traffic() &&
+               completed_qp_count() == last_completed_qp_count_ &&
+               num_unfinished_ranks_ == last_unfinished_rank_count_;
+    }
 
     void liveness_checkpoint() {
         AstraSim::LoggerFactory::get_logger("network")->info(
@@ -93,6 +107,19 @@ class NS3BackendCompletionTracker {
             !has_pending_background_traffic()) {
             AstraSim::LoggerFactory::get_logger("network")->info(
                 "Transport failure reached quiescence; stopping simulation.");
+            Simulator::Stop();
+            return;
+        }
+        quiescent_checkpoints_ = is_quiescent() ? quiescent_checkpoints_ + 1 : 0;
+        last_completed_qp_count_ = completed_qp_count();
+        last_unfinished_rank_count_ = num_unfinished_ranks_;
+        if (quiescent_checkpoints_ >= kQuiescentCheckpointsBeforeStall) {
+            AstraSim::LoggerFactory::get_logger("network")->critical(
+                "Simulation stalled: no flow or rank completed in the last {} "
+                "ns of simulated time while {} of {} ranks were unfinished and "
+                "no flow was in flight.",
+                kQuiescentCheckpointsBeforeStall * kLivenessCheckpointIntervalNs,
+                num_unfinished_ranks_, num_ranks_);
             Simulator::Stop();
             return;
         }
@@ -116,6 +143,9 @@ class NS3BackendCompletionTracker {
 
     int num_ranks_;
     int num_unfinished_ranks_;
+    uint64_t last_completed_qp_count_ = 0;
+    int last_unfinished_rank_count_ = 0;
+    uint64_t quiescent_checkpoints_ = 0;
     vector<int> completion_tracker_;
 };
 
@@ -193,8 +223,22 @@ class ASTRASimNetwork : public AstraSim::AstraNetworkAPI {
         if (request == nullptr) {
             throw runtime_error("ns-3 sim_send requires a sim_request");
         }
-        send_flow(src_id, dst_id, message_size, msg_handler, fun_arg, tag,
-                  *request);
+        // Sys::call_events swallows exceptions raised by a callable, so an
+        // unstartable flow has to be recorded here or the run would deadlock
+        // silently instead of failing.
+        try {
+            send_flow(src_id, dst_id, message_size, msg_handler, fun_arg, tag,
+                      *request);
+        } catch (const exception& error) {
+            const string message = "Unable to start flow " +
+                                   to_string(src_id) + "->" +
+                                   to_string(dst_id) + ": " + error.what();
+            AstraSim::LoggerFactory::get_logger("network")->critical(
+                "ns-3 bridge failure at {} ns; stopping simulation: {}",
+                Simulator::Now().GetNanoSeconds(), message);
+            record_bridge_failure(message);
+            throw;
+        }
         return 0;
     }
 
@@ -410,6 +454,11 @@ int main(int argc, char* argv[]) {
     Simulator::Run();
     AstraSimNs3::finalize_experiment_telemetry();
     Simulator::Destroy();
+    if (has_bridge_failure()) {
+        cerr << "Simulation stopped after an ns-3 bridge failure: "
+             << current_bridge_failure_message() << "\n";
+        return 1;
+    }
     if (has_transport_failure()) {
         cerr << "Simulation stopped after explicit transport failure: "
              << current_transport_failure_message() << "\n";

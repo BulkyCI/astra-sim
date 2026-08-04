@@ -262,11 +262,12 @@ def _timing_by_domain_and_kind(
     }
 
 
-def _flow_key(row: dict[str, str]) -> tuple[int, int, int]:
+def _flow_key(row: dict[str, str]) -> tuple[int, int, int, int]:
     return (
         _as_int(row, "src"),
         _as_int(row, "dst"),
         _as_int(row, "source_port"),
+        _as_int(row, "start_time_ns"),
     )
 
 
@@ -278,8 +279,13 @@ def _fct_node_id(encoded_address: str) -> int:
     return (address >> 8) & 0xFFFF
 
 
-def _load_fct_records(path: Path) -> dict[tuple[int, int, int], dict[str, int]]:
-    records: dict[tuple[int, int, int], dict[str, int]] = {}
+def _load_fct_records(
+    path: Path,
+) -> dict[tuple[int, int, int, int], dict[str, int]]:
+    # A source port names a live five-tuple, not a flow: the ns-3 bridge
+    # reuses one once its queue pair terminates, so only the port together
+    # with the flow's start time identifies a flow across a whole run.
+    records: dict[tuple[int, int, int, int], dict[str, int]] = {}
     for line_number, line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
     ):
@@ -296,7 +302,12 @@ def _load_fct_records(path: Path) -> dict[tuple[int, int, int], dict[str, int]]:
             duration,
             standalone,
         ) = fields
-        key = (_fct_node_id(source), _fct_node_id(destination), int(source_port))
+        key = (
+            _fct_node_id(source),
+            _fct_node_id(destination),
+            int(source_port),
+            int(start),
+        )
         if key in records:
             raise ValueError("FCT records contain a duplicate flow key")
         try:

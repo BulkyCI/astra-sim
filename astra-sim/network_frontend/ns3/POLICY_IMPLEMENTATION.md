@@ -101,6 +101,11 @@ fields are:
 | `start_time_ns`, `end_time_ns` | Simulated QP interval |
 | `terminal_outcome` / `failure_reason` | Explicit transport terminal state; failures invalidate primary latency analysis |
 
+`source_port` identifies a live five-tuple, not a flow. ns-3 owns only the
+range `[10000, 65535]` per ordered host pair, so the bridge returns a port to
+that pair once its queue pair terminates and reuses it later in the run. Join
+flow telemetry against `fct.txt` on `(src, dst, source_port, start_time_ns)`.
+
 `collective_events.csv` is the source for native logical collective latency.
 Do not substitute P99 of only admitted QPs: treatment changes that population.
 

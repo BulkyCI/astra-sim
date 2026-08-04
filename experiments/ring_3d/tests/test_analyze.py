@@ -567,6 +567,29 @@ class Ring3DAnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "physical-byte mismatch"):
                 summarize(telemetry, fct)
 
+    def test_summary_joins_reused_source_ports(self) -> None:
+        # The ns-3 bridge returns a source port to its host pair once the
+        # queue pair terminates, so one port names several flows in a run.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            flows = []
+            for index, start in enumerate((100, 400, 700)):
+                flow = self.valid_shed_flow()
+                flow["source_port"] = "10000"
+                flow["message_sequence"] = str(index)
+                flow["start_time_ns"] = str(start)
+                flow["end_time_ns"] = str(start + 10 * (index + 1))
+                flows.append(flow)
+            self.write_telemetry(telemetry, flows)
+            fct = self.write_fct(root / "ns3", flows)
+
+            summary = summarize(telemetry, fct)
+
+            self.assertEqual(summary["fct_join"]["status"], "verified")
+            self.assertEqual(summary["fct_join"]["fct_record_count"], 3)
+            self.assertEqual(summary["fct_join"]["telemetry_flow_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

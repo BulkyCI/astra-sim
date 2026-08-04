@@ -19,6 +19,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <set>
 #include <ns3/rdma-client-helper.h>
 #include <ns3/rdma-client.h>
 #include <ns3/rdma-driver.h>
@@ -86,9 +87,52 @@ uint64_t pending_background_flows = 0;
 uint64_t completed_qps = 0;
 bool transport_failure = false;
 string transport_failure_message;
+bool bridge_failure = false;
+string bridge_failure_message;
 
 FlowKey make_flow_key(uint16_t source_port, int src_id, int dst_id) {
     return make_pair(source_port, make_pair(src_id, dst_id));
+}
+
+// ns-3 gives every ordered host pair the source-port range [10000, 65535], and
+// `common.h` seeds `portNumber` at the bottom of that range. A source port only
+// names a live five-tuple: `qp_finish`/`qp_fail` delete both the sender and the
+// receiver queue pair, after which the port is free again. Allocation therefore
+// walks the range round-robin over the live set instead of consuming it
+// monotonically, because a long chained collective sends every message of every
+// step to the same ring neighbour and would otherwise cap one host pair at
+// 55536 flows for the whole simulation.
+constexpr uint16_t kFirstSourcePort = 10000;
+constexpr uint32_t kSourcePortRange =
+    static_cast<uint32_t>(numeric_limits<uint16_t>::max()) + 1 -
+    kFirstSourcePort;
+
+map<pair<int, int>, set<uint16_t>> live_source_ports;
+
+uint16_t acquire_source_port(int src_id, int dst_id) {
+    auto& live = live_source_ports[make_pair(src_id, dst_id)];
+    uint16_t& cursor = portNumber[src_id][dst_id];
+    for (uint32_t attempt = 0; attempt < kSourcePortRange; ++attempt) {
+        if (cursor < kFirstSourcePort) {
+            cursor = kFirstSourcePort;
+        }
+        const uint16_t candidate = cursor;
+        cursor = candidate == numeric_limits<uint16_t>::max()
+                     ? kFirstSourcePort
+                     : static_cast<uint16_t>(candidate + 1);
+        if (live.insert(candidate).second) {
+            return candidate;
+        }
+    }
+    throw runtime_error("Every source port of the host pair is already live");
+}
+
+void release_source_port(int src_id, int dst_id, uint16_t source_port) {
+    const auto pair_ports = live_source_ports.find(make_pair(src_id, dst_id));
+    if (pair_ports == live_source_ports.end() ||
+        pair_ports->second.erase(source_port) != 1) {
+        throw runtime_error("Released source port was not live");
+    }
 }
 
 void account_physical_bytes(int src_id, int dst_id, uint64_t bytes) {
@@ -114,6 +158,28 @@ bool has_transport_failure() {
 
 const string& current_transport_failure_message() {
     return transport_failure_message;
+}
+
+bool has_bridge_failure() {
+    return bridge_failure;
+}
+
+const string& current_bridge_failure_message() {
+    return bridge_failure_message;
+}
+
+// `AstraSim::Sys::call_events` wraps every callable in a catch-all that only
+// logs, so an exception raised while starting a flow would otherwise leave the
+// system layer waiting forever on a message ns-3 never carries. A bridge
+// failure is an internal error, never a modeled transport outcome: it records
+// the first cause and ends the run instead of producing a partial result that
+// looks like a completed experiment.
+void record_bridge_failure(const string& message) {
+    if (!bridge_failure) {
+        bridge_failure = true;
+        bridge_failure_message = message;
+    }
+    Simulator::Stop();
 }
 
 void register_logical_send_event(int src_id,
@@ -142,11 +208,8 @@ void start_rdma_flow(AstraSimNs3::FlowRecord flow,
     }
     AstraSimNs3::validate_priority_group(flow.priority_group,
                                          "flow priority group");
-    if (portNumber[flow.src][flow.dst] == numeric_limits<uint16_t>::max()) {
-        throw runtime_error("Source-port space exhausted for host pair");
-    }
 
-    const uint16_t port = portNumber[flow.src][flow.dst]++;
+    const uint16_t port = acquire_source_port(flow.src, flow.dst);
     flow.source_port = port;
     flow.start_time_ns = Simulator::Now().GetNanoSeconds();
     if (flow.kind != AstraSimNs3::FlowKind::BackgroundMicroburst) {
@@ -395,6 +458,11 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     }
     AstraSimNs3::experiment_telemetry.record_flow(flow);
     active_flow_registry.erase(active);
+    // Release last: the ASTRA completion handlers above can start the next
+    // message inline, and `RdmaHw::QpComplete` erases this five-tuple from the
+    // sender only after this callback returns. Holding the port until here
+    // keeps a nested send from reusing a port that is about to be torn down.
+    release_source_port(sid, did, q->sport);
     ++completed_qps;
 }
 
@@ -450,6 +518,7 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
 
     AstraSimNs3::experiment_telemetry.record_flow(flow);
     active_flow_registry.erase(active);
+    release_source_port(sid, did, q->sport);
     transport_failure = true;
     transport_failure_message =
         "QP retry budget exhausted for " + to_string(sid) + "->" +

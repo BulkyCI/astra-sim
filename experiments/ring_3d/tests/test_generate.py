@@ -319,6 +319,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
         for mode in ("ftd", "bts"):
             document = json.loads(self.profile_path.read_text(encoding="utf-8"))
             document["network"]["packet_trimming"] = {"mode": mode}
+            document["network"]["fabric"] = {
+                "buffer_size_mb": 2,
+                "pfc_enabled": False,
+                "headroom_factor": 0,
+                "data_queue_bytes": 262144,
+                "trimmed_queue_bytes": 65536,
+            }
             document["network"]["transport_recovery"] = {
                 "retransmission_timeout_ns": 500,
                 "max_retransmission_retries": 3,
@@ -359,6 +366,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "mode": "ftd",
                 "trimmed_queue": queue,
             }
+            document["network"]["fabric"] = {
+                "buffer_size_mb": 2,
+                "pfc_enabled": False,
+                "headroom_factor": 0,
+                "data_queue_bytes": 262144,
+                "trimmed_queue_bytes": 65536,
+            }
             document["network"]["transport_recovery"] = {
                 "retransmission_timeout_ns": 500,
                 "max_retransmission_retries": 3,
@@ -376,6 +390,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "mode": "ftd",
                 "trimmed_queue_weight": weight,
             }
+            document["network"]["fabric"] = {
+                "buffer_size_mb": 2,
+                "pfc_enabled": False,
+                "headroom_factor": 0,
+                "data_queue_bytes": 262144,
+                "trimmed_queue_bytes": 65536,
+            }
             document["network"]["transport_recovery"] = {
                 "retransmission_timeout_ns": 500,
                 "max_retransmission_retries": 3,
@@ -392,6 +413,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
             "mode": "ftd",
             "min_trim_size_bytes": 16,
         }
+        document["network"]["fabric"] = {
+            "buffer_size_mb": 2,
+            "pfc_enabled": False,
+            "headroom_factor": 0,
+            "data_queue_bytes": 262144,
+            "trimmed_queue_bytes": 65536,
+        }
         document["network"]["transport_recovery"] = {
             "retransmission_timeout_ns": 500,
             "max_retransmission_retries": 3,
@@ -405,11 +433,93 @@ class Ring3DGeneratorTests(unittest.TestCase):
     def test_packet_trimming_requires_shared_recovery(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["network"]["packet_trimming"] = {"mode": "ftd"}
+        document["network"]["fabric"] = {
+            "buffer_size_mb": 2,
+            "pfc_enabled": False,
+            "headroom_factor": 0,
+            "data_queue_bytes": 262144,
+            "trimmed_queue_bytes": 65536,
+        }
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "invalid.json"
             profile_path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "transport_recovery"):
                 load_profile(profile_path)
+
+    def test_trimming_requires_an_explicit_best_effort_fabric(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["packet_trimming"] = {"mode": "ftd"}
+        document["network"]["transport_recovery"] = {
+            "retransmission_timeout_ns": 500,
+            "max_retransmission_retries": 3,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "network.fabric"):
+                load_profile(profile_path)
+
+    def test_trimming_rejects_a_fabric_that_keeps_pfc(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["packet_trimming"] = {"mode": "ftd"}
+        document["network"]["fabric"] = {
+            "buffer_size_mb": 2,
+            "pfc_enabled": True,
+            "data_queue_bytes": 262144,
+        }
+        document["network"]["transport_recovery"] = {
+            "retransmission_timeout_ns": 500,
+            "max_retransmission_retries": 3,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "pfc_enabled"):
+                load_profile(profile_path)
+
+    def test_disabled_pfc_requires_zero_headroom(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["fabric"] = {
+            "buffer_size_mb": 2,
+            "pfc_enabled": False,
+            "headroom_factor": 3,
+            "data_queue_bytes": 262144,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "headroom_factor"):
+                load_profile(profile_path)
+
+    def test_best_effort_fabric_requires_transport_recovery(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["fabric"] = {
+            "buffer_size_mb": 2,
+            "pfc_enabled": False,
+            "headroom_factor": 0,
+            "data_queue_bytes": 262144,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "transport_recovery"):
+                load_profile(profile_path)
+
+    def test_comparison_arms_share_one_fabric(self) -> None:
+        # Buffer depth decides whether incast becomes queueing delay or loss, so
+        # it must be identical across every arm or it confounds the result.
+        fabrics = []
+        for filename in (
+            "uec_trim_ftd_8.json",
+            "bts_trim_8.json",
+            "besteffort_baseline_8.json",
+        ):
+            profile = load_profile(
+                REPOSITORY_ROOT / "experiments/ring_3d/profiles" / filename
+            )
+            self.assertIsNotNone(profile.network.fabric)
+            fabrics.append(profile.network.fabric)
+        self.assertEqual(len(set(fabrics)), 1)
 
     def test_checked_in_trim_profiles_select_expected_modes(self) -> None:
         # Only "ftd" is UEC 1.0.3 trimming, so only that profile is named "uec".

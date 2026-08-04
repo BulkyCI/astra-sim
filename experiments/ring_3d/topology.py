@@ -37,6 +37,8 @@ MAX_PRIORITY_GROUP = 7
 # trimmed packets, and caps fair-queueing at 50%, because an unrestricted
 # trimmed class can drive congestion collapse.
 DEFAULT_TRIMMED_QUEUE_WEIGHT = 25
+DEFAULT_BUFFER_SIZE_MB = 32
+DEFAULT_HEADROOM_FACTOR = 3
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,34 @@ class PacketTrimming:
 
 
 @dataclass(frozen=True)
+class SwitchFabric:
+    """Switch buffer and flow-control regime.
+
+    These knobs decide *how* congestion manifests, so they must be held
+    constant across every arm of a comparison. A deep buffer turns incast into
+    queueing delay and nothing is ever dropped; a shallow best-effort buffer
+    turns it into loss that trimming reports. UEC 1.0.3 section 3.6.4.5
+    excludes PFC from best-effort networks, and section 4.1 sizes data queues
+    at roughly one bandwidth-delay product.
+    """
+
+    buffer_size_mb: int
+    pfc_enabled: bool
+    headroom_factor: int
+    data_queue_bytes: int
+    trimmed_queue_bytes: int
+
+    def manifest(self) -> dict[str, int | bool]:
+        return {
+            "buffer_size_mb": self.buffer_size_mb,
+            "pfc_enabled": self.pfc_enabled,
+            "headroom_factor": self.headroom_factor,
+            "data_queue_bytes": self.data_queue_bytes,
+            "trimmed_queue_bytes": self.trimmed_queue_bytes,
+        }
+
+
+@dataclass(frozen=True)
 class DataPlaneLoss:
     """Data-only receive impairment independent from transport recovery."""
 
@@ -129,6 +159,7 @@ class ClosNetwork:
     data_loss: DataPlaneLoss | None = None
     transport_recovery: TransportRecovery | None = None
     packet_trimming: PacketTrimming | None = None
+    fabric: SwitchFabric | None = None
 
     @property
     def kind(self) -> str:
@@ -152,6 +183,7 @@ class RingNetwork:
     data_loss: DataPlaneLoss | None = None
     transport_recovery: TransportRecovery | None = None
     packet_trimming: PacketTrimming | None = None
+    fabric: SwitchFabric | None = None
 
     @property
     def kind(self) -> str:
@@ -425,6 +457,67 @@ def _load_packet_trimming(document: dict[str, Any]) -> PacketTrimming | None:
     )
 
 
+def _load_fabric(
+    document: dict[str, Any], trimming: PacketTrimming | None
+) -> SwitchFabric | None:
+    trimming_enabled = trimming is not None
+    if "fabric" not in document:
+        if trimming_enabled:
+            raise ValueError(
+                "network.packet_trimming requires an explicit network.fabric; "
+                "trimming only fires when the data queue can reject a packet"
+            )
+        return None
+    fabric = document["fabric"]
+    required = {"buffer_size_mb", "pfc_enabled", "data_queue_bytes"}
+    optional = {"headroom_factor", "trimmed_queue_bytes"}
+    if not isinstance(fabric, dict) or not required <= set(fabric) <= (
+        required | optional
+    ):
+        raise ValueError(
+            f"network.fabric must contain {sorted(required)} and may contain "
+            f"{sorted(optional)}"
+        )
+    pfc_enabled = fabric["pfc_enabled"]
+    if not isinstance(pfc_enabled, bool):
+        raise ValueError("network.fabric.pfc_enabled must be a boolean")
+    buffer_size_mb = _positive_int(
+        fabric["buffer_size_mb"], "network.fabric.buffer_size_mb"
+    )
+    data_queue_bytes = _positive_int(
+        fabric["data_queue_bytes"], "network.fabric.data_queue_bytes"
+    )
+    trimmed_queue_bytes = _positive_int(
+        fabric.get("trimmed_queue_bytes", data_queue_bytes),
+        "network.fabric.trimmed_queue_bytes",
+    )
+    default_headroom = DEFAULT_HEADROOM_FACTOR if pfc_enabled else 0
+    headroom_factor = _nonnegative_int(
+        fabric.get("headroom_factor", default_headroom),
+        "network.fabric.headroom_factor",
+    )
+    # PFC headroom only absorbs packets in flight when a PAUSE is sent. Without
+    # PFC nothing pauses, so nonzero headroom is buffer that no mechanism ever
+    # drains but that still has to fill before anything can be dropped.
+    if not pfc_enabled and headroom_factor != 0:
+        raise ValueError(
+            "network.fabric.headroom_factor must be 0 when pfc_enabled is false"
+        )
+    # UEC 1.0.3 section 3.6.4.5 excludes PFC from best-effort networks, which is
+    # the only regime in which trimming is meaningful.
+    if trimming_enabled and pfc_enabled:
+        raise ValueError(
+            "network.packet_trimming requires network.fabric.pfc_enabled false"
+        )
+    return SwitchFabric(
+        buffer_size_mb=buffer_size_mb,
+        pfc_enabled=pfc_enabled,
+        headroom_factor=headroom_factor,
+        data_queue_bytes=data_queue_bytes,
+        trimmed_queue_bytes=trimmed_queue_bytes,
+    )
+
+
 def _common_network_fields(document: dict[str, Any]) -> tuple[str, int, int, int]:
     return (
         _link_rate(document.get("link_rate")),
@@ -464,6 +557,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "data_loss",
         "transport_recovery",
         "packet_trimming",
+        "fabric",
     }
     topology_keys = {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
     unknown_keys = set(document) - common_keys - topology_keys
@@ -482,11 +576,24 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
     data_loss = _load_data_loss(document, host_count)
     transport_recovery = _load_transport_recovery(document)
     packet_trimming = _load_packet_trimming(document)
+    fabric = _load_fabric(document, packet_trimming)
     if (
         data_loss is not None or packet_trimming is not None
     ) and transport_recovery is None:
         raise ValueError(
             "network.transport_recovery is required when data_loss or packet_trimming is enabled"
+        )
+    # A best-effort fabric drops on buffer exhaustion whether or not trimming is
+    # enabled, so the transport must be able to recover or a dropped packet
+    # strands its QP forever.
+    if (
+        fabric is not None
+        and not fabric.pfc_enabled
+        and transport_recovery is None
+    ):
+        raise ValueError(
+            "network.transport_recovery is required when network.fabric disables "
+            "PFC, because a best-effort fabric can drop data packets"
         )
     if packet_payload_bytes > MAX_PACKET_PAYLOAD_BYTES:
         raise ValueError(
@@ -504,6 +611,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             data_loss=data_loss,
             transport_recovery=transport_recovery,
             packet_trimming=packet_trimming,
+            fabric=fabric,
         )
 
     hosts_per_leaf = _positive_int(document["hosts_per_leaf"], "network.hosts_per_leaf")
@@ -524,6 +632,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         data_loss=data_loss,
         transport_recovery=transport_recovery,
         packet_trimming=packet_trimming,
+        fabric=fabric,
     )
 
 

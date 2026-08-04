@@ -19,6 +19,9 @@ paper term in a profile, report, or code symbol.
 | FTD | Trim-and-forward-to-destination. This is the UEC 1.0.3 behavior: the trimmed packet reaches the destination, which returns a UET_TRIMMED NACK without accepting payload bytes | Disabled | `network.packet_trimming.mode: "ftd"` | `trim_ftd_*` event and flow counters |
 | BTS | Back-to-sender notification. UEC 1.0.3 section 4.1 explicitly excludes this ("Sending a trimmed packet back to the source ... is not part of this specification"); it models FastLane/P802.1Qdw and is research-only | Disabled | `network.packet_trimming.mode: "bts"` | `trim_bts_*` event and flow counters |
 | DSCP_TRIMMED_LAST_HOP | Codepoint set when the trimming switch is the destination's own leaf. The source repairs the loss but does not treat it as a path or NSCC congestion signal | Enabled with trimming | `network.packet_trimming.last_hop_codepoint` | `trim_*_lasthop_*` events, `trim_lasthop_notifications` |
+| Best-effort fabric | PFC disabled, zero headroom, shallow buffers. The only regime where trimming is meaningful (UEC 1.0.3 section 3.6.4.5) | Off unless `network.fabric` sets it | `network.fabric.pfc_enabled: false` | `switch_admission_drop`, `switch_trimmed_queue_drop` |
+| PFC headroom | Buffer reserved to absorb packets in flight when a PAUSE is sent. Without PFC nothing drains it, so it becomes buffer that must fill before anything drops | 0 when PFC is off | `network.fabric.headroom_factor` | Effective drop threshold |
+| Egress drop threshold | Per-queue byte bound on an egress queue, the `queue_trimmable.drop_threshold` / `queue_trimmed.drop_threshold` of UEC 1.0.3 section 4.1 | Unbounded unless set | `network.fabric.data_queue_bytes`, `.trimmed_queue_bytes` | Admission drops and trim conversions |
 | TC_med | Egress tier for DSCP_TRIMMED, drained below TC_high control (queue 0) and ahead of the round-robin TC_low data queues, but capped at its configured bandwidth share | Queue 2 at 25% | `network.packet_trimming.trimmed_queue`, `.trimmed_queue_weight` | `switch_trimmed_queue_drop` |
 | `trimmed_queue_weight` | Percent of egress bandwidth TC_med may take while TC_low has traffic. UEC 1.0.3 section 4.1 recommends WDRR at 25% and caps fair-queueing at 50%, because an unrestricted trimmed class can cause congestion collapse. 100 restores strict priority | 25 | `network.packet_trimming.trimmed_queue_weight` | Trim conversions versus data goodput |
 | control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; generated profiles set strict ACK/NACK priority at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
@@ -49,6 +52,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `network.queue_monitor_interval_ns` | Positive periodic queue-sampling interval | 10,000 ns | Prevents observability work from scaling with every packet event |
 | `network.data_loss` | Optional independent physical data-only receive impairment | Absent | Requires probability, time window, scope, and RNG stream; separate from logical selection thresholds and packet trimming |
 | `network.transport_recovery` | Required bounded go-back-$N$ recovery budget when physical loss or trimming is enabled | Absent | Requires positive retransmission timeout and retry budget; terminal exhaustion is recorded as a failure |
+| `network.fabric` | Switch buffer and flow-control regime | Absent (32 MB, PFC on) | Requires `buffer_size_mb`, `pfc_enabled`, `data_queue_bytes`; optional `headroom_factor`, `trimmed_queue_bytes`. Mandatory when trimming is enabled, and must be identical across every arm of a comparison |
 | `network.packet_trimming` | Optional UEC 1.0.3 section 4.1 packet trimming | Absent | Requires `mode: "ftd"` (UET-conformant) or `"bts"` (research-only); optional `trimmed_queue` (default 2), `trimmed_queue_weight` (default 25), `min_trim_size_bytes` (default 24), and `last_hop_codepoint` (default `true`). Only switch admission or egress queue rejection can trigger it |
 | `selection_policy` | Typed low/high logical-admission selection knobs | `p_low=0.005`, `p_high=0.1` | Profile, manifest, and `experiment.json` | Materialized selection probabilities |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |
@@ -99,6 +103,10 @@ a naturally emitted framework burst or as packet loss.
 - `network.packet_trimming` is independent from `network.data_loss`. It turns
   a congestion-rejected RDMA data packet into explicit loss metadata, never
   placeholder bytes or partial payload delivery.
+- Buffer depth decides *how* incast produces tail latency: a deep buffer makes
+  it queueing delay with no loss, a shallow best-effort buffer makes it loss
+  that trimming reports. The two are different physical claims, so
+  `network.fabric` must be identical across every arm of a comparison.
 - A trimmed packet rides TC_med (`network.packet_trimming.trimmed_queue`,
   default queue 2), not the TC_high control queue, and it obeys that queue's
   admission thresholds. TC_med is drained ahead of data but is limited to

@@ -47,6 +47,7 @@ try:
         DataPlaneLoss,
         PacketTrimming,
         PhysicalNetwork,
+        SwitchFabric,
         TransportRecovery,
         build_topology,
         load_network,
@@ -64,6 +65,7 @@ except ImportError:
         DataPlaneLoss,
         PacketTrimming,
         PhysicalNetwork,
+        SwitchFabric,
         TransportRecovery,
         build_topology,
         load_network,
@@ -1067,6 +1069,7 @@ def write_network_config(
     data_loss: DataPlaneLoss | None,
     transport_recovery: TransportRecovery | None,
     packet_trimming: PacketTrimming | None,
+    fabric: SwitchFabric | None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     # The bundled ns-3 setup unconditionally opens these legacy input files,
@@ -1114,6 +1117,19 @@ def write_network_config(
             "MAX_RETRANSMISSION_RETRIES "
             f"{transport_recovery.max_retransmission_retries}\n"
         )
+    if fabric is None:
+        fabric_settings = (
+            "BUFFER_SIZE 32\nENABLE_PFC 1\nHEADROOM_FACTOR 3\n"
+            "DATA_QUEUE_BYTES 0\nTRIMMED_QUEUE_BYTES 0\n"
+        )
+    else:
+        fabric_settings = (
+            f"BUFFER_SIZE {fabric.buffer_size_mb}\n"
+            f"ENABLE_PFC {int(fabric.pfc_enabled)}\n"
+            f"HEADROOM_FACTOR {fabric.headroom_factor}\n"
+            f"DATA_QUEUE_BYTES {fabric.data_queue_bytes}\n"
+            f"TRIMMED_QUEUE_BYTES {fabric.trimmed_queue_bytes}\n"
+        )
     if packet_trimming is None:
         trim_settings = "PACKET_TRIM_MODE disabled\n"
     else:
@@ -1154,7 +1170,7 @@ def write_network_config(
             "200000000000 600 400000000000 800 2400000000000 800\n"
             "PMAX_MAP 6 25000000000 0.2 40000000000 0.2 100000000000 0.2 "
             "200000000000 0.2 400000000000 0.2 2400000000000 0.2\n"
-            "BUFFER_SIZE 32\n"
+            f"{fabric_settings}"
         )
 
 
@@ -1400,6 +1416,7 @@ def materialize(
         profile.network.data_loss,
         profile.network.transport_recovery,
         profile.network.packet_trimming,
+        profile.network.fabric,
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(experiment_config, profile, clr_schedule, selection_policy)
@@ -1456,6 +1473,17 @@ def materialize(
             profile.network.packet_trimming.manifest()
             if profile.network.packet_trimming is not None
             else {"enabled": False}
+        ),
+        "fabric": (
+            profile.network.fabric.manifest()
+            if profile.network.fabric is not None
+            else {
+                "buffer_size_mb": 32,
+                "pfc_enabled": True,
+                "headroom_factor": 3,
+                "data_queue_bytes": 0,
+                "trimmed_queue_bytes": 0,
+            }
         ),
         "profile_config": str(profile_config.resolve()),
         "workload_prefix": str((workload_dir / "ring_3d").resolve()),

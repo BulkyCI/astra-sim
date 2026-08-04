@@ -150,6 +150,25 @@ A trimmed packet is re-admitted as a new DSCP_TRIMMED arrival, so a congested
 TC_med drops it and records `switch_trimmed_queue_drop`; the specification is
 explicit that trimmed delivery is not guaranteed.
 
+### Fabric regime
+
+Trimming only fires when a queue can reject a packet, so `network.fabric` is
+mandatory alongside `network.packet_trimming` and must disable PFC. UEC 1.0.3
+section 3.6.4.5 excludes PFC from best-effort networks, and trimming exists to
+replace lossless operation. Disabling PFC also forces `headroom_factor` to 0:
+PFC headroom only absorbs packets already in flight when a PAUSE is sent, so
+without PFC it is buffer that nothing drains but that still has to fill before
+anything can drop.
+
+`data_queue_bytes` and `trimmed_queue_bytes` are the `queue_trimmable` and
+`queue_trimmed` drop thresholds of the section 4.1 pseudocode, enforced by
+`SwitchMmu::CheckEgressAdmission`. Before this they did not exist — the egress
+check was a stub returning true, so the only drop path was the shared ingress
+pool and no per-queue threshold was expressible.
+
+A best-effort fabric can drop data whether or not trimming is enabled, so it
+also requires `network.transport_recovery`.
+
 ### Trim size
 
 `min_trim_size_bytes` (default 24, per Table 4-1 for UET over UDP/IP) is the

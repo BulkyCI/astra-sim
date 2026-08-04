@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-bts-trim-8",
+  "name": "ring-3d-besteffort-baseline-8",
   "parallelism": {
     "tp": 2,
     "pp": 2,
@@ -27,9 +27,6 @@
       "headroom_factor": 0,
       "data_queue_bytes": 262144,
       "trimmed_queue_bytes": 65536
-    },
-    "packet_trimming": {
-      "mode": "bts"
     },
     "transport_recovery": {
       "retransmission_timeout_ns": 100000,

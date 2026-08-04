@@ -6,7 +6,7 @@
     "pp": 2,
     "dp": 2
   },
-  "steps": 3,
+  "steps": 20,
   "compute_duration_us": 10,
   "tp_all_reduce_bytes": 65536,
   "pp_bytes": 32768,
@@ -21,14 +21,24 @@
     "hosts_per_leaf": 2,
     "spine_count": 4,
     "link_rate": "200Gbps",
+    "fabric": {
+      "buffer_size_mb": 2,
+      "pfc_enabled": false,
+      "headroom_factor": 0,
+      "data_queue_bytes": 262144,
+      "trimmed_queue_bytes": 65536
+    },
     "packet_trimming": {
       "mode": "ftd"
     },
     "transport_recovery": {
-      "retransmission_timeout_ns": 1000,
-      "max_retransmission_retries": 3
+      "retransmission_timeout_ns": 100000,
+      "max_retransmission_retries": 8
     }
   },
-  "microburst_enabled": false,
-  "microburst_bytes": 262144
+  "microburst_enabled": true,
+  "microburst_destination_rank": 0,
+  "microburst_flow_count": 7,
+  "microburst_offset_spacing_ns": 0,
+  "microburst_bytes": 1048576
 }

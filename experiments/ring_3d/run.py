@@ -19,18 +19,26 @@ except ImportError:
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BINARY_PATTERN = (
-    "extern/network_backend/ns-3/build/scratch/*AstraSimNetwork-default"
+BINARY_DIRECTORY = "extern/network_backend/ns-3/build/scratch"
+# ns-3 suffixes a binary with its build profile and leaves `release` bare, so
+# the evaluation build produces `ns3.42-AstraSimNetwork`. The patterns are
+# disjoint and searched in order of decreasing optimization, which keeps a
+# stale development binary from silently standing in for the release one.
+DEFAULT_BINARY_PATTERNS = (
+    f"{BINARY_DIRECTORY}/*AstraSimNetwork",
+    f"{BINARY_DIRECTORY}/*AstraSimNetwork-default",
+    f"{BINARY_DIRECTORY}/*AstraSimNetwork-debug",
 )
 
 
 def find_default_binary() -> Path:
-    matches = sorted(REPOSITORY_ROOT.glob(DEFAULT_BINARY_PATTERN))
-    if not matches:
-        raise FileNotFoundError(
-            "No ns-3 AstraSimNetwork binary is available. Build it first, or pass --binary."
-        )
-    return matches[-1]
+    for pattern in DEFAULT_BINARY_PATTERNS:
+        matches = sorted(REPOSITORY_ROOT.glob(pattern))
+        if matches:
+            return matches[-1]
+    raise FileNotFoundError(
+        "No ns-3 AstraSimNetwork binary is available. Build it first, or pass --binary."
+    )
 
 
 def fixed_p_low_baseline(profile: Profile) -> tuple[float, float]:

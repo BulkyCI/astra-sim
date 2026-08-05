@@ -11,7 +11,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from experiments.ring_3d.run import run_experiment
+from experiments.ring_3d.run import find_default_binary, run_experiment
 
 
 class Ring3DRunnerTests(unittest.TestCase):
@@ -72,6 +72,46 @@ class Ring3DRunnerTests(unittest.TestCase):
                 json.loads((output / "execution.json").read_text(encoding="utf-8")),
                 returned["execution"],
             )
+
+
+class Ring3DBinaryDiscoveryTests(unittest.TestCase):
+    def scratch_directory(self, root: Path) -> Path:
+        scratch = root / "extern/network_backend/ns-3/build/scratch"
+        scratch.mkdir(parents=True)
+        return scratch
+
+    def test_release_binary_wins_over_a_stale_development_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            scratch = self.scratch_directory(root)
+            (scratch / "ns3.42-AstraSimNetwork-default").touch()
+            (scratch / "ns3.42-AstraSimNetwork-debug").touch()
+            (scratch / "ns3.42-AstraSimNetwork").touch()
+
+            with patch("experiments.ring_3d.run.REPOSITORY_ROOT", root):
+                self.assertEqual(
+                    find_default_binary().name, "ns3.42-AstraSimNetwork"
+                )
+
+    def test_development_binary_is_still_discoverable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            scratch = self.scratch_directory(root)
+            (scratch / "ns3.42-AstraSimNetwork-debug").touch()
+
+            with patch("experiments.ring_3d.run.REPOSITORY_ROOT", root):
+                self.assertEqual(
+                    find_default_binary().name, "ns3.42-AstraSimNetwork-debug"
+                )
+
+    def test_missing_binary_is_an_explicit_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            self.scratch_directory(root)
+
+            with patch("experiments.ring_3d.run.REPOSITORY_ROOT", root):
+                with self.assertRaisesRegex(FileNotFoundError, "Build it first"):
+                    find_default_binary()
 
 
 if __name__ == "__main__":

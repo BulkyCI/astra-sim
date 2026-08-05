@@ -15,7 +15,18 @@ function setup {
 }
 function compile {
     cd "${NS3_DIR}"
-    local configure_args=(--enable-mpi)
+    # ns-3's CLI defaults to its `default` profile, which is relwithdebinfo
+    # with -O2 rewritten to -Os and asserts and logging forced on: optimized
+    # for size and instrumented, which suits interactive model development
+    # rather than multi-hour evaluation runs. `release` is -O3 with logging
+    # compiled out. `optimized` is deliberately not used: it adds
+    # -march=native, and a hosted runner's CPU model varies between runs, so
+    # one binary would stop being reproducible across them.
+    local profile="${NS3_BUILD_PROFILE:-release}"
+    # Asserts are re-enabled on top of the profile. They cost a predictable
+    # branch and are the only in-model check on a transport under active
+    # change; ns-3 removes the profile's -DNS3_ASSERT=OFF for this flag.
+    local configure_args=(--enable-mpi --build-profile "${profile}" --enable-asserts)
     # CI supplies a launcher through CMake's standard environment variable.
     # Bypass ns-3's own integration there: it weakens ccache correctness by
     # enabling sloppiness for timestamps and include-file metadata.

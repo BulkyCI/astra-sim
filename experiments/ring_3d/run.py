@@ -131,6 +131,8 @@ def run_experiment(
                 str(output / "ns3"),
                 "--expected-rank-count",
                 str(manifest["ranks"]),
+                "--manifest",
+                str(output / "manifest.json"),
                 "--output",
                 str(output / "summary.json"),
             ],

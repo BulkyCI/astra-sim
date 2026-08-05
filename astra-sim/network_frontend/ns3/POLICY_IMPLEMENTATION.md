@@ -106,6 +106,14 @@ range `[10000, 65535]` per ordered host pair, so the bridge returns a port to
 that pair once its queue pair terminates and reuses it later in the run. Join
 flow telemetry against `fct.txt` on `(src, dst, source_port, start_time_ns)`.
 
+Reuse is audited, not assumed. A run that models no loss mechanism — no data
+loss, no timeout recovery, no trimming, PFC on — has nothing that can drop,
+reorder, or resend a packet, so `retransmitted_bytes` and `recovery_events`
+must be zero across every flow. A nonzero counter means a packet reached a
+queue pair it does not belong to, which is what a source port reused while a
+straggler was still in the network would look like. The analyzer rejects the
+run rather than reporting it.
+
 `collective_events.csv` is the source for native logical collective latency.
 Do not substitute P99 of only admitted QPs: treatment changes that population.
 

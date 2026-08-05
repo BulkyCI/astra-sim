@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sys
 import tempfile
 import unittest
@@ -566,6 +567,91 @@ class Ring3DAnalysisTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "physical-byte mismatch"):
                 summarize(telemetry, fct)
+
+    def write_manifest(
+        self,
+        directory: Path,
+        loss: bool,
+        recovery: bool,
+        trimming: bool,
+        pfc: bool = True,
+    ) -> Path:
+        path = directory / "manifest.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "data_plane_loss": {"enabled": loss},
+                    "transport_recovery": {"enabled": recovery},
+                    "packet_trimming": {"enabled": trimming},
+                    "fabric": {"pfc_enabled": pfc},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_summary_verifies_lossless_run_recorded_no_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            manifest = self.write_manifest(root, False, False, False)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+            self.assertEqual(summary["lossless_transport"]["status"], "verified")
+
+    def test_summary_rejects_recovery_without_a_loss_mechanism(self) -> None:
+        # A stray packet reaching a reused source port surfaces exactly here.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            flow = self.valid_shed_flow()
+            flow["recovery_events"] = "1"
+            self.write_telemetry(telemetry, flow)
+            manifest = self.write_manifest(root, False, False, False)
+
+            with self.assertRaisesRegex(ValueError, "models no loss mechanism"):
+                summarize(telemetry, manifest_path=manifest)
+
+    def test_summary_allows_recovery_when_the_run_models_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            flow = self.valid_shed_flow()
+            flow["recovery_events"] = "2"
+            flow["retransmitted_bytes"] = "64"
+            self.write_telemetry(telemetry, flow)
+            manifest = self.write_manifest(root, False, True, False)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+            self.assertEqual(summary["lossless_transport"]["status"], "not_applicable")
+
+    def test_summary_allows_recovery_on_a_best_effort_fabric(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            flow = self.valid_shed_flow()
+            flow["recovery_events"] = "1"
+            self.write_telemetry(telemetry, flow)
+            manifest = self.write_manifest(root, False, False, False, pfc=False)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+            self.assertEqual(summary["lossless_transport"]["status"], "not_applicable")
+
+    def test_summary_skips_the_lossless_check_without_a_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            flow = self.valid_shed_flow()
+            flow["recovery_events"] = "3"
+            self.write_telemetry(telemetry, flow)
+
+            summary = summarize(telemetry)
+
+            self.assertEqual(summary["lossless_transport"]["status"], "not_applicable")
 
     def test_summary_joins_reused_source_ports(self) -> None:
         # The ns-3 bridge returns a source port to its host pair once the

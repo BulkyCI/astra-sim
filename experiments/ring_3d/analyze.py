@@ -262,6 +262,60 @@ def _timing_by_domain_and_kind(
     }
 
 
+def _load_manifest(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise TypeError(f"invalid run manifest: {path}")
+    return manifest
+
+
+def _models_no_loss_mechanism(manifest: dict[str, Any] | None) -> bool:
+    if manifest is None:
+        return False
+    if any(
+        bool((manifest.get(key) or {}).get("enabled"))
+        for key in ("data_plane_loss", "transport_recovery", "packet_trimming")
+    ):
+        return False
+    # A best-effort fabric drops on buffer rejection, so only a lossless
+    # flow-controlled one leaves nothing that can lose or reorder a packet.
+    fabric = manifest.get("fabric")
+    return isinstance(fabric, dict) and bool(fabric.get("pfc_enabled"))
+
+
+def _verify_lossless_transport(
+    flow_rows: list[dict[str, str]], manifest: dict[str, Any] | None
+) -> dict[str, int | str]:
+    """Require zero recovery from a run that models no loss mechanism.
+
+    A lossless fabric with no timeout recovery and no trimming has nothing
+    that can drop, reorder, or resend a packet, and per-flow ECMP keeps a
+    single flow on a single path. Every recovery counter must therefore be
+    zero. A nonzero one means a packet reached a queue pair it does not
+    belong to, which is the observable signature of a source port reused
+    while a straggler from its previous flow was still in the network. The
+    check exists because that is otherwise silent: the receiver would fold
+    the stray sequence numbers into a healthy flow.
+    """
+    if not _models_no_loss_mechanism(manifest):
+        return {"status": "not_applicable"}
+    retransmitted_bytes = sum(
+        _optional_nonnegative_int(row, "retransmitted_bytes") for row in flow_rows
+    )
+    recovery_events = sum(
+        _optional_nonnegative_int(row, "recovery_events") for row in flow_rows
+    )
+    if retransmitted_bytes or recovery_events:
+        raise ValueError(
+            "run models no loss mechanism but recorded transport recovery "
+            f"(retransmitted_bytes={retransmitted_bytes}, "
+            f"recovery_events={recovery_events})"
+        )
+    return {"status": "verified", "flow_count": len(flow_rows)}
+
+
 def _flow_key(row: dict[str, str]) -> tuple[int, int, int, int]:
     return (
         _as_int(row, "src"),
@@ -668,6 +722,7 @@ def summarize(
     fct_path: Path | None = None,
     ns3_dir: Path | None = None,
     expected_rank_count: int | None = None,
+    manifest_path: Path | None = None,
 ) -> dict[str, Any]:
     telemetry_dir = telemetry_dir.resolve()
     flow_rows = load_csv(telemetry_dir / "flow_events.csv")
@@ -677,6 +732,9 @@ def summarize(
         fct_path = telemetry_dir.parent / "ns3" / "fct.txt"
     if ns3_dir is None:
         ns3_dir = telemetry_dir.parent / "ns3"
+    if manifest_path is None:
+        manifest_path = telemetry_dir.parent / "manifest.json"
+    manifest = _load_manifest(manifest_path)
 
     rank_completion_status = _summarize_rank_completions(
         completion_rows, expected_rank_count
@@ -772,6 +830,7 @@ def summarize(
         and row.get("collective_type") == "all_reduce"
     ]
     fct_join = _verify_fct_join(flow_rows, fct_path.resolve())
+    lossless_transport = _verify_lossless_transport(flow_rows, manifest)
     collective_completion = _summarize_collectives(collective_rows)
     ns3_observability = _summarize_ns3_observability(ns3_dir.resolve())
     primary_eligible = (
@@ -860,6 +919,7 @@ def summarize(
         },
         "background_microburst_timeline": _background_timeline(flow_rows),
         "fct_join": fct_join,
+        "lossless_transport": lossless_transport,
         "ns3_observability": ns3_observability,
         "primary_analysis_eligibility": {
             "status": "eligible" if primary_eligible else "ineligible",
@@ -894,6 +954,14 @@ def main() -> int:
         help="require exactly one rank-completion row for every rank in [0, count)",
     )
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        help=(
+            "run manifest naming the modeled loss mechanisms; "
+            "defaults to ../manifest.json"
+        ),
+    )
+    parser.add_argument(
         "--output", type=Path, help="write the JSON summary to this path"
     )
     arguments = parser.parse_args()
@@ -902,6 +970,7 @@ def main() -> int:
         arguments.fct_file.resolve() if arguments.fct_file else None,
         arguments.ns3_dir.resolve() if arguments.ns3_dir else None,
         arguments.expected_rank_count,
+        arguments.manifest.resolve() if arguments.manifest else None,
     )
     encoded = json.dumps(summary, indent=2) + "\n"
     if arguments.output is None:

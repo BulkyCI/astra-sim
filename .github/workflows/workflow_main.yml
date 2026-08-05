@@ -334,8 +334,14 @@ jobs:
       ledger_key: dblp-phase1-effnet-64dp
       comparison: true
       comparison_seed: 314159265
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 9000
+      # One arm of this pair measured 2.75 h of wall clock at 5.999M queue
+      # pairs. The per-simulator cap is twice a conservative 3 h round-up, so
+      # it is a backstop rather than a limit: a hung run is now caught by the
+      # simulator's own liveness stall detector, which stops and flushes
+      # telemetry instead of dying mid-flight with nothing to analyze. The
+      # wrapper takes the whole job minus setup and archiving.
+      execution_timeout_minutes: 350
+      simulation_timeout_seconds: 21600
       require_congestion: false
 
   aggregate-llama3-evaluation:

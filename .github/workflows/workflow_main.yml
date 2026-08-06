@@ -274,365 +274,111 @@ jobs:
         artifact: ring-3d-llama3-70b-16-trace-${{ github.run_id }}
         asset-name: ring-3d-llama3-70b-16-trace
 
-  paired-llama3-evaluation:
-    name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow, not a grant to the simulator. Permissions
-    # can only be reduced down the chain, and ns3-evaluation.yml's `evaluate`
-    # job declares `contents: read`; only its `archive` job takes the write.
-    permissions:
-      contents: write
-      issues: write
-    strategy:
-      fail-fast: false
-      # Equal to the matrix size, so this currently constrains nothing; it
-      # takes effect only if seeds are added. The real budget is the account
-      # limit of 20 concurrent jobs on Free (40 on Pro), shared across every
-      # repository in the account:
-      # https://docs.github.com/en/actions/reference/limits
-      max-parallel: 5
-      matrix:
-        # Consecutive nine-digit chunks of π's decimal expansion. They are
-        # deterministic for reproducibility and portable 32-bit seed values.
-        seed: [314159265, 358979323, 846264338, 327950288, 419716939]
-    uses: ./.github/workflows/ns3-evaluation.yml
-    with:
-      evaluation_name: Llama 3 70B congestion pair (seed ${{ matrix.seed }})
-      profile: experiments/ring_3d/profiles/llama3_70b_16.json
-      run_directory: runs/ring_3d/llama3_70b_16_comparison/seed_${{ matrix.seed }}
-      artifact_name: ring-3d-llama3-70b-16-comparison-seed-${{ matrix.seed }}
-      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
-      release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: llama3-70b-16-seed-${{ matrix.seed }}
-      comparison: true
-      comparison_seed: ${{ matrix.seed }}
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 9000
-      require_congestion: true
-
-  llama3-70b-32-direct-incast:
-    name: Llama 3 70B 32-rank direct-DP incast pair
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
-    permissions:
-      contents: write
-      issues: write
-    # The healthy-fabric condition of the spectrum: dp=4 direct on a 1:1 rail
-    # fabric with no failures, so steady-state DP fits and congestion is
-    # purely episodic (the step-18 microburst incast plus ECMP collisions).
-    # Near-zero relief here is expected: it bounds the benefit on a clear
-    # network and calibrates the degraded-fabric sweep.
-    uses: ./.github/workflows/ns3-evaluation.yml
-    with:
-      evaluation_name: Llama 3 70B 32-rank direct-DP incast pair
-      profile: experiments/ring_3d/profiles/llama3_70b_32_direct.json
-      run_directory: runs/ring_3d/llama3_70b_32_direct_comparison
-      artifact_name: ring-3d-llama3-70b-32-direct-comparison
-      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
-      release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: llama3-70b-32-direct
-      comparison: true
-      comparison_seed: 314159265
-      # Roughly twice the 16-rank arm's traffic (double the TP groups plus
-      # direct DP exchange), so it shares that job's per-simulator backstop.
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 9000
-      require_congestion: true
-
-  llama3-70b-64-fanin-sweep:
-    name: Llama 3 70B 64-rank fan-in ${{ matrix.window }} pair
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
-    permissions:
-      contents: write
-      issues: write
-    strategy:
-      fail-fast: false
-      matrix:
-        # direct<k> caps concurrent peer transfers at k, so with dp=8 these
-        # four windows sweep DP transfer concurrency {1, 2, 4, 7} on identical
-        # traces, seed, and schedule over a 1:1 rail fabric degraded by two
-        # failed spines (4:3 live). Designed 2:1 collapsed the baseline
-        # (go-back-N under sustained 2x overload) and a healthy 1:1 fabric is
-        # capacity-matched with little to relieve; the degraded state is the
-        # production-realistic knee where bounded shedding is measurable.
-        window: [direct1, direct2, direct4, direct]
-    uses: ./.github/workflows/ns3-evaluation.yml
-    with:
-      evaluation_name: Llama 3 70B 64-rank fan-in ${{ matrix.window }} pair
-      profile: experiments/ring_3d/profiles/llama3_70b_64_${{ matrix.window }}.json
-      run_directory: runs/ring_3d/llama3_70b_64_fanin/${{ matrix.window }}
-      artifact_name: ring-3d-llama3-70b-64-fanin-${{ matrix.window }}-comparison
-      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
-      release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: llama3-70b-64-fanin-${{ matrix.window }}
-      comparison: true
-      comparison_seed: 314159265
-      # 64 ranks move roughly four times the 16-rank arm's bytes, so the
-      # per-arm backstop grows to 4 h while the pair stays inside the 5.5 h
-      # wrapper and GitHub's 6 h job ceiling.
-      execution_timeout_minutes: 330
-      simulation_timeout_seconds: 14400
-      require_congestion: true
-
-  aggregate-fanin-sweep:
-    name: Aggregate the DP fan-in sweep
-    needs: llama3-70b-64-fanin-sweep
+  evaluation-plan:
+    name: Plan the evaluation matrix
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-    - name: Check out source
-      uses: actions/checkout@v7
-      with:
-        submodules: false
-        persist-credentials: false
-
-    - name: Set up the locked Python environment
-      uses: ./.github/actions/python-env
-
-    - name: Download fan-in point artifacts
-      uses: actions/download-artifact@v8
-      with:
-        pattern: ring-3d-llama3-70b-64-fanin-*-comparison-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_64_fanin/artifacts
-
-    - name: Order the points by fan-in and render the knee table
-      run: |
-        mapfile -t comparisons < <(
-          find runs/ring_3d/llama3_70b_64_fanin/artifacts \
-            -name comparison.json -type f -print | sort
-        )
-        [[ "${#comparisons[@]}" -eq 4 ]]
-        uv run --locked python experiments/ring_3d/fan_in_sweep.py \
-          --comparison "${comparisons[@]}" \
-          --output runs/ring_3d/llama3_70b_64_fanin/sweep
-        cat runs/ring_3d/llama3_70b_64_fanin/sweep/fan_in_sweep_report.md \
-          >> "$GITHUB_STEP_SUMMARY"
-
-    - name: Upload the sweep table
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_64_fanin/sweep
-        if-no-files-found: ignore
-
-  archive-fanin-sweep:
-    name: Record the DP fan-in sweep
-    needs: [ aggregate-fanin-sweep, ledger ]
-    if: ${{ always() }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    permissions:
-      contents: write
-      issues: write
-
-    steps:
-    - name: Check out the publishing tools
+    - name: Check out the evaluation matrix
       uses: actions/checkout@v7
       with:
         persist-credentials: false
-        sparse-checkout: |
-          .github/actions
-          .github/scripts
+        sparse-checkout: .github/workflows/evaluation-matrix.json
         sparse-checkout-cone-mode: false
 
-    - name: Fetch the sweep table
-      continue-on-error: true
-      uses: actions/download-artifact@v8
-      with:
-        name: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_64_fanin/sweep
+    # The matrix is data: one record per evaluation pair, including its
+    # rationale in `notes`. Adding an arm is one JSON record, not a
+    # copy-pasted job. `gate` selects opt-in families.
+    - name: Select the gated evaluation records
+      id: plan
+      env:
+        INCLUDE_STRUCTURAL: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
+      run: |
+        set -euo pipefail
+        matrix="$(jq -c --arg structural "$INCLUDE_STRUCTURAL" '
+          [ .[]
+            | select(.gate == "always"
+                     or (.gate == "structural" and $structural == "true"))
+            | del(.gate, .notes) ]
+        ' .github/workflows/evaluation-matrix.json)"
+        echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
-    - name: Persist the sweep report
-      uses: ./.github/actions/ledger-publish
-      with:
-        issue: ${{ needs.ledger.outputs.issue }}
-        key: llama3-70b-64-fanin-sweep
-        title: Aggregate the DP fan-in sweep
-        body-file: runs/ring_3d/llama3_70b_64_fanin/sweep/fan_in_sweep_report.md
-        status: ${{ needs.aggregate-fanin-sweep.result }}
-
-    - name: Archive the sweep bundle
-      uses: ./.github/actions/release-archive
-      with:
-        tag: ${{ needs.ledger.outputs.release_tag }}
-        artifact: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
-        asset-name: ring-3d-llama3-70b-64-fanin-sweep
-
-  historical-phase1-native-reference:
-    name: Historical Phase-1 64-rank native reference pair
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
+  evaluations:
+    name: ${{ matrix.name }}
+    needs: [ native-build, ledger, evaluation-plan ]
+    # Ceiling for the called workflow, not a grant to the simulator. Its
+    # `evaluate` job declares `contents: read`; only `archive` takes the write.
     permissions:
       contents: write
       issues: write
-    # This independent, communication-only reference pair deliberately runs
-    # alongside the Llama congestion matrix. Its profile reproduces the old
-    # 64-rank/186-round trace shape, so it has the same six-hour budget as one
-    # Llama pair but no background-incast gate.
+    strategy:
+      # Every record is an independent experiment arm whose outcome must be
+      # recorded, so one failing arm never cancels the others. The account's
+      # concurrent-job cap is the real parallelism budget.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.evaluation-plan.outputs.matrix) }}
     uses: ./.github/workflows/ns3-evaluation.yml
     with:
-      evaluation_name: Historical Phase-1 64-rank native reference pair
-      profile: experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json
-      run_directory: runs/ring_3d/dblp_phase1_effnet_64dp_comparison
-      artifact_name: ring-3d-dblp-phase1-effnet-64dp-comparison
+      evaluation_name: ${{ matrix.name }}
+      profile: ${{ matrix.profile }}
+      run_directory: ${{ matrix.run_directory }}
+      artifact_name: ${{ matrix.artifact_name }}
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
       release_tag: ${{ needs.ledger.outputs.release_tag }}
       runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: dblp-phase1-effnet-64dp
-      comparison: true
-      comparison_seed: 314159265
-      # One arm of this pair measured 2.75 h of wall clock at 5.999M queue
-      # pairs. The per-simulator cap is twice a conservative 3 h round-up, so
-      # it is a backstop rather than a limit: a hung run is now caught by the
-      # simulator's own liveness stall detector, which stops and flushes
-      # telemetry instead of dying mid-flight with nothing to analyze. The
-      # wrapper takes the whole job minus setup and archiving.
-      execution_timeout_minutes: 350
-      simulation_timeout_seconds: 21600
-      require_congestion: false
+      ledger_key: ${{ matrix.ledger_key }}
+      comparison: ${{ matrix.comparison }}
+      comparison_seed: ${{ matrix.comparison_seed }}
+      execution_timeout_minutes: ${{ matrix.execution_timeout_minutes }}
+      simulation_timeout_seconds: ${{ matrix.simulation_timeout_seconds }}
+      require_congestion: ${{ matrix.require_congestion }}
 
   aggregate-llama3-evaluation:
     name: Aggregate five-seed Llama 3 70B congestion evaluation
-    needs: paired-llama3-evaluation
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-    - name: Check out source
-      uses: actions/checkout@v7
-      with:
-        submodules: false
-        persist-credentials: false
-
-    - name: Set up the locked Python environment
-      uses: ./.github/actions/python-env
-
-    - name: Download paired seed artifacts
-      uses: actions/download-artifact@v8
-      with:
-        pattern: ring-3d-llama3-70b-16-comparison-seed-*-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_16_comparison/artifacts
-
-    - name: Validate and aggregate paired seed results
-      run: |
-        mapfile -t comparisons < <(
-          find runs/ring_3d/llama3_70b_16_comparison/artifacts \
-            -name comparison.json -type f -print | sort
-        )
-        [[ "${#comparisons[@]}" -eq 5 ]]
-        uv run --locked python experiments/ring_3d/compare.py \
-          --aggregate-inputs "${comparisons[@]}" \
-          --output runs/ring_3d/llama3_70b_16_comparison/aggregate \
-          --clean
-        cat runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md \
-          >> "$GITHUB_STEP_SUMMARY"
-
-    - name: Upload aggregate comparison report
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_16_comparison/aggregate
-        if-no-files-found: ignore
-
-  archive-aggregate-llama3-evaluation:
-    name: Record the five-seed aggregate evaluation
-    needs: [ aggregate-llama3-evaluation, ledger ]
+    needs: [ evaluations, ledger ]
+    # `always()` so an unrelated arm's failure cannot skip this aggregation;
+    # the exact artifact count inside the reusable workflow is the real gate.
     if: ${{ always() }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
     permissions:
       contents: write
       issues: write
-
-    steps:
-    - name: Check out the publishing tools
-      uses: actions/checkout@v7
-      with:
-        persist-credentials: false
-        sparse-checkout: |
-          .github/actions
-          .github/scripts
-        sparse-checkout-cone-mode: false
-
-    - name: Fetch the aggregate report
-      continue-on-error: true
-      uses: actions/download-artifact@v8
-      with:
-        name: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
-        path: runs/ring_3d/llama3_70b_16_comparison/aggregate
-
-    - name: Persist the aggregate comparison report
-      uses: ./.github/actions/ledger-publish
-      with:
-        issue: ${{ needs.ledger.outputs.issue }}
-        key: llama3-70b-16-aggregate
-        title: Aggregate five-seed Llama 3 70B congestion evaluation
-        body-file: runs/ring_3d/llama3_70b_16_comparison/aggregate/comparison_report.md
-        status: ${{ needs.aggregate-llama3-evaluation.result }}
-
-    - name: Archive the aggregate bundle
-      uses: ./.github/actions/release-archive
-      with:
-        tag: ${{ needs.ledger.outputs.release_tag }}
-        artifact: ring-3d-llama3-70b-16-comparison-aggregate-${{ github.run_id }}
-        asset-name: ring-3d-llama3-70b-16-comparison-aggregate
-
-  model-100b-256-clos-evaluation:
-    name: 100B 256-card Clos structural evaluation
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
-    permissions:
-      contents: write
-      issues: write
-    uses: ./.github/workflows/ns3-evaluation.yml
+    uses: ./.github/workflows/evaluation-aggregate.yml
     with:
-      evaluation_name: 100B 256-card Clos structural evaluation
-      profile: experiments/ring_3d/profiles/model_100b_256_clos.json
-      run_directory: runs/ring_3d/model_100b_256_clos
-      artifact_name: ring-3d-model-100b-256-clos
+      aggregate_name: Aggregate five-seed Llama 3 70B congestion evaluation
+      download_pattern: ring-3d-llama3-70b-16-comparison-seed-*-${{ github.run_id }}
+      download_directory: runs/ring_3d/llama3_70b_16_comparison/artifacts
+      expected_count: 5
+      command_prefix: uv run --locked python experiments/ring_3d/compare.py --clean --aggregate-inputs
+      output_directory: runs/ring_3d/llama3_70b_16_comparison/aggregate
+      report_file: comparison_report.md
+      artifact_name: ring-3d-llama3-70b-16-comparison-aggregate
+      ledger_key: llama3-70b-16-aggregate
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
       release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: model-100b-256-clos
-      comparison: false
-      execution_timeout_minutes: 320
-      simulation_timeout_seconds: 16200
-      require_congestion: false
 
-  model-100b-256-ring-evaluation:
-    name: 100B 256-card Ring structural evaluation
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
-    needs: [ native-build, ledger ]
-    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
+  aggregate-fanin-sweep:
+    name: Aggregate the DP fan-in sweep
+    needs: [ evaluations, ledger ]
+    if: ${{ always() }}
     permissions:
       contents: write
       issues: write
-    uses: ./.github/workflows/ns3-evaluation.yml
+    uses: ./.github/workflows/evaluation-aggregate.yml
     with:
-      evaluation_name: 100B 256-card Ring structural evaluation
-      profile: experiments/ring_3d/profiles/model_100b_256_ring.json
-      run_directory: runs/ring_3d/model_100b_256_ring
-      artifact_name: ring-3d-model-100b-256-ring
+      aggregate_name: Aggregate the DP fan-in sweep
+      download_pattern: ring-3d-llama3-70b-64-fanin-*-comparison-${{ github.run_id }}
+      download_directory: runs/ring_3d/llama3_70b_64_fanin/artifacts
+      expected_count: 4
+      command_prefix: uv run --locked python experiments/ring_3d/fan_in_sweep.py --comparison
+      output_directory: runs/ring_3d/llama3_70b_64_fanin/sweep
+      report_file: fan_in_sweep_report.md
+      artifact_name: ring-3d-llama3-70b-64-fanin-sweep
+      ledger_key: llama3-70b-64-fanin-sweep
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
       release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
-      ledger_key: model-100b-256-ring
-      comparison: false
-      execution_timeout_minutes: 320
-      simulation_timeout_seconds: 16200
-      require_congestion: false
 
   ledger-close:
     name: Finalize the experiment ledger
@@ -643,16 +389,9 @@ jobs:
     - native-build
     - native-integration
     - archive-native-integration
-    - paired-llama3-evaluation
-    - llama3-70b-32-direct-incast
-    - llama3-70b-64-fanin-sweep
-    - aggregate-fanin-sweep
-    - archive-fanin-sweep
-    - historical-phase1-native-reference
+    - evaluations
     - aggregate-llama3-evaluation
-    - archive-aggregate-llama3-evaluation
-    - model-100b-256-clos-evaluation
-    - model-100b-256-ring-evaluation
+    - aggregate-fanin-sweep
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:

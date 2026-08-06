@@ -1,0 +1,148 @@
+name: Reusable evaluation aggregation
+
+# Downloads the comparison artifacts that a set of matrix evaluations
+# published, folds them through one aggregation command, and publishes the
+# rendered report to the run summary, the ledger, and the release archive.
+# One definition site for what was previously a copy-pasted aggregate/archive
+# job pair per evaluation family.
+
+on:
+  workflow_call:
+    inputs:
+      aggregate_name:
+        description: Human-readable name, reused as the ledger section title.
+        required: true
+        type: string
+      download_pattern:
+        description: Artifact glob for the per-evaluation comparison bundles; the caller's run ID suffix must be included.
+        required: true
+        type: string
+      download_directory:
+        description: Repository-relative directory that receives the artifacts.
+        required: true
+        type: string
+      expected_count:
+        description: Exact number of comparison.json files the aggregation requires.
+        required: true
+        type: number
+      command_prefix:
+        description: Aggregation command; the sorted comparison.json paths are appended, then `--output` with the output directory.
+        required: true
+        type: string
+      output_directory:
+        description: Repository-relative directory the aggregation writes.
+        required: true
+        type: string
+      report_file:
+        description: Markdown report the aggregation renders inside the output directory.
+        required: true
+        type: string
+      artifact_name:
+        description: Artifact prefix for the aggregate bundle; the workflow appends the GitHub run ID.
+        required: true
+        type: string
+      ledger_key:
+        description: Stable ledger section identity, reused across re-runs.
+        required: true
+        type: string
+      ledger_issue:
+        description: Ledger issue number for the calling run; zero disables publication.
+        required: false
+        default: 0
+        type: number
+      release_tag:
+        description: Release tag from the calling run's ledger job; empty disables archiving.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  aggregate:
+    name: ${{ inputs.aggregate_name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check out source
+      uses: actions/checkout@v7
+      with:
+        submodules: false
+        persist-credentials: false
+
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
+
+    - name: Download evaluation artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ inputs.download_pattern }}
+        path: ${{ inputs.download_directory }}
+
+    - name: Validate and aggregate the evaluation results
+      run: |
+        set -euo pipefail
+        mapfile -t comparisons < <(
+          find '${{ inputs.download_directory }}' \
+            -name comparison.json -type f -print | sort
+        )
+        [[ "${#comparisons[@]}" -eq '${{ inputs.expected_count }}' ]]
+        ${{ inputs.command_prefix }} "${comparisons[@]}" \
+          --output '${{ inputs.output_directory }}'
+        cat '${{ inputs.output_directory }}/${{ inputs.report_file }}' \
+          >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the aggregate bundle
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        path: ${{ inputs.output_directory }}
+        if-no-files-found: ignore
+
+  archive:
+    name: Record ${{ inputs.aggregate_name }}
+    needs: aggregate
+    if: ${{ always() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+    - name: Check out the publishing tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: |
+          .github/actions
+          .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Fetch the aggregate bundle
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        path: ${{ inputs.output_directory }}
+
+    - name: Persist the aggregate report
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ inputs.ledger_issue }}
+        key: ${{ inputs.ledger_key }}
+        title: ${{ inputs.aggregate_name }}
+        body-file: ${{ inputs.output_directory }}/${{ inputs.report_file }}
+        status: ${{ needs.aggregate.result }}
+
+    - name: Archive the aggregate bundle
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ inputs.release_tag }}
+        artifact: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        asset-name: ${{ inputs.artifact_name }}

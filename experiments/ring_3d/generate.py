@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from dataclasses import dataclass, replace
@@ -88,6 +89,7 @@ REQUIRED_PROFILE_KEYS = {
 }
 OPTIONAL_PROFILE_KEYS = {
     "clr_schedule",
+    "dp_all_reduce_implementation",
     "microburst_flow_count",
     "microburst_destination_rank",
     "microburst_offset_spacing_ns",
@@ -125,6 +127,12 @@ GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
 MAX_P_LOW = 0.01
 DEFAULT_MICROBURST_TRIGGER_STEP = 2
 DEFAULT_WORKLOAD_KIND = "three_dimensional_overlap"
+# "ring" walks DP peers with fan-in 1 and can never form an incast; "direct"
+# (optionally windowed, e.g. "direct4") sends every DP peer's shard
+# concurrently, so each rank receives dp-1 flows at once.
+DP_ALL_REDUCE_IMPLEMENTATION_PATTERN = re.compile(
+    r"^(ring|direct(?:[1-9][0-9]{0,4})?)$"
+)
 SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD = "sequential_dp_all_reduce"
 
 
@@ -214,6 +222,7 @@ class Profile:
     microburst_source_ranks: tuple[int, ...] | None
     microburst_enabled: bool
     microburst_trigger_step: int
+    dp_all_reduce_implementation: str
     model: ModelTrace | GradientBucketSample | None
 
     @property
@@ -486,6 +495,18 @@ def parse_profile_document(document: Any) -> Profile:
         raise ValueError(
             "microburst_trigger_step must land within the profile's training steps"
         )
+    dp_all_reduce_implementation = document.get(
+        "dp_all_reduce_implementation", "ring"
+    )
+    if not isinstance(
+        dp_all_reduce_implementation, str
+    ) or not DP_ALL_REDUCE_IMPLEMENTATION_PATTERN.fullmatch(
+        dp_all_reduce_implementation
+    ):
+        raise ValueError(
+            "dp_all_reduce_implementation must be 'ring', 'direct', or "
+            "'direct<window>'"
+        )
     model = _load_model_workload(document, tp, pp)
 
     profile = Profile(
@@ -521,6 +542,7 @@ def parse_profile_document(document: Any) -> Profile:
         microburst_source_ranks=microburst_source_ranks,
         microburst_enabled=microburst_enabled,
         microburst_trigger_step=microburst_trigger_step,
+        dp_all_reduce_implementation=dp_all_reduce_implementation,
         model=model,
     )
     if profile.workload.kind == SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD:
@@ -1289,8 +1311,12 @@ def write_experiment_config(
     path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
 
 
-def write_system_config(path: Path) -> None:
-    configuration = {
+def write_system_config(
+    path: Path,
+    dp_group_ids: Iterable[int] = (),
+    dp_all_reduce_implementation: str = "ring",
+) -> None:
+    configuration: dict[str, Any] = {
         "scheduling-policy": "LIFO",
         "endpoint-delay": 10,
         "active-chunks-per-dimension": 1,
@@ -1305,6 +1331,14 @@ def write_system_config(path: Path) -> None:
         "roofline-enabled": 0,
         "peak-perf": 900,
     }
+    if dp_all_reduce_implementation != "ring":
+        # Override only the DP communicator groups: TP and PP keep the
+        # global ring while every DP all-reduce runs the incast-forming
+        # direct algorithm.
+        configuration["all-reduce-implementation-per-group"] = {
+            str(group_id): dp_all_reduce_implementation
+            for group_id in sorted(dp_group_ids)
+        }
     path.write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1433,7 +1467,11 @@ def materialize(
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(experiment_config, profile, clr_schedule, selection_policy)
     system_config = output_dir / "system.json"
-    write_system_config(system_config)
+    write_system_config(
+        system_config,
+        dp_group_ids=set(dp_groups.values()),
+        dp_all_reduce_implementation=profile.dp_all_reduce_implementation,
+    )
     (output_dir / "communicator_groups.json").write_text(
         json.dumps(groups, indent=2) + "\n", encoding="utf-8"
     )
@@ -1462,6 +1500,10 @@ def materialize(
             "p_high": selection_policy.p_high,
         },
         "workload": {"kind": profile.workload.kind},
+        "collective_implementations": {
+            "default_all_reduce": "ring",
+            "dp_all_reduce": profile.dp_all_reduce_implementation,
+        },
         "clr_schedule_source": (
             {
                 "kind": "explicit_critical_steps",

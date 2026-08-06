@@ -48,6 +48,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `compute_duration_us` | Simulated compute duration per emitted compute node | 5,376 | Workload abstraction, not measured framework time |
 | `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads per emitted event | 64 MiB, 0, 68,359,375 B | Separate from physical transport overhead |
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |
+| `dp_all_reduce_implementation` | Native algorithm for DP communicator groups only | `ring` (default) or `direct`/`direct<window>` | Written as `all-reduce-implementation-per-group` in `system.json`; TP/PP always keep the global ring. `direct` gives every DP rank $DP-1$ concurrent inbound shards |
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
 | `network.queue_monitor_interval_ns` | Positive periodic queue-sampling interval | 10,000 ns | Prevents observability work from scaling with every packet event |
 | `network.data_loss` | Optional independent physical data-only receive impairment | Absent | Requires probability, time window, scope, and RNG stream; separate from logical selection thresholds and packet trimming |

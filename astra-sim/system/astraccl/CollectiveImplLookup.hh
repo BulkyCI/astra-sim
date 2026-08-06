@@ -44,6 +44,16 @@ class CollectiveImplLookup {
             BypassRule bypass_rule = BypassRule::NO_BYPASS
         );
 
+        // Returns a freshly allocated implementation the caller owns, or
+        // nullptr when the communicator group has no override for this
+        // collective type. A fresh instance per call is required because
+        // CollectivePlan deletes its implementations when it owns them, so a
+        // pointer shared across groups would be freed more than once.
+        CollectiveImpl* make_group_collective_impl(
+            ComType comm_type,
+            int comm_group_id
+        );
+
     private:
         // Map from Chakra node id (integer) to a custom algorithm identifier/filepath.
         // Populated from YAML file. The filename is specified in the system input with the key "per-node-custom-implementation".
@@ -59,6 +69,15 @@ class CollectiveImplLookup {
         // To be applied only if no custom algorithm is specified.
         // The algorithm for each dimension is specified in the system input with the key "all-reduce-implementation".
         std::map<ComType, std::vector<CollectiveImpl*>> native_impl_per_coll_dim;
+
+        // Map from Collective Type to (communicator group id -> native
+        // algorithm string). A matching entry overrides the native algorithm
+        // for collectives issued on that communicator group only, letting one
+        // parallelism domain (e.g. the data-parallel groups) run "direct"
+        // while the others keep "ring". Populated from system input keys like
+        // "all-reduce-implementation-per-group". Stored as strings so every
+        // plan mints its own owned instance.
+        std::map<ComType, std::map<int, std::string>> group_native_impl_per_coll;
 
         int rank;
 };

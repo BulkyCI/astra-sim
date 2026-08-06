@@ -311,6 +311,35 @@ jobs:
       simulation_timeout_seconds: 9000
       require_congestion: true
 
+  llama3-70b-32-direct-incast:
+    name: Llama 3 70B 32-rank direct-DP incast pair
+    needs: [ native-build, ledger ]
+    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
+    permissions:
+      contents: write
+      issues: write
+    # Phase-1 proof point: with dp=4 and the direct all-reduce override, every
+    # DP rank receives dp-1 concurrent gradient shards through the spine, so
+    # incast is organic to the workload instead of injected. One seed decides
+    # whether the congestion knee responds before the fan-in matrix is built.
+    uses: ./.github/workflows/ns3-evaluation.yml
+    with:
+      evaluation_name: Llama 3 70B 32-rank direct-DP incast pair
+      profile: experiments/ring_3d/profiles/llama3_70b_32_direct.json
+      run_directory: runs/ring_3d/llama3_70b_32_direct_comparison
+      artifact_name: ring-3d-llama3-70b-32-direct-comparison
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
+      ledger_key: llama3-70b-32-direct
+      comparison: true
+      comparison_seed: 314159265
+      # Roughly twice the 16-rank arm's traffic (double the TP groups plus
+      # direct DP exchange), so it shares that job's per-simulator backstop.
+      execution_timeout_minutes: 330
+      simulation_timeout_seconds: 9000
+      require_congestion: true
+
   historical-phase1-native-reference:
     name: Historical Phase-1 64-rank native reference pair
     needs: [ native-build, ledger ]
@@ -489,6 +518,7 @@ jobs:
     - native-integration
     - archive-native-integration
     - paired-llama3-evaluation
+    - llama3-70b-32-direct-incast
     - historical-phase1-native-reference
     - aggregate-llama3-evaluation
     - archive-aggregate-llama3-evaluation

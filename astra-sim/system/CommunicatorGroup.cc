@@ -58,6 +58,21 @@ CollectivePlan* CommunicatorGroup::get_collective_plan(ComType comm_type, uint64
         return comm_plans[comm_type];
     }
 
+    // A per-group algorithm override always runs over the group's own single
+    // logical dimension, whether or not the group spans the cluster. The plan
+    // owns the freshly minted implementation and the topology.
+    CollectiveImpl* group_impl =
+        generator->collective_impl_lookup->make_group_collective_impl(comm_type,
+                                                                      id);
+    if (group_impl != nullptr) {
+        LogicalTopology* logical_topology = new RingTopology(
+            RingTopology::Dimension::Local, generator->id, involved_NPUs);
+        comm_plans[comm_type] = new CollectivePlan(
+            logical_topology, std::vector<CollectiveImpl*>{group_impl},
+            std::vector<bool>(1, true), true);
+        return comm_plans[comm_type];
+    }
+
     if (static_cast<uint64_t>(generator->total_nodes) == involved_NPUs.size()) {
         LogicalTopology* logical_topology =
             generator->get_logical_topology(comm_type);

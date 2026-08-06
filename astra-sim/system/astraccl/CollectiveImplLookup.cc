@@ -128,6 +128,33 @@ namespace AstraSim {
             }
         }
 
+        // 1b. Parse per-communicator-group native overrides. Each key maps a
+        // communicator group id to an algorithm string for one collective
+        // type. Validation is eager so a typo fails at setup rather than at
+        // the first collective of that group.
+        const std::pair<const char*, ComType> group_override_keys[] = {
+            {"all-reduce-implementation-per-group", ComType::All_Reduce},
+            {"reduce-scatter-implementation-per-group", ComType::Reduce_Scatter},
+            {"all-gather-implementation-per-group", ComType::All_Gather},
+            {"all-to-all-implementation-per-group", ComType::All_to_All},
+        };
+        for (const auto& [key, comm_type] : group_override_keys) {
+            if (!j.contains(key)) {
+                continue;
+            }
+            const json& overrides = j[key];
+            if (!overrides.is_object()) {
+                throw logic_error(
+                    string(key) +
+                    " must map communicator group ids to algorithm names");
+            }
+            for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+                delete generate_collective_impl_from_input(it.value());
+                group_native_impl_per_coll[comm_type][stoi(it.key())] =
+                    it.value();
+            }
+        }
+
         // 2. Parse the custom collectives to be applied on all collectives, if defined.
         // These have the next highest priority.
         if (j.contains("all-to-all-implementation-custom")) {
@@ -231,6 +258,20 @@ namespace AstraSim {
 
         // If no implementation is found, throw an error.
         throw std::runtime_error("No collective implementation found for the given type {" + std::to_string(static_cast<int>(comm_type)) + "} and node ID {" + std::to_string(workload_node_id) + "}.");
+    }
+
+    CollectiveImpl* CollectiveImplLookup::make_group_collective_impl(
+        ComType comm_type,
+        int comm_group_id) {
+        auto coll = group_native_impl_per_coll.find(comm_type);
+        if (coll == group_native_impl_per_coll.end()) {
+            return nullptr;
+        }
+        auto entry = coll->second.find(comm_group_id);
+        if (entry == coll->second.end()) {
+            return nullptr;
+        }
+        return generate_collective_impl_from_input(entry->second);
     }
 
 } // namespace AstraSim

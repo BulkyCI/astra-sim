@@ -161,6 +161,71 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
 
+    def test_direct_dp_profile_overrides_only_the_dp_groups(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_32_direct.json"
+        )
+        profile = load_profile(profile_path)
+        self.assertEqual(profile.dp_all_reduce_implementation, "direct")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+
+            system = json.loads((output / "system.json").read_text("utf-8"))
+            groups = json.loads(
+                (output / "communicator_groups.json").read_text("utf-8")
+            )
+            overrides = system["all-reduce-implementation-per-group"]
+            # Global native algorithms are untouched; only DP groups differ.
+            self.assertEqual(system["all-reduce-implementation"], ["ring"])
+            self.assertEqual(set(overrides.values()), {"direct"})
+            # Every overridden group is exactly one DP group: dp-many members,
+            # one per tensor-parallel position, spanning distinct leaves.
+            self.assertEqual(len(overrides), profile.tp * profile.pp)
+            for group_id in overrides:
+                members = groups[group_id]
+                self.assertEqual(len(members), profile.dp)
+                self.assertEqual(
+                    len({rank % profile.tp for rank in members}), 1
+                )
+            self.assertEqual(
+                manifest["collective_implementations"],
+                {"default_all_reduce": "ring", "dp_all_reduce": "direct"},
+            )
+
+    def test_ring_dp_profile_writes_no_group_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(self.profile_path, output)
+            system = json.loads((output / "system.json").read_text("utf-8"))
+            self.assertNotIn("all-reduce-implementation-per-group", system)
+            self.assertEqual(
+                manifest["collective_implementations"],
+                {"default_all_reduce": "ring", "dp_all_reduce": "ring"},
+            )
+
+    def test_dp_all_reduce_implementation_accepts_windowed_direct(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["dp_all_reduce_implementation"] = "direct4"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            profile = load_profile(profile_path)
+            self.assertEqual(profile.dp_all_reduce_implementation, "direct4")
+
+    def test_dp_all_reduce_implementation_rejects_unknown_algorithms(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        for invalid in ("halvingDoubling", "direct0", "Direct", ""):
+            document["dp_all_reduce_implementation"] = invalid
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                profile_path = Path(temporary_directory) / "profile.json"
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    ValueError, "dp_all_reduce_implementation"
+                ):
+                    load_profile(profile_path)
+
     def test_microburst_trigger_step_override_reaches_the_policy(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["microburst_trigger_step"] = 3

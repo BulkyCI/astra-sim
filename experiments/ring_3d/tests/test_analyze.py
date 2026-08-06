@@ -653,6 +653,55 @@ class Ring3DAnalysisTests(unittest.TestCase):
 
             self.assertEqual(summary["lossless_transport"]["status"], "not_applicable")
 
+    def test_summary_accepts_telemetry_with_no_flows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(telemetry, [])
+
+            summary = summarize(telemetry)
+
+            self.assertEqual(summary["flow_count"], 0)
+            self.assertIsNone(summary["flow_completion_time_ns"]["all"]["p50_ns"])
+            self.assertEqual(summary["physical_traffic_bytes"]["total"]["flow_count"], 0)
+            self.assertEqual(
+                summary["background_microburst_timeline"]["status"],
+                "no_background_microburst",
+            )
+
+    def test_summary_spans_every_background_microburst_flow(self) -> None:
+        # The timeline is the join of each burst flow's interval, so it must
+        # widen to the earliest start and the latest end, not the last row's.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            flows = []
+            for index, (start, end) in enumerate(((700, 900), (300, 500), (600, 1200))):
+                flow = self.valid_shed_flow()
+                flow.update(
+                    {
+                        "flow_kind": "background_microburst",
+                        "decision": "admitted",
+                        "admission_eligible": "false",
+                        "transport_role": "background_traffic",
+                        "message_sequence": str(index),
+                        "source_port": str(20000 + index),
+                        "logical_bytes": "2048",
+                        "physical_bytes": "2048",
+                        "start_time_ns": str(start),
+                        "end_time_ns": str(end),
+                    }
+                )
+                flows.append(flow)
+            self.write_telemetry(telemetry, flows)
+
+            timeline = summarize(telemetry)["background_microburst_timeline"]
+
+            self.assertEqual(timeline["status"], "available")
+            self.assertEqual(timeline["flow_count"], 3)
+            self.assertEqual(timeline["start_time_ns"], 300)
+            self.assertEqual(timeline["end_time_ns"], 1200)
+            self.assertEqual(timeline["span_ns"], 900)
+            self.assertEqual(timeline["physical_bytes"], 6144)
+
     def test_summary_joins_reused_source_ports(self) -> None:
         # The ns-3 bridge returns a source port to its host pair once the
         # queue pair terminates, so one port names several flows in a run.

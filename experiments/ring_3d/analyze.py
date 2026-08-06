@@ -6,10 +6,22 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from array import array
 from collections import defaultdict
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
+
+import numpy
+
+# A 64-rank run emits one flow row per queue pair, which reaches millions of
+# rows and gigabytes of CSV. Nothing in this module may retain a parsed row:
+# every reported figure is a counter, a group-by over a bounded key space
+# (training step, parallelism domain, flow kind), or a duration column held as
+# a packed integer array. Materializing the rows costs ~2.9 KB each, which
+# exceeds the memory of the runner that has to analyze them.
 
 
 def _as_int(row: dict[str, str], key: str) -> int:
@@ -46,15 +58,27 @@ def _optional_nonnegative_int(row: dict[str, str], key: str) -> int:
     return parsed
 
 
-def load_csv(path: Path) -> list[dict[str, str]]:
+def iter_csv(path: Path) -> Iterator[dict[str, str]]:
+    """Yield telemetry rows without materializing the file.
+
+    The file stays open for the life of the generator, so consume it within
+    the scope that created it rather than storing it for later.
+    """
     if not path.is_file():
         raise FileNotFoundError(f"missing telemetry file: {path}")
     with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+        yield from csv.DictReader(handle)
 
 
-def _load_optional_csv(path: Path) -> list[dict[str, str]] | None:
-    return load_csv(path) if path.is_file() else None
+def load_csv(path: Path) -> list[dict[str, str]]:
+    """Read a *bounded* telemetry file whole. Never use this for flow events."""
+    return list(iter_csv(path))
+
+
+def _iter_lines(path: Path) -> Iterator[tuple[int, str]]:
+    """Yield numbered lines without holding the whole file in memory."""
+    with path.open(encoding="utf-8") as handle:
+        yield from enumerate(handle, start=1)
 
 
 def _training_step_sort_key(value: str) -> tuple[int, int | str]:
@@ -64,9 +88,14 @@ def _training_step_sort_key(value: str) -> tuple[int, int | str]:
         return (1, value)
 
 
-def _timing_statistics(values: list[int]) -> dict[str, int | None]:
-    """Return nearest-rank latency quantiles in nanoseconds."""
-    if not values:
+def _timing_statistics(values: Sequence[int]) -> dict[str, int | None]:
+    """Return nearest-rank latency quantiles in nanoseconds.
+
+    Accepts a packed `array("q")` as well as a list, and sorts through numpy so
+    a column of millions of durations never becomes a list of Python integers.
+    """
+    count = len(values)
+    if count == 0:
         return {
             "count": 0,
             "min_ns": None,
@@ -75,18 +104,18 @@ def _timing_statistics(values: list[int]) -> dict[str, int | None]:
             "p99_ns": None,
             "max_ns": None,
         }
-    ordered = sorted(values)
+    ordered = numpy.sort(numpy.asarray(values, dtype=numpy.int64))
 
     def percentile(percent: int) -> int:
-        return ordered[ceil(len(ordered) * percent / 100) - 1]
+        return int(ordered[ceil(count * percent / 100) - 1])
 
     return {
-        "count": len(ordered),
-        "min_ns": ordered[0],
+        "count": count,
+        "min_ns": int(ordered[0]),
         "p50_ns": percentile(50),
         "p95_ns": percentile(95),
         "p99_ns": percentile(99),
-        "max_ns": ordered[-1],
+        "max_ns": int(ordered[-1]),
     }
 
 
@@ -95,6 +124,89 @@ def _flow_duration_ns(row: dict[str, str]) -> int:
     if duration < 0:
         raise ValueError("flow completion time must not be negative")
     return duration
+
+
+def _durations() -> defaultdict[Any, array]:
+    """Free monoid of durations per group key: identity empty, op append."""
+    return defaultdict(lambda: array("q"))
+
+
+def _timing_by_group(durations: dict[Any, array]) -> dict[str, Any]:
+    return {
+        name: _timing_statistics(values)
+        for name, values in sorted(durations.items(), key=lambda entry: entry[0])
+    }
+
+
+def _timing_by_domain_and_kind(durations: dict[Any, array]) -> dict[str, Any]:
+    nested: dict[str, dict[str, array]] = defaultdict(dict)
+    for (domain, kind), values in durations.items():
+        nested[domain][kind] = values
+    return {
+        domain: _timing_by_group(kinds)
+        for domain, kinds in sorted(nested.items(), key=lambda entry: entry[0])
+    }
+
+
+@dataclass(slots=True)
+class _Traffic:
+    """Componentwise monoid on (count, logical bytes, physical bytes)."""
+
+    flow_count: int = 0
+    logical_bytes: int = 0
+    physical_bytes: int = 0
+
+    def add(self, logical_bytes: int, physical_bytes: int) -> None:
+        self.flow_count += 1
+        self.logical_bytes += logical_bytes
+        self.physical_bytes += physical_bytes
+
+    def summary(self) -> dict[str, int]:
+        return {
+            "flow_count": self.flow_count,
+            "logical_bytes": self.logical_bytes,
+            "physical_bytes": self.physical_bytes,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _Window:
+    """A closed interval. `join` is the semilattice operation; the identity is
+    `None`, so absence of a window is a state rather than a pair of nulls."""
+
+    start_ns: int
+    end_ns: int
+
+    def join(self, start_ns: int, end_ns: int) -> _Window:
+        return _Window(min(self.start_ns, start_ns), max(self.end_ns, end_ns))
+
+    @property
+    def span_ns(self) -> int:
+        return self.end_ns - self.start_ns
+
+
+def _timing_by_step(durations: dict[Any, array]) -> dict[str, Any]:
+    """Group timings by training step, ordered numerically where possible."""
+    return {
+        step: _timing_statistics(values)
+        for step, values in sorted(
+            durations.items(), key=lambda entry: _training_step_sort_key(entry[0])
+        )
+    }
+
+
+@dataclass(slots=True)
+class _Operation:
+    """One logical collective: the join of its ranks' intervals and how many
+    ranks reported it. The contributing rows are never retained."""
+
+    window: _Window
+    rank_count: int = 1
+
+    def record(self, start_ns: int, end_ns: int) -> None:
+        self.window = self.window.join(start_ns, end_ns)
+        self.rank_count += 1
+
 
 
 def _summarize_rank_completions(
@@ -132,23 +244,23 @@ def _collective_duration_ns(row: dict[str, str]) -> int:
     return duration
 
 
-def _summarize_collectives(
-    collective_rows: list[dict[str, str]] | None,
-) -> dict[str, Any]:
-    if collective_rows is None:
-        return {"status": "not_available"}
+def _summarize_collectives(rows: Iterator[dict[str, str]]) -> dict[str, Any]:
+    """Fold per-rank collective events into per-rank and whole-operation timing.
 
-    per_rank_durations: list[int] = []
-    per_rank_by_domain: dict[str, list[int]] = defaultdict(list)
-    per_rank_by_domain_and_type: dict[str, dict[str, list[int]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    operations: dict[tuple[str, str, int, int], list[dict[str, str]]] = defaultdict(
-        list
-    )
+    A logical collective is identified by (domain, type, step, workload node);
+    its all-rank span is the join of every contributing rank's interval, so the
+    rows themselves are not retained. Nesting by domain and type reuses the
+    flow-side grouping rather than restating it.
+    """
+    rank_event_count = 0
+    per_rank_durations = array("q")
+    per_rank_by_domain = _durations()
+    per_rank_by_domain_and_type = _durations()
+    operations: dict[tuple[str, str, int, int], _Operation] = {}
     seen_rank_events: set[tuple[str, str, int, int, int]] = set()
 
-    for row in collective_rows:
+    for row in rows:
+        rank_event_count += 1
         domain = row.get("parallelism_domain") or "unknown"
         collective_type = row.get("collective_type") or "unknown"
         training_step = _as_int(row, "training_step")
@@ -167,98 +279,50 @@ def _summarize_collectives(
         seen_rank_events.add(event_key)
         per_rank_durations.append(duration)
         per_rank_by_domain[domain].append(duration)
-        per_rank_by_domain_and_type[domain][collective_type].append(duration)
-        operations[(domain, collective_type, training_step, node_id)].append(row)
+        per_rank_by_domain_and_type[(domain, collective_type)].append(duration)
 
-    operation_spans: list[int] = []
-    operation_spans_by_domain: dict[str, list[int]] = defaultdict(list)
-    operation_spans_by_domain_and_type: dict[str, dict[str, list[int]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    operation_spans_by_step: dict[str, list[int]] = defaultdict(list)
-    rank_counts: list[int] = []
-    for (domain, collective_type, training_step, _node_id), rows in operations.items():
-        start_time_ns = min(_as_int(row, "start_time_ns") for row in rows)
-        end_time_ns = max(_as_int(row, "end_time_ns") for row in rows)
-        span = end_time_ns - start_time_ns
+        start_time_ns = _as_int(row, "start_time_ns")
+        end_time_ns = _as_int(row, "end_time_ns")
+        operation_key = (domain, collective_type, training_step, node_id)
+        operation = operations.get(operation_key)
+        if operation is None:
+            operations[operation_key] = _Operation(_Window(start_time_ns, end_time_ns))
+        else:
+            operation.record(start_time_ns, end_time_ns)
+
+    operation_spans = array("q")
+    spans_by_domain = _durations()
+    spans_by_domain_and_type = _durations()
+    spans_by_step = _durations()
+    rank_counts = array("q")
+    for (domain, collective_type, training_step, _node), operation in operations.items():
+        span = operation.window.span_ns
         operation_spans.append(span)
-        operation_spans_by_domain[domain].append(span)
-        operation_spans_by_domain_and_type[domain][collective_type].append(span)
-        operation_spans_by_step[str(training_step)].append(span)
-        rank_counts.append(len(rows))
-
-    def by_domain_and_type(
-        durations: dict[str, dict[str, list[int]]],
-    ) -> dict[str, dict[str, dict[str, int | None]]]:
-        return {
-            domain: {
-                collective_type: _timing_statistics(values)
-                for collective_type, values in sorted(types.items())
-            }
-            for domain, types in sorted(durations.items())
-        }
+        spans_by_domain[domain].append(span)
+        spans_by_domain_and_type[(domain, collective_type)].append(span)
+        spans_by_step[str(training_step)].append(span)
+        rank_counts.append(operation.rank_count)
 
     return {
         "status": "available",
-        "rank_event_count": len(collective_rows),
+        "rank_event_count": rank_event_count,
         "logical_collective_count": len(operations),
         "operation_rank_count": _timing_statistics(rank_counts),
         "per_rank_completion_time_ns": {
             "all": _timing_statistics(per_rank_durations),
-            "by_parallelism_domain": {
-                domain: _timing_statistics(values)
-                for domain, values in sorted(per_rank_by_domain.items())
-            },
-            "by_parallelism_domain_and_collective_type": by_domain_and_type(
+            "by_parallelism_domain": _timing_by_group(per_rank_by_domain),
+            "by_parallelism_domain_and_collective_type": _timing_by_domain_and_kind(
                 per_rank_by_domain_and_type
             ),
         },
         "all_rank_operation_span_ns": {
             "all": _timing_statistics(operation_spans),
-            "by_parallelism_domain": {
-                domain: _timing_statistics(values)
-                for domain, values in sorted(operation_spans_by_domain.items())
-            },
-            "by_parallelism_domain_and_collective_type": by_domain_and_type(
-                operation_spans_by_domain_and_type
+            "by_parallelism_domain": _timing_by_group(spans_by_domain),
+            "by_parallelism_domain_and_collective_type": _timing_by_domain_and_kind(
+                spans_by_domain_and_type
             ),
-            "by_training_step": {
-                step: _timing_statistics(values)
-                for step, values in sorted(
-                    operation_spans_by_step.items(),
-                    key=lambda entry: _training_step_sort_key(entry[0]),
-                )
-            },
+            "by_training_step": _timing_by_step(spans_by_step),
         },
-    }
-
-
-def _timing_by_field(
-    flow_rows: list[dict[str, str]], field: str
-) -> dict[str, dict[str, int | None]]:
-    durations: dict[str, list[int]] = defaultdict(list)
-    for row in flow_rows:
-        durations[row.get(field) or "unknown"].append(_flow_duration_ns(row))
-    return {
-        name: _timing_statistics(values)
-        for name, values in sorted(durations.items(), key=lambda entry: entry[0])
-    }
-
-
-def _timing_by_domain_and_kind(
-    flow_rows: list[dict[str, str]],
-) -> dict[str, dict[str, dict[str, int | None]]]:
-    durations: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
-    for row in flow_rows:
-        domain = row.get("parallelism_domain") or "unknown"
-        kind = row.get("flow_kind") or "unknown"
-        durations[domain][kind].append(_flow_duration_ns(row))
-    return {
-        domain: {
-            kind: _timing_statistics(values)
-            for kind, values in sorted(kinds.items(), key=lambda entry: entry[0])
-        }
-        for domain, kinds in sorted(durations.items(), key=lambda entry: entry[0])
     }
 
 
@@ -286,7 +350,10 @@ def _models_no_loss_mechanism(manifest: dict[str, Any] | None) -> bool:
 
 
 def _verify_lossless_transport(
-    flow_rows: list[dict[str, str]], manifest: dict[str, Any] | None
+    flow_count: int,
+    retransmitted_bytes: int,
+    recovery_events: int,
+    manifest: dict[str, Any] | None,
 ) -> dict[str, int | str]:
     """Require zero recovery from a run that models no loss mechanism.
 
@@ -301,23 +368,43 @@ def _verify_lossless_transport(
     """
     if not _models_no_loss_mechanism(manifest):
         return {"status": "not_applicable"}
-    retransmitted_bytes = sum(
-        _optional_nonnegative_int(row, "retransmitted_bytes") for row in flow_rows
-    )
-    recovery_events = sum(
-        _optional_nonnegative_int(row, "recovery_events") for row in flow_rows
-    )
     if retransmitted_bytes or recovery_events:
         raise ValueError(
             "run models no loss mechanism but recorded transport recovery "
             f"(retransmitted_bytes={retransmitted_bytes}, "
             f"recovery_events={recovery_events})"
         )
-    return {"status": "verified", "flow_count": len(flow_rows)}
+    return {"status": "verified", "flow_count": flow_count}
 
 
-def _flow_key(row: dict[str, str]) -> tuple[int, int, int, int]:
+_KEY_FIELD_BITS = 24
+_KEY_TIME_BITS = 64
+
+
+def _packed_flow_key(
+    src: int, dst: int, source_port: int, start_time_ns: int
+) -> int:
+    """Pack a flow's identity into a single integer.
+
+    Millions of these are live at once during the join, where one four-integer
+    tuple per flow costs roughly three times what the packed form does.
+    """
+    for value, bits in (
+        (src, _KEY_FIELD_BITS),
+        (dst, _KEY_FIELD_BITS),
+        (source_port, _KEY_FIELD_BITS),
+        (start_time_ns, _KEY_TIME_BITS),
+    ):
+        if value < 0 or value >> bits:
+            raise ValueError("flow identity is outside the joinable range")
     return (
+        ((src << _KEY_FIELD_BITS | dst) << _KEY_FIELD_BITS | source_port)
+        << _KEY_TIME_BITS
+    ) | start_time_ns
+
+
+def _flow_key(row: dict[str, str]) -> int:
+    return _packed_flow_key(
         _as_int(row, "src"),
         _as_int(row, "dst"),
         _as_int(row, "source_port"),
@@ -333,93 +420,124 @@ def _fct_node_id(encoded_address: str) -> int:
     return (address >> 8) & 0xFFFF
 
 
-def _load_fct_records(
-    path: Path,
-) -> dict[tuple[int, int, int, int], dict[str, int]]:
-    # A source port names a live five-tuple, not a flow: the ns-3 bridge
-    # reuses one once its queue pair terminates, so only the port together
-    # with the flow's start time identifies a flow across a whole run.
-    records: dict[tuple[int, int, int, int], dict[str, int]] = {}
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        fields = line.split()
-        if len(fields) != 8:
-            raise ValueError(f"invalid FCT record at {path}:{line_number}")
-        (
-            source,
-            destination,
-            source_port,
-            _destination_port,
-            size,
-            start,
-            duration,
-            standalone,
-        ) = fields
-        key = (
-            _fct_node_id(source),
-            _fct_node_id(destination),
-            int(source_port),
-            int(start),
-        )
-        if key in records:
-            raise ValueError("FCT records contain a duplicate flow key")
-        try:
-            records[key] = {
-                "physical_bytes": int(size),
-                "start_time_ns": int(start),
-                "duration_ns": int(duration),
-                "standalone_fct_ns": int(standalone),
-            }
-        except ValueError as error:
-            raise ValueError(
-                f"invalid numeric FCT record at {path}:{line_number}"
-            ) from error
+def _load_fct_records(path: Path) -> dict[int, tuple[int, int] | None]:
+    """Index `fct.txt` by packed flow key.
+
+    A source port names a live five-tuple, not a flow: the ns-3 bridge reuses
+    one once its queue pair terminates, so only the port together with the
+    flow's start time identifies a flow across a whole run. Values are
+    `(physical_bytes, duration_ns)`; the join replaces each with `None` as it
+    consumes it, which both detects a duplicate on the telemetry side and
+    releases the record while the pass is still running.
+    """
+    records: dict[int, tuple[int, int] | None] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            fields = line.split()
+            if len(fields) != 8:
+                raise ValueError(f"invalid FCT record at {path}:{line_number}")
+            (
+                source,
+                destination,
+                source_port,
+                _destination_port,
+                size,
+                start,
+                duration,
+                standalone,
+            ) = fields
+            try:
+                value = (int(size), int(duration))
+                int(standalone)
+                key = _packed_flow_key(
+                    _fct_node_id(source),
+                    _fct_node_id(destination),
+                    int(source_port),
+                    int(start),
+                )
+            except ValueError as error:
+                raise ValueError(
+                    f"invalid numeric FCT record at {path}:{line_number}"
+                ) from error
+            if key in records:
+                raise ValueError("FCT records contain a duplicate flow key")
+            records[key] = value
     return records
 
 
-def _verify_fct_join(
-    flow_rows: list[dict[str, str]], fct_path: Path
-) -> dict[str, int | str]:
-    completed_rows = [row for row in flow_rows if _terminal_outcome(row) == "completed"]
-    failed_flow_count = len(flow_rows) - len(completed_rows)
-    if not fct_path.is_file():
+_ABSENT: Final = object()
+"""Distinguishes an unknown key from a consumed one in the FCT index."""
+
+
+class _FctJoin:
+    """Match completed flow telemetry against `fct.txt` one row at a time.
+
+    The set-based join built a dict of every telemetry row *and* a dict of
+    every FCT record, then compared the two key sets. Only the FCT side
+    survives here, and each record passes through three states exactly once:
+    unknown (absent from the index), pending (a byte/duration pair), consumed
+    (`None`). Python cannot seal that sum, so the transition is confined to
+    `consume` and the sentinel is compared by identity.
+    """
+
+    __slots__ = ("_matched", "_mismatch", "_missing", "_records", "available")
+
+    def __init__(self, fct_path: Path) -> None:
+        self.available = fct_path.is_file()
+        self._records = _load_fct_records(fct_path) if self.available else {}
+        self._matched = 0
+        self._missing = 0
+        self._mismatch: str | None = None
+
+    def consume(self, row: dict[str, str]) -> None:
+        if not self.available:
+            return
+        key = _flow_key(row)
+        record = self._records.get(key, _ABSENT)
+        if record is _ABSENT:
+            self._missing += 1
+            return
+        if record is None:
+            raise ValueError("flow telemetry contains a duplicate flow key")
+        self._records[key] = None
+        self._matched += 1
+        # Report a missing or extra record ahead of a field mismatch, as the
+        # set-based join did: an incomplete join explains the mismatches.
+        if self._mismatch is not None:
+            return
+        physical_bytes, duration_ns = record
+        if _as_int(row, "physical_bytes") != physical_bytes:
+            self._mismatch = "telemetry/FCT physical-byte mismatch"
+        elif _flow_duration_ns(row) != duration_ns:
+            self._mismatch = "telemetry/FCT duration mismatch"
+
+    def result(self, failed_flow_count: int) -> dict[str, int | str]:
+        if not self.available:
+            return {
+                "status": "not_available",
+                "failed_flow_count": failed_flow_count,
+            }
+        extra = len(self._records) - self._matched
+        if self._missing or extra:
+            raise ValueError(
+                "telemetry/FCT join is incomplete "
+                f"(missing={self._missing}, extra={extra})"
+            )
+        if self._mismatch is not None:
+            raise ValueError(self._mismatch)
         return {
-            "status": "not_available",
+            "status": "verified" if failed_flow_count == 0 else "partial_verified",
+            "telemetry_flow_count": self._matched,
+            "fct_record_count": len(self._records),
             "failed_flow_count": failed_flow_count,
         }
-    records = _load_fct_records(fct_path)
-    telemetry = {_flow_key(row): row for row in completed_rows}
-    if len(telemetry) != len(completed_rows):
-        raise ValueError("flow telemetry contains a duplicate flow key")
-    missing = set(telemetry) - set(records)
-    extra = set(records) - set(telemetry)
-    if missing or extra:
-        raise ValueError(
-            "telemetry/FCT join is incomplete "
-            f"(missing={len(missing)}, extra={len(extra)})"
-        )
-    for key, row in telemetry.items():
-        record = records[key]
-        if _as_int(row, "physical_bytes") != record["physical_bytes"]:
-            raise ValueError("telemetry/FCT physical-byte mismatch")
-        if _as_int(row, "start_time_ns") != record["start_time_ns"]:
-            raise ValueError("telemetry/FCT start-time mismatch")
-        if _flow_duration_ns(row) != record["duration_ns"]:
-            raise ValueError("telemetry/FCT duration mismatch")
-    return {
-        "status": "verified" if failed_flow_count == 0 else "partial_verified",
-        "telemetry_flow_count": len(telemetry),
-        "fct_record_count": len(records),
-        "failed_flow_count": failed_flow_count,
-    }
 
 
 def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
     path = ns3_dir / "transport_events.csv"
     if not path.is_file():
         return {"status": "not_available"}
-    rows = load_csv(path)
+    event_count = 0
     events: dict[str, int] = defaultdict(int)
     bytes_by_event: dict[str, int] = defaultdict(int)
     plane_events: dict[str, int] = defaultdict(int)
@@ -452,7 +570,10 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "trim_bts_lasthop_egress_queue",
     }
     trim_events = {event for event in valid_events if event.startswith("trim_")}
-    for row in rows:
+    # A trimming or loss profile records one row per impaired packet, so this
+    # file is unbounded for the same reason `flow_events.csv` is.
+    for row in iter_csv(path):
+        event_count += 1
         event = row.get("event")
         plane = row.get("plane")
         if event not in valid_events or plane not in {"data", "control"}:
@@ -476,7 +597,7 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
 
     return {
         "status": "available",
-        "event_count": len(rows),
+        "event_count": event_count,
         "event_counts": dict(sorted(events.items())),
         "event_bytes": dict(sorted(bytes_by_event.items())),
         "plane_event_counts": {
@@ -547,9 +668,7 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
         queues: set[tuple[int, int]] = set()
         max_queue_bytes = 0
         peak_queue_locations: set[tuple[int, int]] = set()
-        for line_number, line in enumerate(
-            queue_path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for line_number, line in _iter_lines(queue_path):
             fields = line.split()
             if not fields:
                 continue
@@ -600,9 +719,7 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
         affected: dict[tuple[int, int, int | None], int] = {}
         event_count = 0
         uses_queue_identity = True
-        for line_number, line in enumerate(
-            pfc_path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for line_number, line in _iter_lines(pfc_path):
             if not line.strip():
                 continue
             fields = line.split()
@@ -692,29 +809,212 @@ def _summarize_ns3_observability(ns3_dir: Path) -> dict[str, Any]:
     }
 
 
-def _traffic_bytes(rows: list[dict[str, str]]) -> dict[str, int]:
-    return {
-        "flow_count": len(rows),
-        "logical_bytes": sum(_as_int(row, "logical_bytes") for row in rows),
-        "physical_bytes": sum(_as_int(row, "physical_bytes") for row in rows),
-    }
+_COUNTER_FIELDS: Final = (
+    "data_attempted_bytes",
+    "retransmitted_bytes",
+    "recovery_events",
+    "trimmed_payload_bytes",
+    "trim_notifications",
+    "trim_ftd_repairs",
+    "trim_bts_notifications",
+    "trim_lasthop_notifications",
+    "trim_recovery_events",
+    "stale_trim_notifications",
+)
+"""Telemetry columns summed verbatim. The column name is the only name they
+have, so the totals stay keyed by it rather than restating each one."""
+
+_FOREGROUND_LOGICAL_KINDS: Final = frozenset(
+    {"foreground_payload", "provenance_control"}
+)
+
+_STEP_BUCKET_FIELDS: Final = (
+    "flows",
+    "completed_flows",
+    "failed_flows",
+    "shed_flows",
+    "logical_bytes",
+    "physical_bytes",
+)
 
 
-def _background_timeline(rows: list[dict[str, str]]) -> dict[str, int | str]:
-    background_rows = [
-        row for row in rows if row.get("flow_kind") == "background_microburst"
-    ]
-    if not background_rows:
-        return {"status": "no_background_microburst"}
-    start_time_ns = min(_as_int(row, "start_time_ns") for row in background_rows)
-    end_time_ns = max(_as_int(row, "end_time_ns") for row in background_rows)
-    return {
-        "status": "available",
-        **_traffic_bytes(background_rows),
-        "start_time_ns": start_time_ns,
-        "end_time_ns": end_time_ns,
-        "span_ns": end_time_ns - start_time_ns,
-    }
+def _is_dp_all_reduce(row: dict[str, str]) -> bool:
+    """A flow whose logical origin is a DP All-Reduce payload."""
+    return (
+        row.get("parallelism_domain") == "dp"
+        and row.get("origin_transport_role") == "collective_payload"
+        and row.get("collective_type") == "all_reduce"
+    )
+
+
+def _is_valid_shed(row: dict[str, str]) -> bool:
+    """The selection policy may only substitute a DP All-Reduce payload."""
+    return (
+        _as_bool(row, "admission_eligible")
+        and _is_dp_all_reduce(row)
+        and row.get("flow_kind") == "provenance_control"
+        and row.get("transport_role") == "provenance_control"
+    )
+
+
+
+
+class _FlowStatistics:
+    """Every figure the analyzer derives from `flow_events.csv`, in one pass.
+
+    Validation, aggregation, and the FCT join all consume the same row and
+    then drop it. Duration columns are the only unbounded state and they hold
+    8 bytes per flow, so a run with millions of queue pairs costs megabytes
+    here instead of the tens of gigabytes that retaining the rows would.
+    """
+
+    __slots__ = (
+        "_join",
+        "all_durations",
+        "background",
+        "background_window",
+        "by_domain_and_kind",
+        "by_flow_kind",
+        "by_parallelism_domain",
+        "by_step",
+        "by_training_step",
+        "completed_count",
+        "counters",
+        "dp_all_reduce_traffic",
+        "failed_by_reason",
+        "failed_count",
+        "flow_count",
+        "foreground_traffic",
+        "shed_count",
+        "shed_logical_bytes",
+        "total_logical_bytes",
+        "total_physical_bytes",
+        "total_traffic",
+    )
+
+    def __init__(self, join: _FctJoin) -> None:
+        self._join = join
+        self.flow_count = 0
+        self.completed_count = 0
+        self.failed_count = 0
+        self.shed_count = 0
+        self.total_logical_bytes = 0
+        self.total_physical_bytes = 0
+        self.shed_logical_bytes = 0
+        self.counters = dict.fromkeys(_COUNTER_FIELDS, 0)
+        self.failed_by_reason: dict[str, int] = defaultdict(int)
+        self.total_traffic = _Traffic()
+        self.foreground_traffic = _Traffic()
+        self.dp_all_reduce_traffic = _Traffic()
+        self.background = _Traffic()
+        self.background_window: _Window | None = None
+        self.by_step: dict[str, dict[str, int]] = defaultdict(
+            lambda: dict.fromkeys(_STEP_BUCKET_FIELDS, 0)
+        )
+        self.all_durations = array("q")
+        self.by_training_step = _durations()
+        self.by_parallelism_domain = _durations()
+        self.by_flow_kind = _durations()
+        self.by_domain_and_kind = _durations()
+
+    def consume(self, row: dict[str, str]) -> None:
+        """Fold one flow into every accumulator, then drop it.
+
+        The checks run in the order the row-list implementation ran them, so a
+        malformed row still reports the same first violation.
+        """
+        logical_bytes = _as_int(row, "logical_bytes")
+        physical_bytes = _as_int(row, "physical_bytes")
+        outcome = _terminal_outcome(row)
+        failure_reason = row.get("failure_reason")
+        if outcome == "completed" and failure_reason:
+            raise ValueError("completed flow must not have a failure reason")
+        if outcome == "failed" and not failure_reason:
+            raise ValueError("failed flow must record a failure reason")
+
+        trim_notifications = _optional_nonnegative_int(row, "trim_notifications")
+        if trim_notifications and (
+            _optional_nonnegative_int(row, "trimmed_payload_bytes") == 0
+        ):
+            raise ValueError("trim notification must identify undelivered payload bytes")
+        if (
+            trim_notifications
+            and outcome == "completed"
+            and _optional_nonnegative_int(row, "data_attempted_bytes") < physical_bytes
+        ):
+            raise ValueError("completed flow cannot deliver more bytes than attempted")
+
+        kind = row.get("flow_kind")
+        domain = row.get("parallelism_domain")
+        shed = row.get("decision") == "shed"
+        if shed:
+            if not _is_valid_shed(row):
+                raise ValueError(
+                    "shedding policy affected a flow outside DP All-Reduce payloads"
+                )
+            self.shed_count += 1
+            self.shed_logical_bytes += logical_bytes
+        if kind == "provenance_control" and physical_bytes <= 0:
+            raise ValueError("provenance control flow must carry nonzero physical bytes")
+
+        self.flow_count += 1
+        self.total_logical_bytes += logical_bytes
+        self.total_physical_bytes += physical_bytes
+        for field in _COUNTER_FIELDS:
+            self.counters[field] += _optional_nonnegative_int(row, field)
+
+        self.total_traffic.add(logical_bytes, physical_bytes)
+        if kind in _FOREGROUND_LOGICAL_KINDS:
+            self.foreground_traffic.add(logical_bytes, physical_bytes)
+        if _is_dp_all_reduce(row):
+            self.dp_all_reduce_traffic.add(logical_bytes, physical_bytes)
+
+        bucket = self.by_step[row.get("training_step", "unknown")]
+        bucket["flows"] += 1
+        bucket[f"{outcome}_flows"] += 1
+        bucket["shed_flows"] += shed
+        bucket["logical_bytes"] += logical_bytes
+        bucket["physical_bytes"] += physical_bytes
+
+        if kind == "background_microburst":
+            self.background.add(logical_bytes, physical_bytes)
+            start_time_ns = _as_int(row, "start_time_ns")
+            end_time_ns = _as_int(row, "end_time_ns")
+            window = self.background_window
+            self.background_window = (
+                _Window(start_time_ns, end_time_ns)
+                if window is None
+                else window.join(start_time_ns, end_time_ns)
+            )
+
+        if outcome == "failed":
+            self.failed_count += 1
+            self.failed_by_reason[failure_reason or ""] += 1
+            return
+
+        self.completed_count += 1
+        duration = _flow_duration_ns(row)
+        step = row.get("training_step") or "unknown"
+        domain_name = domain or "unknown"
+        kind_name = kind or "unknown"
+        self.all_durations.append(duration)
+        self.by_training_step[step].append(duration)
+        self.by_parallelism_domain[domain_name].append(duration)
+        self.by_flow_kind[kind_name].append(duration)
+        self.by_domain_and_kind[(domain_name, kind_name)].append(duration)
+        self._join.consume(row)
+
+    def background_timeline(self) -> dict[str, int | str]:
+        window = self.background_window
+        if window is None:
+            return {"status": "no_background_microburst"}
+        return {
+            "status": "available",
+            **self.background.summary(),
+            "start_time_ns": window.start_ns,
+            "end_time_ns": window.end_ns,
+            "span_ns": window.span_ns,
+        }
 
 
 def summarize(
@@ -725,9 +1025,11 @@ def summarize(
     manifest_path: Path | None = None,
 ) -> dict[str, Any]:
     telemetry_dir = telemetry_dir.resolve()
-    flow_rows = load_csv(telemetry_dir / "flow_events.csv")
+    flow_events = telemetry_dir / "flow_events.csv"
+    if not flow_events.is_file():
+        raise FileNotFoundError(f"missing telemetry file: {flow_events}")
     completion_rows = load_csv(telemetry_dir / "rank_completion.csv")
-    collective_rows = _load_optional_csv(telemetry_dir / "collective_events.csv")
+    collective_events = telemetry_dir / "collective_events.csv"
     if fct_path is None:
         fct_path = telemetry_dir.parent / "ns3" / "fct.txt"
     if ns3_dir is None:
@@ -740,197 +1042,99 @@ def summarize(
         completion_rows, expected_rank_count
     )
 
-    total_logical_bytes = sum(_as_int(row, "logical_bytes") for row in flow_rows)
-    total_physical_bytes = sum(_as_int(row, "physical_bytes") for row in flow_rows)
-    completed_rows = [row for row in flow_rows if _terminal_outcome(row) == "completed"]
-    failed_rows = [row for row in flow_rows if _terminal_outcome(row) == "failed"]
-    for row in completed_rows:
-        if row.get("failure_reason"):
-            raise ValueError("completed flow must not have a failure reason")
-    for row in failed_rows:
-        if not row.get("failure_reason"):
-            raise ValueError("failed flow must record a failure reason")
-    for row in flow_rows:
-        if _optional_nonnegative_int(row, "trim_notifications") and (
-            _optional_nonnegative_int(row, "trimmed_payload_bytes") == 0
-        ):
-            raise ValueError(
-                "trim notification must identify undelivered payload bytes"
-            )
-        if (
-            _optional_nonnegative_int(row, "trim_notifications")
-            and _terminal_outcome(row) == "completed"
-            and (
-                _optional_nonnegative_int(row, "data_attempted_bytes")
-                < _as_int(row, "physical_bytes")
-            )
-        ):
-            raise ValueError("completed flow cannot deliver more bytes than attempted")
-    shed_rows = [row for row in flow_rows if row.get("decision") == "shed"]
-    invalid_sheds = [
-        row
-        for row in shed_rows
-        if not (
-            _as_bool(row, "admission_eligible")
-            and row.get("flow_kind") == "provenance_control"
-            and row.get("parallelism_domain") == "dp"
-            and row.get("origin_transport_role") == "collective_payload"
-            and row.get("collective_type") == "all_reduce"
-            and row.get("transport_role") == "provenance_control"
-        )
-    ]
-    if invalid_sheds:
-        raise ValueError(
-            "shedding policy affected a flow outside DP All-Reduce payloads"
-        )
-
-    invalid_provenance = [
-        row
-        for row in flow_rows
-        if row.get("flow_kind") == "provenance_control"
-        and _as_int(row, "physical_bytes") <= 0
-    ]
-    if invalid_provenance:
-        raise ValueError("provenance control flow must carry nonzero physical bytes")
-
-    by_step: dict[str, dict[str, int]] = defaultdict(
-        lambda: {
-            "flows": 0,
-            "completed_flows": 0,
-            "failed_flows": 0,
-            "shed_flows": 0,
-            "logical_bytes": 0,
-            "physical_bytes": 0,
-        }
-    )
-    for row in flow_rows:
-        step = row.get("training_step", "unknown")
-        bucket = by_step[step]
-        bucket["flows"] += 1
-        bucket[f"{_terminal_outcome(row)}_flows"] += 1
-        bucket["shed_flows"] += row.get("decision") == "shed"
-        bucket["logical_bytes"] += _as_int(row, "logical_bytes")
-        bucket["physical_bytes"] += _as_int(row, "physical_bytes")
+    join = _FctJoin(fct_path.resolve())
+    statistics = _FlowStatistics(join)
+    for row in iter_csv(flow_events):
+        statistics.consume(row)
 
     completion_times = [_as_int(row, "completion_time_ns") for row in completion_rows]
-    flow_completion = _timing_statistics(
-        [_flow_duration_ns(row) for row in completed_rows]
-    )
+    flow_completion = _timing_statistics(statistics.all_durations)
     rank_completion = _timing_statistics(completion_times)
-    foreground_logical_rows = [
-        row
-        for row in flow_rows
-        if row.get("flow_kind") in ("foreground_payload", "provenance_control")
-    ]
-    dp_all_reduce_rows = [
-        row
-        for row in flow_rows
-        if row.get("parallelism_domain") == "dp"
-        and row.get("origin_transport_role") == "collective_payload"
-        and row.get("collective_type") == "all_reduce"
-    ]
-    fct_join = _verify_fct_join(flow_rows, fct_path.resolve())
-    lossless_transport = _verify_lossless_transport(flow_rows, manifest)
-    collective_completion = _summarize_collectives(collective_rows)
+    fct_join = join.result(statistics.failed_count)
+    lossless_transport = _verify_lossless_transport(
+        statistics.flow_count,
+        statistics.counters["retransmitted_bytes"],
+        statistics.counters["recovery_events"],
+        manifest,
+    )
+    collective_completion = (
+        _summarize_collectives(iter_csv(collective_events))
+        if collective_events.is_file()
+        else {"status": "not_available"}
+    )
     ns3_observability = _summarize_ns3_observability(ns3_dir.resolve())
     primary_eligible = (
         expected_rank_count is not None
-        and not failed_rows
+        and not statistics.failed_count
         and rank_completion_status["status"] == "verified"
         and collective_completion["status"] == "available"
         and fct_join["status"] == "verified"
     )
     return {
-        "flow_count": len(flow_rows),
-        "completed_flow_count": len(completed_rows),
-        "failed_flow_count": len(failed_rows),
-        "shed_flow_count": len(shed_rows),
-        "total_logical_bytes": total_logical_bytes,
-        "total_physical_bytes": total_physical_bytes,
-        "shed_logical_bytes": sum(_as_int(row, "logical_bytes") for row in shed_rows),
+        "flow_count": statistics.flow_count,
+        "completed_flow_count": statistics.completed_count,
+        "failed_flow_count": statistics.failed_count,
+        "shed_flow_count": statistics.shed_count,
+        "total_logical_bytes": statistics.total_logical_bytes,
+        "total_physical_bytes": statistics.total_physical_bytes,
+        "shed_logical_bytes": statistics.shed_logical_bytes,
         "completion_rank_count": len(completion_rows),
         "completion_time_ns_max": rank_completion["max_ns"] or 0,
         "rank_completion_time_ns": rank_completion,
         "rank_completion_status": rank_completion_status,
         "flow_completion_time_ns": {
             "all": flow_completion,
-            "by_training_step": _timing_by_field(completed_rows, "training_step"),
-            "by_parallelism_domain": _timing_by_field(
-                completed_rows, "parallelism_domain"
+            "by_training_step": _timing_by_group(statistics.by_training_step),
+            "by_parallelism_domain": _timing_by_group(
+                statistics.by_parallelism_domain
             ),
-            "by_flow_kind": _timing_by_field(completed_rows, "flow_kind"),
+            "by_flow_kind": _timing_by_group(statistics.by_flow_kind),
             "by_parallelism_domain_and_flow_kind": _timing_by_domain_and_kind(
-                completed_rows
+                statistics.by_domain_and_kind
             ),
         },
         "transport_recovery": {
-            "data_attempted_bytes": sum(
-                _optional_nonnegative_int(row, "data_attempted_bytes")
-                for row in flow_rows
-            ),
-            "retransmitted_bytes": sum(
-                _optional_nonnegative_int(row, "retransmitted_bytes")
-                for row in flow_rows
-            ),
-            "recovery_event_count": sum(
-                _optional_nonnegative_int(row, "recovery_events") for row in flow_rows
-            ),
-            "failed_by_reason": {
-                reason: sum(
-                    1 for row in failed_rows if row.get("failure_reason") == reason
-                )
-                for reason in sorted(
-                    {row.get("failure_reason", "") for row in failed_rows}
-                )
-            },
-            "trimmed_payload_bytes": sum(
-                _optional_nonnegative_int(row, "trimmed_payload_bytes")
-                for row in flow_rows
-            ),
-            "trim_notification_count": sum(
-                _optional_nonnegative_int(row, "trim_notifications")
-                for row in flow_rows
-            ),
-            "trim_ftd_repair_count": sum(
-                _optional_nonnegative_int(row, "trim_ftd_repairs") for row in flow_rows
-            ),
-            "trim_bts_notification_count": sum(
-                _optional_nonnegative_int(row, "trim_bts_notifications")
-                for row in flow_rows
-            ),
-            "trim_lasthop_notification_count": sum(
-                _optional_nonnegative_int(row, "trim_lasthop_notifications")
-                for row in flow_rows
-            ),
-            "trim_recovery_event_count": sum(
-                _optional_nonnegative_int(row, "trim_recovery_events")
-                for row in flow_rows
-            ),
-            "stale_trim_notification_count": sum(
-                _optional_nonnegative_int(row, "stale_trim_notifications")
-                for row in flow_rows
-            ),
+            "data_attempted_bytes": statistics.counters["data_attempted_bytes"],
+            "retransmitted_bytes": statistics.counters["retransmitted_bytes"],
+            "recovery_event_count": statistics.counters["recovery_events"],
+            "failed_by_reason": dict(sorted(statistics.failed_by_reason.items())),
+            "trimmed_payload_bytes": statistics.counters["trimmed_payload_bytes"],
+            "trim_notification_count": statistics.counters["trim_notifications"],
+            "trim_ftd_repair_count": statistics.counters["trim_ftd_repairs"],
+            "trim_bts_notification_count": statistics.counters[
+                "trim_bts_notifications"
+            ],
+            "trim_lasthop_notification_count": statistics.counters[
+                "trim_lasthop_notifications"
+            ],
+            "trim_recovery_event_count": statistics.counters["trim_recovery_events"],
+            "stale_trim_notification_count": statistics.counters[
+                "stale_trim_notifications"
+            ],
         },
         "collective_completion": collective_completion,
         "physical_traffic_bytes": {
-            "total": _traffic_bytes(flow_rows),
-            "foreground_logical_operations": _traffic_bytes(foreground_logical_rows),
-            "dp_all_reduce": _traffic_bytes(dp_all_reduce_rows),
+            "total": statistics.total_traffic.summary(),
+            "foreground_logical_operations": statistics.foreground_traffic.summary(),
+            "dp_all_reduce": statistics.dp_all_reduce_traffic.summary(),
         },
-        "background_microburst_timeline": _background_timeline(flow_rows),
+        "background_microburst_timeline": statistics.background_timeline(),
         "fct_join": fct_join,
         "lossless_transport": lossless_transport,
         "ns3_observability": ns3_observability,
         "primary_analysis_eligibility": {
             "status": "eligible" if primary_eligible else "ineligible",
             "expected_rank_count": expected_rank_count,
-            "failed_flow_count": len(failed_rows),
+            "failed_flow_count": statistics.failed_count,
             "rank_completion_status": rank_completion_status["status"],
             "collective_completion_status": collective_completion["status"],
             "fct_join_status": fct_join["status"],
         },
         "by_training_step": dict(
-            sorted(by_step.items(), key=lambda entry: _training_step_sort_key(entry[0]))
+            sorted(
+                statistics.by_step.items(),
+                key=lambda entry: _training_step_sort_key(entry[0]),
+            )
         ),
     }
 

@@ -945,6 +945,37 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     )
                     self.assertEqual(dp_bucket_sizes, {65_104_166, 65_104_167})
 
+    def test_degraded_clos_builds_only_the_live_spine_tier(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_64_direct2.json"
+        )
+        profile = load_profile(profile_path)
+        self.assertEqual(profile.network.spine_count, 8)
+        self.assertEqual(profile.network.failed_spine_count, 2)
+        layout = build_topology(profile.network, profile.ranks)
+        # 64 hosts + 8 leaves + 6 live spines; dark spines carry no links.
+        self.assertEqual(layout.node_count, 78)
+        self.assertEqual(len(layout.links), 64 + 8 * 6)
+        manifest = layout.manifest()
+        self.assertEqual(manifest["spine_count"], 8)
+        self.assertEqual(manifest["failed_spine_count"], 2)
+        self.assertEqual(manifest["live_spine_count"], 6)
+        self.assertIn("degraded", manifest["description"])
+
+    def test_degraded_clos_requires_a_live_spine(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_64_direct2.json"
+        )
+        document = json.loads(profile_path.read_text(encoding="utf-8"))
+        document["network"]["failed_spine_count"] = 8
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            invalid_profile = Path(temporary_directory) / "invalid.json"
+            invalid_profile.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "live spine"):
+                load_profile(invalid_profile)
+
     def test_ring_network_rejects_clos_only_fields(self) -> None:
         profile_path = (
             REPOSITORY_ROOT / "experiments/ring_3d/profiles/model_100b_256_ring.json"

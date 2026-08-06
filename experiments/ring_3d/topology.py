@@ -154,7 +154,14 @@ class DataPlaneLoss:
 
 @dataclass(frozen=True)
 class ClosNetwork:
-    """A two-stage leaf-spine fabric with host-attached leaf switches."""
+    """A two-stage leaf-spine fabric with host-attached leaf switches.
+
+    ``spine_count`` is the designed spine tier; ``failed_spine_count`` models
+    a degraded state — spines lost to failure or drained for maintenance —
+    by leaving that many designed spines dark. A rail-optimized 1:1 fabric
+    with failed spines is how production AI clusters actually experience
+    sustained oversubscription; it is an operating condition, not a design.
+    """
 
     link_rate: str
     packet_payload_bytes: int
@@ -162,6 +169,11 @@ class ClosNetwork:
     queue_monitor_interval_ns: int
     hosts_per_leaf: int
     spine_count: int
+    failed_spine_count: int = 0
+
+    @property
+    def live_spine_count(self) -> int:
+        return self.spine_count - self.failed_spine_count
     data_loss: DataPlaneLoss | None = None
     transport_recovery: TransportRecovery | None = None
     packet_trimming: PacketTrimming | None = None
@@ -566,7 +578,8 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "fabric",
     }
     topology_keys = {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
-    unknown_keys = set(document) - common_keys - topology_keys
+    optional_topology_keys = {"failed_spine_count"} if topology == "clos" else set()
+    unknown_keys = set(document) - common_keys - topology_keys - optional_topology_keys
     if unknown_keys:
         raise ValueError(f"unknown network keys: {sorted(unknown_keys)}")
     missing_keys = ({"link_rate"} | topology_keys) - set(document)
@@ -628,6 +641,15 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         )
     if spine_count > 255:
         raise ValueError("network.spine_count must not exceed 255")
+    failed_value = document.get("failed_spine_count", 0)
+    if isinstance(failed_value, bool) or not isinstance(failed_value, int):
+        raise ValueError("network.failed_spine_count must be an integer")
+    if failed_value < 0:
+        raise ValueError("network.failed_spine_count must not be negative")
+    if failed_value >= spine_count:
+        raise ValueError(
+            "network.failed_spine_count must leave at least one live spine"
+        )
     return ClosNetwork(
         link_rate=link_rate,
         packet_payload_bytes=packet_payload_bytes,
@@ -635,6 +657,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         queue_monitor_interval_ns=queue_monitor_interval_ns,
         hosts_per_leaf=hosts_per_leaf,
         spine_count=spine_count,
+        failed_spine_count=failed_value,
         data_loss=data_loss,
         transport_recovery=transport_recovery,
         packet_trimming=packet_trimming,
@@ -663,7 +686,11 @@ def _build_clos_topology(network: ClosNetwork, host_count: int) -> TopologyLayou
     leaf_count = host_count // network.hosts_per_leaf
     leaf_start = host_count
     spine_start = leaf_start + leaf_count
-    node_count = spine_start + network.spine_count
+    # Failed spines are simply absent from the built fabric: a dark spine
+    # carries no traffic and terminates no link, so only the live tier is
+    # materialized. The manifest keeps the designed count so a degraded run
+    # is legible as "a 1:1 fabric with spines down", not a smaller design.
+    node_count = spine_start + network.live_spine_count
     links = [
         TopologyLink(
             source=host,
@@ -679,7 +706,11 @@ def _build_clos_topology(network: ClosNetwork, host_count: int) -> TopologyLayou
     )
     return TopologyLayout(
         kind=network.kind,
-        description="Two-stage leaf-spine Clos",
+        description=(
+            "Two-stage leaf-spine Clos"
+            if network.failed_spine_count == 0
+            else "Two-stage leaf-spine Clos, degraded by failed spines"
+        ),
         host_count=host_count,
         node_count=node_count,
         switch_ids=tuple(range(leaf_start, node_count)),
@@ -688,6 +719,8 @@ def _build_clos_topology(network: ClosNetwork, host_count: int) -> TopologyLayou
         details=(
             ("leaf_count", leaf_count),
             ("spine_count", network.spine_count),
+            ("failed_spine_count", network.failed_spine_count),
+            ("live_spine_count", network.live_spine_count),
             ("hosts_per_leaf", network.hosts_per_leaf),
         ),
     )

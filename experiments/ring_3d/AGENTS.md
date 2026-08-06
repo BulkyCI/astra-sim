@@ -60,9 +60,10 @@ any research result.
 
 ## Claim boundaries
 
-The current mechanism models a lossless, congestion-inducing RDMA incast plus
-phase-aware logical payload substitution. It can establish modeled latency and
-traffic effects under that condition; it cannot establish model accuracy,
-partial-gradient quality, literal packet loss, or the original paper's
-selective-retransmission semantics. Keep this distinction visible in comments,
-reports, and pull requests.
+The flagship mechanism models a congestion-inducing RDMA incast on a
+best-effort UEC packet-trimming fabric plus phase-aware logical payload
+substitution; the historical Phase-1 reference remains lossless. It can
+establish modeled latency, loss-recovery, and traffic effects under those
+conditions; it cannot establish model accuracy, partial-gradient quality, or
+the original paper's selective-retransmission semantics. Keep this
+distinction visible in comments, reports, and pull requests.

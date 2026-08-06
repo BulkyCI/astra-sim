@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Generate a reproducible critical-learning-regime (CLR) mask.
 
-The schedule follows a decaying early-training probability with narrow Gaussian
-spikes at epoch boundaries:
+Critical learning regimes concentrate early in training, when the loss
+landscape is still being carved, and fade as the run converges. The schedule
+therefore decays over *normalized* training progress ``tau = t / (T - 1)`` so
+one parameter set draws the same curve at any step count, and every Gaussian
+epoch-boundary spike is scaled by the envelope at its own center so late
+spikes fade with the envelope instead of saturating the tail:
 
-    P(CLR | t) = min(1, exp(-lambda * t) + sum_k spike(t - k * epoch_steps))
+    envelope(tau)  = exp(-lambda * tau)
+    P(CLR | t) = min(1, envelope(tau_t)
+                        + sum_k amplitude * envelope(tau_k) * spike(t - k * E))
 
 The sampled CSV is immutable experiment input: the simulator consumes its
 ``step_id,is_clr`` mapping and does not draw CLR decisions at runtime.
@@ -21,7 +27,7 @@ from typing import Iterable
 
 import numpy as np
 
-DEFAULT_DECAY_RATE = 1.5
+DEFAULT_DECAY_RATE = 3.0
 DEFAULT_EPOCH_STEPS = 2
 DEFAULT_SPIKE_STDDEV_STEPS = 0.5
 DEFAULT_SPIKE_AMPLITUDE = 1.0
@@ -46,7 +52,7 @@ class ClrSchedule:
     is_clr: np.ndarray
     seed: int
     parameters: ClrScheduleParameters | None
-    model: str = "exponential_decay_with_gaussian_epoch_spikes"
+    model: str = "normalized_decay_with_decaying_epoch_spikes"
 
     def rows(self) -> Iterable[tuple[int, bool, float]]:
         return (
@@ -100,20 +106,31 @@ def validate_parameters(parameters: ClrScheduleParameters) -> ClrScheduleParamet
 def clr_probabilities(
     total_steps: int, parameters: ClrScheduleParameters = ClrScheduleParameters()
 ) -> np.ndarray:
-    """Return the vectorized CLR probability for every one-based training step."""
+    """Return the vectorized CLR probability for every one-based training step.
+
+    ``decay_rate`` applies over normalized training progress, so the curve
+    starts at certainty and reaches ``exp(-decay_rate)`` at the final step
+    regardless of the step count. Scaling each epoch-boundary spike by the
+    envelope at its own center keeps the schedule trending downward: an early
+    spike can restore near-certain CLR while a late one barely registers.
+    """
     total_steps = _require_positive_int(total_steps, "total_steps")
     parameters = validate_parameters(parameters)
     step_indices = np.arange(total_steps, dtype=np.float64)
-    probability = np.exp(-parameters.decay_rate * step_indices)
+    steps_to_converge = float(max(total_steps - 1, 1))
+    probability = np.exp(-parameters.decay_rate * step_indices / steps_to_converge)
     boundary_indices = np.arange(
         parameters.epoch_steps, total_steps, parameters.epoch_steps, dtype=np.float64
     )
     if boundary_indices.size:
+        amplitudes = parameters.spike_amplitude * np.exp(
+            -parameters.decay_rate * boundary_indices / steps_to_converge
+        )
         normalized_distance = (
             step_indices[:, np.newaxis] - boundary_indices[np.newaxis, :]
         ) / parameters.spike_stddev_steps
-        probability += parameters.spike_amplitude * np.exp(
-            -0.5 * np.square(normalized_distance)
+        probability += (
+            amplitudes[np.newaxis, :] * np.exp(-0.5 * np.square(normalized_distance))
         ).sum(axis=1)
     return np.minimum(1.0, probability)
 

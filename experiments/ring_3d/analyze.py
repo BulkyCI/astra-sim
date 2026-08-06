@@ -349,6 +349,23 @@ def _models_no_loss_mechanism(manifest: dict[str, Any] | None) -> bool:
     return isinstance(fabric, dict) and bool(fabric.get("pfc_enabled"))
 
 
+def _flow_control_regime(manifest: dict[str, Any] | None) -> str:
+    """Name how the fabric releases buffer pressure, for regime-aware gates.
+
+    A ``lossless_pfc`` fabric pauses upstream ports, so congestion leaves
+    completed PFC pause intervals. A ``best_effort`` fabric rejects buffer
+    admission instead, so congestion leaves trimmed or dropped packets and
+    can never leave a pause. A summary from a run without a manifest cannot
+    name its regime.
+    """
+    if manifest is None:
+        return "unknown"
+    fabric = manifest.get("fabric")
+    if not isinstance(fabric, dict):
+        return "unknown"
+    return "lossless_pfc" if fabric.get("pfc_enabled") else "best_effort"
+
+
 def _verify_lossless_transport(
     flow_count: int,
     retransmitted_bytes: int,
@@ -1120,6 +1137,7 @@ def summarize(
         },
         "background_microburst_timeline": statistics.background_timeline(),
         "fct_join": fct_join,
+        "flow_control_regime": _flow_control_regime(manifest),
         "lossless_transport": lossless_transport,
         "ns3_observability": ns3_observability,
         "primary_analysis_eligibility": {

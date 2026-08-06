@@ -188,7 +188,7 @@ def main() -> int:
     parser.add_argument(
         "--clr-decay-rate",
         type=float,
-        help="exponential CLR probability decay rate",
+        help="CLR probability decay over the full normalized training run",
     )
     parser.add_argument(
         "--clr-epoch-steps",

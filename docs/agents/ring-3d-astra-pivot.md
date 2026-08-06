@@ -20,7 +20,9 @@ assuming that an existing abstraction resolves a paper limitation.
 The project has separately adopted a
 [loss-tolerant RDMA transport requirement](loss-tolerant-rdma-decision.md).
 It sets the control/data-plane model contract but does not select a DBLP
-recovery design or change the current lossless Ring-3D result boundary.
+recovery design. The flagship Llama profile now exercises that contract on a
+best-effort UEC-trimming fabric; the historical Phase-1 reference keeps the
+original lossless result boundary.
 
 ## Causal contract for an acceptable deviation
 

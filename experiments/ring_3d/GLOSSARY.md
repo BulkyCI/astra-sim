@@ -44,7 +44,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | Field | Meaning | 70B example | Notes |
 | --- | --- | --- | --- |
 | `parallelism.tp`, `.pp`, `.dp` | Logical parallel dimensions | 8, 1, 2 | Ranks equal $TP\times PP\times DP$ |
-| `steps` | Modeled optimizer steps in the bounded experiment window | 2 | Includes the step-two incast; insufficient to characterize training warmup or a CLR distribution |
+| `steps` | Modeled optimizer steps in the bounded experiment window | 20 | Long enough to express the decaying CLR schedule; the incast fires at the profile's `microburst_trigger_step` |
 | `compute_duration_us` | Simulated compute duration per emitted compute node | 5,376 | Workload abstraction, not measured framework time |
 | `tp_all_reduce_bytes`, `pp_bytes`, `dp_all_reduce_bytes` | Logical collective payloads per emitted event | 64 MiB, 0, 68,359,375 B | Separate from physical transport overhead |
 | `seed` | Selection and CLR-mask seed unless overridden | 314159265 | Pair treatment must retain it |

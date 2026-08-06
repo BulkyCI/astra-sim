@@ -38,7 +38,7 @@ class ClrScheduleTests(unittest.TestCase):
         probabilities = clr_probabilities(
             12,
             ClrScheduleParameters(
-                decay_rate=1.0,
+                decay_rate=3.0,
                 epoch_steps=4,
                 spike_stddev_steps=0.1,
                 spike_amplitude=1.0,
@@ -47,9 +47,43 @@ class ClrScheduleTests(unittest.TestCase):
 
         self.assertEqual(probabilities[0], 1.0)
         self.assertGreater(probabilities[1], probabilities[2])
-        self.assertEqual(probabilities[4], 1.0)
-        self.assertEqual(probabilities[8], 1.0)
-        self.assertLess(probabilities[11], 0.001)
+        # Epoch boundaries spike above their neighbors...
+        self.assertGreater(probabilities[4], probabilities[3])
+        self.assertGreater(probabilities[4], probabilities[5])
+        self.assertGreater(probabilities[8], probabilities[7])
+        self.assertGreater(probabilities[8], probabilities[9])
+        # ...but each spike is scaled by the envelope, so later spikes fade
+        # instead of saturating the tail of the schedule.
+        self.assertGreater(probabilities[4], probabilities[8])
+        self.assertLess(probabilities[8], 0.5)
+        self.assertLess(probabilities[11], 0.06)
+
+    def test_probability_trends_downward_at_any_step_count(self) -> None:
+        for total_steps in (20, 40, 200):
+            probabilities = clr_probabilities(total_steps)
+            first_half = probabilities[: total_steps // 2].mean()
+            second_half = probabilities[total_steps // 2 :].mean()
+            self.assertGreater(
+                first_half,
+                second_half + 0.25,
+                f"CLR schedule must trend downward at {total_steps} steps",
+            )
+            last_quarter = probabilities[-(total_steps // 4) :].mean()
+            self.assertLess(
+                last_quarter,
+                0.2,
+                f"converged tail must be mostly non-CLR at {total_steps} steps",
+            )
+
+    def test_probability_shape_is_invariant_to_step_count(self) -> None:
+        # The same parameters must describe the same curve over normalized
+        # training progress: sampling the 40-step schedule at every other
+        # step reproduces the 20-step envelope away from spike centers.
+        spikeless = ClrScheduleParameters(spike_amplitude=1e-12)
+        coarse = clr_probabilities(20, spikeless)
+        fine = clr_probabilities(39, spikeless)
+        for index in range(20):
+            self.assertAlmostEqual(coarse[index], fine[2 * index], places=9)
 
     def test_csv_has_one_boolean_mapping_per_training_step(self) -> None:
         schedule = generate_clr_schedule(5, 42)

@@ -11,15 +11,17 @@ The trace generator writes one ET trace per rank, explicit TP/PP/DP communicator
 Before changing semantics or interpreting a result, read the
 [DBLP paper brief](../../docs/agents/ring-3d-paper-brief.md),
 [ASTRA-sim pivot](../../docs/agents/ring-3d-astra-pivot.md), and
-[glossary](GLOSSARY.md). The current experiment is a lossless incast plus
-logical-payload-substitution ablation, not a DBLP packet-loss reproduction.
+[glossary](GLOSSARY.md). The experiment is not a DBLP packet-loss
+reproduction: the flagship Llama profile runs a best-effort UEC
+packet-trimming fabric with bounded transport recovery, while the historical
+Phase-1 reference remains a lossless logical-payload-substitution ablation.
 
 ## Profiles
 
 - [profiles/smoke_8.json](profiles/smoke_8.json): $TP=2$, $PP=2$, $DP=2$, with an eight-host Clos topology.
 - [profiles/no_incast_8.json](profiles/no_incast_8.json): an otherwise identical negative control with synthetic microbursts disabled.
 - [profiles/retry_exhaustion_8.json](profiles/retry_exhaustion_8.json): a native regression fixture that deterministically exhausts a one-retry, data-only impairment budget; it must fail while retaining explicit terminal-QP telemetry and is never a primary-analysis result.
-- [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a two-step, production-shaped Llama 3 70B-class event window with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, a 400 Gb/s two-leaf Clos, and the retained step-two $7\times128$ MiB incast stressor.
+- [profiles/llama3_70b_16.json](profiles/llama3_70b_16.json): a twenty-step, production-shaped Llama 3 70B-class event window with $TP=8$, $PP=1$, $DP=2$, 16 ranks, 4 KiB RoCE payloads, and a 400 Gb/s two-leaf Clos running a best-effort UEC FTD-trimming fabric (no PFC, one-BDP data queues, 1 ms bounded recovery). Its $7\times128$ MiB incast stressor fires at step 18, deep in the converged non-CLR tail of the schedule.
 - [profiles/dblp_phase1_effnet_64dp.json](profiles/dblp_phase1_effnet_64dp.json): a 64-rank, communication-only native reference for the historical Phase-1 EfficientNet trace: 186 chained 21,200,000-byte DP All-Reduces on a 400 Gb/s physical switch ring, with no microburst or configured data loss.
 - [profiles/model_100b_256_clos.json](profiles/model_100b_256_clos.json): a two-step 100B-parameter structural window on 256 accelerator cards and a 16-leaf × 16-spine Clos, with the shared step-two seven-source incast.
 - [profiles/model_100b_256_ring.json](profiles/model_100b_256_ring.json): the identical 100B window and incast schedule on a 256-switch host-attached physical ring, retained to measure the physical Clos-versus-ring topology difference.
@@ -51,14 +53,14 @@ uv run --locked python experiments/ring_3d/analyze.py \
 
 Every materialized run contains a static `clr_mask.csv` with one row per one-based training step: `step_id,is_clr,probability`. It is generated once with the profile/override seed and passed to ns-3 as `--clr-mask-configuration`. The runtime reads the mask before scheduling work, then applies the strict CLR tolerance when `is_clr=1` and the relaxed stable-convergence tolerance when `is_clr=0`; it does not sample CLR state during simulation.
 
-The vectorized schedule computes
+Critical learning regimes concentrate early in training and fade as the run converges, so the schedule decays over normalized training progress $\tau_t = t/(T-1)$ and scales every epoch-boundary spike by the envelope at its own center:
 
 $$
-P(\mathrm{CLR}\mid t)=\min\left(1, e^{-\lambda t}+
-\sum_k A\exp\left(-\frac{(t-kT_{\mathrm{epoch}})^2}{2\sigma^2}\right)\right),
+P(\mathrm{CLR}\mid t)=\min\left(1, e^{-\lambda \tau_t}+
+\sum_k A\,e^{-\lambda \tau_{kT_{\mathrm{epoch}}}}\exp\left(-\frac{(t-kT_{\mathrm{epoch}})^2}{2\sigma^2}\right)\right),
 $$
 
-then samples the whole Boolean mask with a fixed NumPy generator seed. Defaults are $\lambda=1.5$, $T_{\mathrm{epoch}}=2$ steps, $\sigma=0.5$ steps, and $A=1.0$. The first zero-indexed step is therefore always a CLR; narrow epoch-boundary spikes restore CLR state at configured shifts. `manifest.json` retains all parameters, the seed, and the CLR-step count.
+then samples the whole Boolean mask with a fixed NumPy generator seed. Defaults are $\lambda=3.0$ over the full run, $T_{\mathrm{epoch}}=2$ steps, $\sigma=0.5$ steps, and $A=1.0$. Normalizing progress makes one parameter set describe the same curve at any step count; envelope-scaled spikes let an early boundary restore near-certain CLR while a late one barely registers, so the schedule trends monotonically from certain CLR at the first step toward $e^{-\lambda}$ at the last. `manifest.json` retains all parameters, the seed, and the CLR-step count.
 
 A profile may instead retain an explicit, externally derived static mask through
 `clr_schedule.kind: "explicit_critical_steps"`. This is an immutable phase
@@ -71,7 +73,7 @@ Generate only the immutable schedule with:
 ```sh
 uv run --locked python experiments/ring_3d/generate_clr_schedule.py \
   --steps 1000 --seed 314159265 --output runs/ring_3d/clr_mask.csv \
-  --decay-rate 0.01 --epoch-steps 100 --spike-stddev-steps 1
+  --decay-rate 4 --epoch-steps 100 --spike-stddev-steps 1
 ```
 
 `generate.py` and `run.py` expose the same `--clr-decay-rate`, `--clr-epoch-steps`, `--clr-spike-stddev-steps`, and `--clr-spike-amplitude` controls. The seed override controls both the legacy deterministic per-flow admission decision and the static CLR-mask sample, so baseline and policy invocations in a pair ingest identical masks.

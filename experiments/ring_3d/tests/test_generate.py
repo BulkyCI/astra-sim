@@ -82,7 +82,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(policy["eligibility"], "dp_all_reduce_only")
             self.assertEqual(
                 policy["selection_probability_by_step"],
-                {"1": 0.005, "2": 0.1, "3": 0.005},
+                {"1": 0.005, "2": 0.1, "3": 0.1},
             )
             self.assertEqual(
                 policy["selection_policy"],
@@ -100,16 +100,20 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         {
                             "step_id": "2",
                             "is_clr": "0",
-                            "probability": "0.35846544338504249",
+                            "probability": "0.22986810714751529",
                         },
-                        {"step_id": "3", "is_clr": "1", "probability": "1"},
+                        {
+                            "step_id": "3",
+                            "is_clr": "0",
+                            "probability": "0.099574136735727889",
+                        },
                     ],
                 )
             self.assertEqual(policy["provenance"]["priority_group"], 1)
             self.assertEqual(manifest["ranks"], 8)
             self.assertEqual(Path(manifest["profile_config"]), output / "profile.json")
             self.assertEqual(Path(manifest["clr_mask"]), output / "clr_mask.csv")
-            self.assertEqual(manifest["clr_schedule"]["clr_step_count"], 2)
+            self.assertEqual(manifest["clr_schedule"]["clr_step_count"], 1)
             self.assertIn(
                 "ACK_HIGH_PRIO 1",
                 (output / "network_config.txt").read_text(encoding="utf-8"),
@@ -134,6 +138,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
             flows = policy["microburst"]["flows"]
             self.assertTrue(policy["microburst"]["enabled"])
+            # The burst probes the converged tail of the CLR schedule instead
+            # of inheriting the hardcoded step-2 trigger.
+            self.assertEqual(policy["microburst"]["trigger_step"], 18)
             self.assertEqual(len(flows), 7)
             self.assertEqual({flow["dst"] for flow in flows}, {8})
             self.assertEqual({flow["src"] for flow in flows}, set(range(7)))
@@ -154,6 +161,28 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 (output / "network_config.txt").read_text(encoding="utf-8"),
             )
 
+    def test_microburst_trigger_step_override_reaches_the_policy(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["microburst_trigger_step"] = 3
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(policy["microburst"]["trigger_step"], 3)
+
+    def test_microburst_trigger_step_must_land_inside_the_run(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["microburst_trigger_step"] = document["steps"] + 1
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "microburst_trigger_step"):
+                load_profile(profile_path)
+
     def test_no_incast_profile_disables_synthetic_background_traffic(self) -> None:
         profile_path = REPOSITORY_ROOT / "experiments/ring_3d/profiles/no_incast_8.json"
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -167,7 +196,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertEqual(policy["microburst"]["flows"], [])
             self.assertEqual(
                 policy["selection_probability_by_step"],
-                {"1": 0.005, "2": 0.1, "3": 0.005},
+                {"1": 0.005, "2": 0.1, "3": 0.1},
             )
 
     def test_fixed_p_low_override_preserves_enabled_microburst(self) -> None:
@@ -632,15 +661,12 @@ class Ring3DGeneratorTests(unittest.TestCase):
                         tp_collectives_by_step[step] = (
                             tp_collectives_by_step.get(step, 0) + 1
                         )
+            steps = range(1, profile.steps + 1)
             self.assertEqual(
-                dp_bytes_by_step,
-                {
-                    1: 68_359_375,
-                    2: 68_359_375,
-                },
+                dp_bytes_by_step, {step: 68_359_375 for step in steps}
             )
-            self.assertEqual(dp_buckets_by_step, {1: 1, 2: 1})
-            self.assertEqual(tp_collectives_by_step, {1: 16, 2: 16})
+            self.assertEqual(dp_buckets_by_step, {step: 1 for step in steps})
+            self.assertEqual(tp_collectives_by_step, {step: 16 for step in steps})
 
     def test_phase1_reference_profile_materializes_exact_sequential_dp_trace(
         self,

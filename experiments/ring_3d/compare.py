@@ -193,18 +193,28 @@ def _nonnegative_int(value: Any, field: str, *, default: int = 0) -> int:
 
 
 def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
-    """Extract the raw queue/PFC signals required for a congestion claim."""
+    """Extract the raw switch signals required for a congestion claim.
+
+    Buffer pressure leaves a regime-specific signature: a lossless PFC fabric
+    pauses upstream ports, while a best-effort fabric rejects admission and
+    can only leave trimmed or naturally dropped packets. The gate therefore
+    demands the signature of the regime the run actually modeled; a summary
+    that predates regime recording accepts either signature.
+    """
     observability = _mapping(summary.get("ns3_observability"), "ns3_observability")
     queue = _mapping(observability.get("queue"), "ns3_observability.queue")
     pfc = _mapping(observability.get("pfc"), "ns3_observability.pfc")
     transport_value = observability.get("transport")
     transport = transport_value if isinstance(transport_value, dict) else {}
+    recovery_value = summary.get("transport_recovery")
+    recovery = recovery_value if isinstance(recovery_value, dict) else {}
     background = _mapping(
         summary.get("background_microburst_timeline"), "background_microburst_timeline"
     )
     queue_status = queue.get("status")
     pfc_status = pfc.get("status")
     background_status = background.get("status")
+    regime = str(summary.get("flow_control_regime", "unknown"))
     max_queue_bytes = _nonnegative_int(
         queue.get("max_queue_bytes"), "ns3_observability.queue.max_queue_bytes"
     )
@@ -216,18 +226,31 @@ def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
         background.get("physical_bytes"),
         "background_microburst_timeline.physical_bytes",
     )
+    data_natural_buffer_drops = _nonnegative_int(
+        transport.get("data_natural_buffer_drop_count"),
+        "ns3_observability.transport.data_natural_buffer_drop_count",
+    )
+    trim_notifications = _nonnegative_int(
+        recovery.get("trim_notification_count"),
+        "transport_recovery.trim_notification_count",
+    )
+    pause_signature = completed_pause_intervals > 0
+    rejection_signature = data_natural_buffer_drops + trim_notifications > 0
+    pressure_signature = {
+        "lossless_pfc": pause_signature,
+        "best_effort": rejection_signature,
+    }.get(regime, pause_signature or rejection_signature)
     return {
         "queue_status": str(queue_status),
         "pfc_status": str(pfc_status),
         "background_microburst_status": str(background_status),
+        "flow_control_regime": regime,
         "max_queue_bytes": max_queue_bytes,
         "completed_pause_interval_count": completed_pause_intervals,
+        "trim_notification_count": trim_notifications,
         "background_physical_bytes": background_physical_bytes,
         "transport_status": str(transport.get("status", "not_available")),
-        "data_natural_buffer_drop_count": _nonnegative_int(
-            transport.get("data_natural_buffer_drop_count"),
-            "ns3_observability.transport.data_natural_buffer_drop_count",
-        ),
+        "data_natural_buffer_drop_count": data_natural_buffer_drops,
         "control_natural_buffer_drop_count": _nonnegative_int(
             transport.get("control_natural_buffer_drop_count"),
             "ns3_observability.transport.control_natural_buffer_drop_count",
@@ -237,7 +260,7 @@ def congestion_evidence(summary: dict[str, Any]) -> dict[str, bool | int | str]:
             and pfc_status == "available"
             and background_status == "available"
             and max_queue_bytes > 0
-            and completed_pause_intervals > 0
+            and pressure_signature
             and background_physical_bytes > 0
         ),
     }
@@ -302,7 +325,9 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
     """Render a self-contained Markdown record of the paired comparison."""
     congestion_statement = (
         "Every baseline and policy run passed the required raw-signal gate: "
-        "background microburst traffic, a nonzero queue peak, and at least one completed PFC pause interval."
+        "background microburst traffic, a nonzero queue peak, and the fabric's "
+        "buffer-pressure signature (completed PFC pause intervals on a lossless "
+        "fabric; trimmed or naturally dropped packets on a best-effort fabric)."
         if comparison.get("congestion_required")
         else "Raw congestion signals were recorded but not enforced as a comparison gate."
     )

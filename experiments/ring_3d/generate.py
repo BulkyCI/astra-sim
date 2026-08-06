@@ -93,6 +93,7 @@ OPTIONAL_PROFILE_KEYS = {
     "microburst_offset_spacing_ns",
     "microburst_source_ranks",
     "microburst_enabled",
+    "microburst_trigger_step",
     "model",
     "workload",
 }
@@ -122,6 +123,7 @@ GRADIENT_BUCKET_SAMPLE_MODEL_KEYS = {
     "gradient_accumulation_steps",
 }
 MAX_P_LOW = 0.01
+DEFAULT_MICROBURST_TRIGGER_STEP = 2
 DEFAULT_WORKLOAD_KIND = "three_dimensional_overlap"
 SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD = "sequential_dp_all_reduce"
 
@@ -211,6 +213,7 @@ class Profile:
     microburst_offset_spacing_ns: int
     microburst_source_ranks: tuple[int, ...] | None
     microburst_enabled: bool
+    microburst_trigger_step: int
     model: ModelTrace | GradientBucketSample | None
 
     @property
@@ -475,6 +478,14 @@ def parse_profile_document(document: Any) -> Profile:
     microburst_enabled = document.get("microburst_enabled", True)
     if not isinstance(microburst_enabled, bool):
         raise ValueError("microburst_enabled must be a boolean")
+    microburst_trigger_step = _require_positive_int(
+        document.get("microburst_trigger_step", DEFAULT_MICROBURST_TRIGGER_STEP),
+        "microburst_trigger_step",
+    )
+    if microburst_enabled and microburst_trigger_step > steps:
+        raise ValueError(
+            "microburst_trigger_step must land within the profile's training steps"
+        )
     model = _load_model_workload(document, tp, pp)
 
     profile = Profile(
@@ -509,6 +520,7 @@ def parse_profile_document(document: Any) -> Profile:
         ),
         microburst_source_ranks=microburst_source_ranks,
         microburst_enabled=microburst_enabled,
+        microburst_trigger_step=microburst_trigger_step,
         model=model,
     )
     if profile.workload.kind == SEQUENTIAL_DP_ALL_REDUCE_WORKLOAD:
@@ -1270,7 +1282,7 @@ def write_experiment_config(
         "vnet_to_priority_group": {"0": 3},
         "microburst": {
             "enabled": profile.microburst_enabled,
-            "trigger_step": 2,
+            "trigger_step": profile.microburst_trigger_step,
             "flows": microburst_flows,
         },
     }
@@ -1529,7 +1541,7 @@ def main() -> int:
     parser.add_argument(
         "--clr-decay-rate",
         type=float,
-        help="exponential CLR probability decay rate",
+        help="CLR probability decay over the full normalized training run",
     )
     parser.add_argument(
         "--clr-epoch-steps",

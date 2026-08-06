@@ -186,6 +186,41 @@ class Ring3DComparisonTests(unittest.TestCase):
         ):
             require_congestion(uncongested, "test run")
 
+    def test_congestion_gate_matches_the_flow_control_regime(self) -> None:
+        # A best-effort fabric can never pause, so its congestion signature
+        # is trimmed or naturally dropped packets.
+        best_effort = congested_summary()
+        best_effort["flow_control_regime"] = "best_effort"
+        best_effort["ns3_observability"]["pfc"][
+            "completed_pause_interval_count"
+        ] = 0
+        best_effort["transport_recovery"] = {"trim_notification_count": 3}
+        best_effort["ns3_observability"]["transport"][
+            "data_natural_buffer_drop_count"
+        ] = 0
+        evidence = congestion_evidence(best_effort)
+        self.assertTrue(evidence["congestion_established"])
+        self.assertEqual(evidence["trim_notification_count"], 3)
+
+        without_rejections = congested_summary()
+        without_rejections["flow_control_regime"] = "best_effort"
+        without_rejections["ns3_observability"]["transport"][
+            "data_natural_buffer_drop_count"
+        ] = 0
+        with self.assertRaisesRegex(
+            ValueError, "did not establish required congestion"
+        ):
+            require_congestion(without_rejections, "test run")
+
+        # A lossless fabric must pause; drops cannot substitute.
+        lossless = congested_summary()
+        lossless["flow_control_regime"] = "lossless_pfc"
+        lossless["ns3_observability"]["pfc"]["completed_pause_interval_count"] = 0
+        with self.assertRaisesRegex(
+            ValueError, "did not establish required congestion"
+        ):
+            require_congestion(lossless, "test run")
+
     def test_finite_buffer_drop_gate_requires_natural_data_drop(self) -> None:
         self.assertEqual(
             require_finite_buffer_data_drop(congested_summary(), "test run")[

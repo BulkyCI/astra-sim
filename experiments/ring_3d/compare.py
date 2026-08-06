@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .generate import load_profile, resolve_selection_policy
+    from .generate import dp_fan_in, load_profile, resolve_selection_policy
     from .run import fixed_p_low_baseline, run_experiment
 except ImportError:
-    from generate import load_profile, resolve_selection_policy
+    from generate import dp_fan_in, load_profile, resolve_selection_policy
     from run import fixed_p_low_baseline, run_experiment
 
 
@@ -492,9 +492,14 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
     if len(set(seeds)) != len(seeds):
         raise ValueError("comparison artifacts must not contain duplicate seeds")
     per_seed.sort(key=lambda entry: entry["seed"])
+    # Profile equality is already enforced above, so the sweep coordinates of
+    # the first artifact describe every artifact.
+    first = _read_comparison(comparison_paths[0])
     return {
         "profile": profile,
         "selection_policy": selection_policy,
+        "dp_all_reduce_implementation": first.get("dp_all_reduce_implementation"),
+        "dp_fan_in": first.get("dp_fan_in"),
         "seeds": sorted(seeds),
         "congestion_required": require_congestion,
         "finite_buffer_data_drop_required": require_finite_buffer_drop,
@@ -526,12 +531,11 @@ def run_comparison(
     if output.exists() and clean:
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
+    profile_model = load_profile(profile.resolve())
     profile_policy = resolve_selection_policy(
-        load_profile(profile.resolve()), p_low=p_low, p_high=p_high
+        profile_model, p_low=p_low, p_high=p_high
     )
-    baseline_p_low, baseline_p_high = fixed_p_low_baseline(
-        load_profile(profile.resolve())
-    )
+    baseline_p_low, baseline_p_high = fixed_p_low_baseline(profile_model)
     if p_low is not None:
         baseline_p_low = p_low
         baseline_p_high = p_low
@@ -607,6 +611,12 @@ def run_comparison(
             "baseline": {"p_low": baseline_p_low, "p_high": baseline_p_high},
             "policy": {"p_low": profile_policy.p_low, "p_high": profile_policy.p_high},
         },
+        # Self-describing sweep coordinates: a fan-in aggregation needs only
+        # the comparison artifacts, never the original profile paths.
+        "dp_all_reduce_implementation": profile_model.dp_all_reduce_implementation,
+        "dp_fan_in": dp_fan_in(
+            profile_model.dp, profile_model.dp_all_reduce_implementation
+        ),
         "seeds": seeds,
         "congestion_required": require_congestion_signals,
         "finite_buffer_data_drop_required": require_finite_buffer_data_drops,

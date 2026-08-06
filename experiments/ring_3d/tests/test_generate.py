@@ -191,7 +191,11 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 )
             self.assertEqual(
                 manifest["collective_implementations"],
-                {"default_all_reduce": "ring", "dp_all_reduce": "direct"},
+                {
+                    "default_all_reduce": "ring",
+                    "dp_all_reduce": "direct",
+                    "dp_fan_in": profile.dp - 1,
+                },
             )
 
     def test_ring_dp_profile_writes_no_group_override(self) -> None:
@@ -202,7 +206,11 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertNotIn("all-reduce-implementation-per-group", system)
             self.assertEqual(
                 manifest["collective_implementations"],
-                {"default_all_reduce": "ring", "dp_all_reduce": "ring"},
+                {
+                    "default_all_reduce": "ring",
+                    "dp_all_reduce": "ring",
+                    "dp_fan_in": 1,
+                },
             )
 
     def test_dp_all_reduce_implementation_accepts_windowed_direct(self) -> None:

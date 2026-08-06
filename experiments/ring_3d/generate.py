@@ -1244,6 +1244,23 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
     ]
 
 
+def dp_fan_in(dp: int, dp_all_reduce_implementation: str) -> int:
+    """Peak concurrent inbound DP shard flows per receiving rank.
+
+    Ring walks peers one at a time, so a rank never receives from more than
+    one sender. Direct keeps ``min(window, dp - 1)`` transfers in flight per
+    rank (AllToAll sets ``parallel_reduce`` exactly this way), and the
+    unwindowed form saturates at every peer at once.
+    """
+    if dp <= 1:
+        return 0
+    if dp_all_reduce_implementation == "ring":
+        return 1
+    window = dp_all_reduce_implementation[len("direct"):]
+    peers = dp - 1
+    return min(int(window), peers) if window else peers
+
+
 def resolve_selection_policy(
     profile: Profile,
     *,
@@ -1503,6 +1520,9 @@ def materialize(
         "collective_implementations": {
             "default_all_reduce": "ring",
             "dp_all_reduce": profile.dp_all_reduce_implementation,
+            "dp_fan_in": dp_fan_in(
+                profile.dp, profile.dp_all_reduce_implementation
+            ),
         },
         "clr_schedule_source": (
             {

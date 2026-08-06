@@ -340,6 +340,128 @@ jobs:
       simulation_timeout_seconds: 9000
       require_congestion: true
 
+  llama3-70b-64-fanin-sweep:
+    name: Llama 3 70B 64-rank fan-in ${{ matrix.window }} pair
+    needs: [ native-build, ledger ]
+    # Ceiling for the called workflow; its `evaluate` job reduces to read-only.
+    permissions:
+      contents: write
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # direct<k> caps concurrent peer transfers at k, so with dp=8 these
+        # four windows sweep receiver fan-in {1, 2, 4, 7} on identical
+        # hardware, traces, seed, and schedule: transport concurrency is the
+        # only variable. The knee table reads congestion against this axis.
+        window: [direct1, direct2, direct4, direct]
+    uses: ./.github/workflows/ns3-evaluation.yml
+    with:
+      evaluation_name: Llama 3 70B 64-rank fan-in ${{ matrix.window }} pair
+      profile: experiments/ring_3d/profiles/llama3_70b_64_${{ matrix.window }}.json
+      run_directory: runs/ring_3d/llama3_70b_64_fanin/${{ matrix.window }}
+      artifact_name: ring-3d-llama3-70b-64-fanin-${{ matrix.window }}-comparison
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
+      ledger_key: llama3-70b-64-fanin-${{ matrix.window }}
+      comparison: true
+      comparison_seed: 314159265
+      # 64 ranks move roughly four times the 16-rank arm's bytes, so the
+      # per-arm backstop grows to 4 h while the pair stays inside the 5.5 h
+      # wrapper and GitHub's 6 h job ceiling.
+      execution_timeout_minutes: 330
+      simulation_timeout_seconds: 14400
+      require_congestion: true
+
+  aggregate-fanin-sweep:
+    name: Aggregate the DP fan-in sweep
+    needs: llama3-70b-64-fanin-sweep
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check out source
+      uses: actions/checkout@v7
+      with:
+        submodules: false
+        persist-credentials: false
+
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
+
+    - name: Download fan-in point artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ring-3d-llama3-70b-64-fanin-*-comparison-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_64_fanin/artifacts
+
+    - name: Order the points by fan-in and render the knee table
+      run: |
+        mapfile -t comparisons < <(
+          find runs/ring_3d/llama3_70b_64_fanin/artifacts \
+            -name comparison.json -type f -print | sort
+        )
+        [[ "${#comparisons[@]}" -eq 4 ]]
+        uv run --locked python experiments/ring_3d/fan_in_sweep.py \
+          --comparison "${comparisons[@]}" \
+          --output runs/ring_3d/llama3_70b_64_fanin/sweep
+        cat runs/ring_3d/llama3_70b_64_fanin/sweep/fan_in_sweep_report.md \
+          >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the sweep table
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_64_fanin/sweep
+        if-no-files-found: ignore
+
+  archive-fanin-sweep:
+    name: Record the DP fan-in sweep
+    needs: [ aggregate-fanin-sweep, ledger ]
+    if: ${{ always() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+    - name: Check out the publishing tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: |
+          .github/actions
+          .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Fetch the sweep table
+      continue-on-error: true
+      uses: actions/download-artifact@v8
+      with:
+        name: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
+        path: runs/ring_3d/llama3_70b_64_fanin/sweep
+
+    - name: Persist the sweep report
+      uses: ./.github/actions/ledger-publish
+      with:
+        issue: ${{ needs.ledger.outputs.issue }}
+        key: llama3-70b-64-fanin-sweep
+        title: Aggregate the DP fan-in sweep
+        body-file: runs/ring_3d/llama3_70b_64_fanin/sweep/fan_in_sweep_report.md
+        status: ${{ needs.aggregate-fanin-sweep.result }}
+
+    - name: Archive the sweep bundle
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ring-3d-llama3-70b-64-fanin-sweep-${{ github.run_id }}
+        asset-name: ring-3d-llama3-70b-64-fanin-sweep
+
   historical-phase1-native-reference:
     name: Historical Phase-1 64-rank native reference pair
     needs: [ native-build, ledger ]
@@ -519,6 +641,9 @@ jobs:
     - archive-native-integration
     - paired-llama3-evaluation
     - llama3-70b-32-direct-incast
+    - llama3-70b-64-fanin-sweep
+    - aggregate-fanin-sweep
+    - archive-fanin-sweep
     - historical-phase1-native-reference
     - aggregate-llama3-evaluation
     - archive-aggregate-llama3-evaluation

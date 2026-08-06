@@ -6,5 +6,9 @@
 **/*.py[cod]
 build/**/build
 build/**/result
+extern/network_backend/ns-3/build
+extern/network_backend/ns-3/cmake-cache
 **/*.log
 runs
+Dockerfile
+.dockerignore

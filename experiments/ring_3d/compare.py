@@ -394,6 +394,10 @@ def _coordinate_lines(comparison: dict[str, Any]) -> list[str]:
         ),
         ("DP fan-in", comparison.get("dp_fan_in", "not recorded")),
         (
+            "Microburst source count",
+            comparison.get("microburst_source_count", "not recorded"),
+        ),
+        (
             "Fixed-low baseline selection",
             f"p_low = p_high = {baseline.get('p_low', 'not recorded')}",
         ),
@@ -641,6 +645,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
         "selection_policy": selection_policy,
         "dp_all_reduce_implementation": first.get("dp_all_reduce_implementation"),
         "dp_fan_in": first.get("dp_fan_in"),
+        "microburst_source_count": first.get("microburst_source_count"),
         "seeds": sorted(seeds),
         "congestion_required": require_congestion,
         "finite_buffer_data_drop_required": require_finite_buffer_drop,
@@ -770,11 +775,16 @@ def run_comparison(
             "baseline": {"p_low": baseline_p_low, "p_high": baseline_p_high},
             "policy": {"p_low": profile_policy.p_low, "p_high": profile_policy.p_high},
         },
-        # Self-describing sweep coordinates: a fan-in aggregation needs only
+        # Self-describing sweep coordinates: a sweep aggregation needs only
         # the comparison artifacts, never the original profile paths.
         "dp_all_reduce_implementation": profile_model.dp_all_reduce_implementation,
         "dp_fan_in": dp_fan_in(
             profile_model.dp, profile_model.dp_all_reduce_implementation
+        ),
+        "microburst_source_count": (
+            profile_model.microburst_flow_count
+            if profile_model.microburst_enabled
+            else 0
         ),
         "seeds": seeds,
         "congestion_required": require_congestion_signals,

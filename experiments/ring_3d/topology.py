@@ -53,12 +53,18 @@ class TransportRecovery:
 
     retransmission_timeout_ns: int
     max_retransmission_retries: int
+    # UEC-style selective repair: retransmit exactly the reported trimmed or
+    # missing ranges and accept out-of-order payload at the receiver. The
+    # timeout/retry budget remains the silent-loss fallback. Off by default so
+    # every existing arm keeps go-back-N semantics.
+    selective_repair: bool = False
 
     def manifest(self) -> dict[str, int | bool]:
         return {
             "enabled": True,
             "retransmission_timeout_ns": self.retransmission_timeout_ns,
             "max_retransmission_retries": self.max_retransmission_retries,
+            "selective_repair": self.selective_repair,
         }
 
 
@@ -384,9 +390,17 @@ def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | No
     if not isinstance(recovery, dict):
         raise ValueError("network.transport_recovery must be an object")
     required = {"retransmission_timeout_ns", "max_retransmission_retries"}
-    if set(recovery) != required:
+    if not required <= set(recovery) or set(recovery) - required - {
+        "selective_repair"
+    }:
         raise ValueError(
-            f"network.transport_recovery must contain exactly {sorted(required)}"
+            f"network.transport_recovery must contain exactly {sorted(required)} "
+            "plus an optional selective_repair"
+        )
+    selective_repair = recovery.get("selective_repair", False)
+    if not isinstance(selective_repair, bool):
+        raise ValueError(
+            "network.transport_recovery.selective_repair must be a boolean"
         )
     return TransportRecovery(
         retransmission_timeout_ns=_positive_int(
@@ -397,6 +411,7 @@ def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | No
             recovery["max_retransmission_retries"],
             "network.transport_recovery.max_retransmission_retries",
         ),
+        selective_repair=selective_repair,
     )
 
 

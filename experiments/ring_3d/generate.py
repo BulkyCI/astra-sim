@@ -1143,6 +1143,7 @@ def write_network_config(
     if transport_recovery is None:
         recovery_settings = (
             "RETRANSMISSION_TIMEOUT_NS 0\nMAX_RETRANSMISSION_RETRIES 0\n"
+            "SELECTIVE_RETRANSMISSION 0\n"
         )
     else:
         recovery_settings = (
@@ -1150,6 +1151,8 @@ def write_network_config(
             f"{transport_recovery.retransmission_timeout_ns}\n"
             "MAX_RETRANSMISSION_RETRIES "
             f"{transport_recovery.max_retransmission_retries}\n"
+            "SELECTIVE_RETRANSMISSION "
+            f"{int(transport_recovery.selective_repair)}\n"
         )
     if fabric is None:
         fabric_settings = (

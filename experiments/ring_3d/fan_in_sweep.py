@@ -76,12 +76,16 @@ def _arm_signals(
     return signals
 
 
-def sweep_point(path: Path) -> dict[str, Any]:
+def sweep_point(path: Path, swept_field: str = "dp_fan_in") -> dict[str, Any]:
     """Reduce one comparison artifact to its sweep-table row."""
     comparison = _read_comparison(path)
-    fan_in = _require(comparison, "dp_fan_in", path)
-    if isinstance(fan_in, bool) or not isinstance(fan_in, int) or fan_in < 1:
-        raise ValueError(f"comparison artifact {path} has invalid dp_fan_in")
+    swept_value = _require(comparison, swept_field, path)
+    if (
+        isinstance(swept_value, bool)
+        or not isinstance(swept_value, int)
+        or swept_value < 0
+    ):
+        raise ValueError(f"comparison artifact {path} has invalid {swept_field}")
     per_seed = _require(comparison, "per_seed", path)
     if not isinstance(per_seed, list) or not per_seed:
         raise ValueError(f"comparison artifact {path} has no per-seed results")
@@ -100,7 +104,9 @@ def sweep_point(path: Path) -> dict[str, Any]:
             "reduction_ci95_ns": entry.get("reduction_ci95_ns"),
         }
     return {
-        "dp_fan_in": fan_in,
+        "swept_value": swept_value,
+        "dp_fan_in": comparison.get("dp_fan_in"),
+        "microburst_source_count": comparison.get("microburst_source_count"),
         "dp_all_reduce_implementation": _require(
             comparison, "dp_all_reduce_implementation", path
         ),
@@ -114,23 +120,25 @@ def sweep_point(path: Path) -> dict[str, Any]:
     }
 
 
-def aggregate_sweep(comparison_paths: list[Path]) -> dict[str, Any]:
-    """Validate that the points form one sweep and order them by fan-in."""
+def aggregate_sweep(
+    comparison_paths: list[Path], swept_field: str = "dp_fan_in"
+) -> dict[str, Any]:
+    """Validate that the points form one sweep and order them by its value."""
     if len(comparison_paths) < 2:
-        raise ValueError("a sweep requires at least two fan-in points")
-    points = [sweep_point(path) for path in comparison_paths]
+        raise ValueError("a sweep requires at least two swept points")
+    points = [sweep_point(path, swept_field) for path in comparison_paths]
 
-    fan_ins = [point["dp_fan_in"] for point in points]
-    if len(set(fan_ins)) != len(fan_ins):
-        raise ValueError("sweep points must have distinct dp_fan_in values")
+    swept_values = [point["swept_value"] for point in points]
+    if len(set(swept_values)) != len(swept_values):
+        raise ValueError(f"sweep points must have distinct {swept_field} values")
     for field in ("seeds", "selection_policy"):
         distinct = {json.dumps(point[field], sort_keys=True) for point in points}
         if len(distinct) != 1:
             raise ValueError(f"sweep points must share {field}")
 
-    points.sort(key=lambda point: point["dp_fan_in"])
+    points.sort(key=lambda point: point["swept_value"])
     return {
-        "swept_variable": "dp_fan_in",
+        "swept_variable": swept_field,
         "seeds": points[0]["seeds"],
         "selection_policy": points[0]["selection_policy"],
         "points": points,
@@ -146,20 +154,39 @@ def _format_bytes(value: float) -> str:
     raise AssertionError("unreachable")
 
 
+SWEPT_TITLES = {
+    "dp_fan_in": (
+        "DP fan-in sweep",
+        "only the direct all-reduce window differs, so the peak concurrent "
+        "inbound DP flows per rank is the single swept variable",
+        "Fan-in",
+    ),
+    "microburst_source_count": (
+        "Microburst source-count sweep",
+        "only the number of asymmetric burst senders differs, so the "
+        "receiver-downlink overload is the single swept variable",
+        "Burst sources",
+    ),
+}
+
+
 def render_sweep_report(sweep: dict[str, Any]) -> str:
-    """Render the fan-in knee table as a self-contained Markdown record."""
+    """Render the sweep knee table as a self-contained Markdown record."""
+    swept_field = sweep.get("swept_variable", "dp_fan_in")
+    title, variable_statement, column = SWEPT_TITLES.get(
+        swept_field, (f"{swept_field} sweep", f"{swept_field} is swept", swept_field)
+    )
     lines = [
-        "# DP fan-in sweep",
+        f"# {title}",
         "",
         "> Every point shares the workload, fabric, schedule, seeds, and "
-        "selection policy; only the direct all-reduce window differs, so the "
-        "peak concurrent inbound DP flows per rank is the single swept "
-        "variable. Congestion signals are per-seed means of raw switch "
-        "counters; relief rows are paired baseline-minus-policy aggregates.",
+        f"selection policy; {variable_statement}. Congestion signals are "
+        "per-seed means of raw switch counters; relief rows are paired "
+        "baseline-minus-policy aggregates.",
         "",
-        "## Buffer pressure against fan-in",
+        f"## Buffer pressure against {column.lower()}",
         "",
-        "| Fan-in | Algorithm | Baseline trims | Policy trims | "
+        f"| {column} | Algorithm | Baseline trims | Policy trims | "
         "Baseline drops | Policy drops | Baseline peak queue | "
         "Policy peak queue |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -168,7 +195,7 @@ def render_sweep_report(sweep: dict[str, Any]) -> str:
         baseline = point["congestion_signals"]["fixed_p_low_baseline"]
         policy = point["congestion_signals"]["dblp_policy"]
         lines.append(
-            f"| {point['dp_fan_in']} "
+            f"| {point['swept_value']} "
             f"| `{point['dp_all_reduce_implementation']}` "
             f"| {baseline['trim_notification_count']:.1f} "
             f"| {policy['trim_notification_count']:.1f} "
@@ -179,9 +206,9 @@ def render_sweep_report(sweep: dict[str, Any]) -> str:
         )
     lines += [
         "",
-        "## Policy relief against fan-in",
+        f"## Policy relief against {column.lower()}",
         "",
-        "| Fan-in | Makespan reduction | DP operation-span p99 reduction | "
+        f"| {column} | Makespan reduction | DP operation-span p99 reduction | "
         "DP physical-byte reduction |",
         "| --- | --- | --- | --- |",
     ]
@@ -191,12 +218,12 @@ def render_sweep_report(sweep: dict[str, Any]) -> str:
         for metric in RELIEF_METRICS:
             entry = relief[metric]
             cells.append(f"{entry['mean_reduction_percent']:.2f}%")
-        lines.append(f"| {point['dp_fan_in']} | " + " | ".join(cells) + " |")
+        lines.append(f"| {point['swept_value']} | " + " | ".join(cells) + " |")
     lines += [
         "",
         "A congestion knee appears where the baseline pressure columns stop "
-        "growing linearly in fan-in; the claim under test is that the "
-        "policy's relief widens past that knee.",
+        f"growing linearly in {column.lower()}; the claim under test is that "
+        "the policy's relief widens past that knee.",
         "",
     ]
     return "\n".join(lines)
@@ -212,8 +239,14 @@ def main() -> int:
         help="comparison.json artifacts, one per fan-in point",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--swept-field",
+        choices=sorted(SWEPT_TITLES),
+        default="dp_fan_in",
+        help="comparison.json coordinate the points sweep",
+    )
     arguments = parser.parse_args()
-    sweep = aggregate_sweep(arguments.comparison)
+    sweep = aggregate_sweep(arguments.comparison, arguments.swept_field)
     arguments.output.mkdir(parents=True, exist_ok=True)
     (arguments.output / "fan_in_sweep.json").write_text(
         json.dumps(sweep, indent=2) + "\n", encoding="utf-8"

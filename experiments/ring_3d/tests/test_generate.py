@@ -359,6 +359,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     "enabled": True,
                     "retransmission_timeout_ns": 500,
                     "max_retransmission_retries": 3,
+                    "selective_repair": False,
                 },
             )
             network_config = (output / "network_config.txt").read_text(encoding="utf-8")
@@ -978,6 +979,44 @@ class Ring3DGeneratorTests(unittest.TestCase):
         self.assertEqual(manifest["failed_spine_count"], 2)
         self.assertEqual(manifest["live_spine_count"], 6)
         self.assertIn("degraded", manifest["description"])
+
+    def test_selective_repair_reaches_config_and_manifest(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_64_sr2x.json"
+        )
+        profile = load_profile(profile_path)
+        self.assertTrue(profile.network.transport_recovery.selective_repair)
+        # The canary runs the designed-2:1 fabric that collapsed go-back-N.
+        self.assertEqual(profile.network.spine_count, 4)
+        self.assertEqual(profile.network.failed_spine_count, 0)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+            self.assertIn(
+                "SELECTIVE_RETRANSMISSION 1",
+                (output / "network_config.txt").read_text(encoding="utf-8"),
+            )
+            self.assertTrue(manifest["transport_recovery"]["selective_repair"])
+
+    def test_selective_repair_defaults_off_and_rejects_non_boolean(self) -> None:
+        profile = load_profile(
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_64_direct2.json"
+        )
+        self.assertFalse(profile.network.transport_recovery.selective_repair)
+        document = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/llama3_70b_64_sr2x.json"
+            ).read_text(encoding="utf-8")
+        )
+        document["network"]["transport_recovery"]["selective_repair"] = 1
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            invalid_profile = Path(temporary_directory) / "invalid.json"
+            invalid_profile.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "selective_repair"):
+                load_profile(invalid_profile)
 
     def test_degraded_clos_requires_a_live_spine(self) -> None:
         profile_path = (

@@ -380,6 +380,29 @@ jobs:
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
       release_tag: ${{ needs.ledger.outputs.release_tag }}
 
+  aggregate-burst-sweep:
+    name: Aggregate the microburst source-count sweep
+    needs: [ evaluations, ledger ]
+    if: ${{ always() }}
+    permissions:
+      contents: write
+      issues: write
+    uses: ./.github/workflows/evaluation-aggregate.yml
+    with:
+      aggregate_name: Aggregate the microburst source-count sweep
+      # The 32-direct arm is the 7-source point of the sweep; the brace set
+      # keeps the sibling clrburst artifact out of the fold.
+      download_pattern: ring-3d-llama3-70b-32-{direct,burst0,burst2,burst4}-comparison-${{ github.run_id }}
+      download_directory: runs/ring_3d/llama3_70b_32_burst/artifacts
+      expected_count: 4
+      command_prefix: uv run --locked python experiments/ring_3d/fan_in_sweep.py --swept-field microburst_source_count --comparison
+      output_directory: runs/ring_3d/llama3_70b_32_burst/sweep
+      report_file: fan_in_sweep_report.md
+      artifact_name: ring-3d-llama3-70b-32-burst-sweep
+      ledger_key: llama3-70b-32-burst-sweep
+      ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
+      release_tag: ${{ needs.ledger.outputs.release_tag }}
+
   ledger-close:
     name: Finalize the experiment ledger
     if: ${{ always() }}
@@ -392,6 +415,7 @@ jobs:
     - evaluations
     - aggregate-llama3-evaluation
     - aggregate-fanin-sweep
+    - aggregate-burst-sweep
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:

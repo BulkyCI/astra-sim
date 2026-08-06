@@ -44,6 +44,7 @@ def comparison(fan_in: int, *, trims: int, reduction_percent: float) -> dict:
             "direct" if fan_in == 7 else f"direct{fan_in}"
         ),
         "dp_fan_in": fan_in,
+        "microburst_source_count": 7,
         "seeds": [314159265],
         "per_seed": [
             {
@@ -114,6 +115,29 @@ class FanInSweepTests(unittest.TestCase):
                 "trim_notification_count"
             ],
             1.0,
+        )
+
+    def test_microburst_source_sweep_orders_by_source_count(self) -> None:
+        documents = []
+        for sources, fan_in in ((7, 3), (0, 3), (4, 3)):
+            document = comparison(fan_in, trims=sources * 10 + 1,
+                                  reduction_percent=float(sources))
+            document["microburst_source_count"] = sources
+            documents.append(document)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_comparisons(Path(temporary_directory), documents)
+            sweep = aggregate_sweep(paths, "microburst_source_count")
+            report = render_sweep_report(sweep)
+
+        self.assertEqual(
+            [point["swept_value"] for point in sweep["points"]], [0, 4, 7]
+        )
+        self.assertEqual(sweep["swept_variable"], "microburst_source_count")
+        self.assertIn("# Microburst source-count sweep", report)
+        self.assertIn("Buffer pressure against burst sources", report)
+        # dp_fan_in duplicates across burst points must not be rejected.
+        self.assertEqual(
+            {point["dp_fan_in"] for point in sweep["points"]}, {3}
         )
 
     def test_sweep_rejects_duplicate_fan_in(self) -> None:

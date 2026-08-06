@@ -147,12 +147,24 @@ def _confidence_interval_95(values: list[float]) -> list[float] | None:
 
 def aggregate_comparisons(
     per_seed: list[dict[str, Any]],
-) -> dict[str, dict[str, float | int | list[float] | None]]:
+    metrics_field: str = "metrics",
+) -> dict[str, dict[str, float | int | list[float] | None]] | None:
+    """Aggregate one per-seed metric set; None when the field is absent.
+
+    Absence happens only for comparison artifacts recorded before the
+    fixed-high arm existed; a mixed set is rejected by artifact validation.
+    """
     if not per_seed:
         raise ValueError("at least one paired seed result is required")
+    if any(metrics_field not in seed for seed in per_seed):
+        if all(metrics_field not in seed for seed in per_seed):
+            return None
+        raise ValueError(
+            f"comparison seeds must all record {metrics_field} or none of them"
+        )
     aggregate: dict[str, dict[str, float | int | list[float] | None]] = {}
     for metric in METRICS:
-        entries = [seed["metrics"][metric] for seed in per_seed]
+        entries = [seed[metrics_field][metric] for seed in per_seed]
         baseline_values = [float(entry["baseline_ns"]) for entry in entries]
         policy_values = [float(entry["policy_ns"]) for entry in entries]
         reductions = [float(entry["reduction_ns"]) for entry in entries]
@@ -321,36 +333,29 @@ def _format_bytes(value: float) -> str:
     raise AssertionError("unreachable")
 
 
-def render_comparison_report(comparison: dict[str, Any]) -> str:
-    """Render a self-contained Markdown record of the paired comparison."""
-    congestion_statement = (
-        "Every baseline and policy run passed the required raw-signal gate: "
-        "background microburst traffic, a nonzero queue peak, and the fabric's "
-        "buffer-pressure signature (completed PFC pause intervals on a lossless "
-        "fabric; trimmed or naturally dropped packets on a best-effort fabric)."
-        if comparison.get("congestion_required")
-        else "Raw congestion signals were recorded but not enforced as a comparison gate."
-    )
-    finite_buffer_statement = (
-        "Every run also recorded at least one natural data-plane switch admission "
-        "or egress-queue drop; configured injection remains a separate signal."
-        if comparison.get("finite_buffer_data_drop_required")
-        else "Natural finite-buffer data loss was recorded when available but not enforced."
-    )
+_ARM_TITLES = {
+    "fixed_p_low_baseline": "Fixed-low baseline",
+    "fixed_p_high_baseline": "Fixed-high baseline",
+    "dblp_policy": "Phase-aware policy",
+}
+_EVIDENCE_COLUMNS = (
+    ("trim_notification_count", "Trims"),
+    ("data_natural_buffer_drop_count", "Natural drops"),
+    ("completed_pause_interval_count", "PFC pauses"),
+    ("max_queue_bytes", "Peak queue"),
+)
+
+
+def _metric_table(
+    aggregate: dict[str, Any], value_labels: tuple[str, str]
+) -> list[str]:
+    baseline_label, treatment_label = value_labels
     lines = [
-        "# Paired phase-aware selection comparison",
-        "",
-        "> Each seed uses identical traces, topology, microburst configuration, and seed. "
-        "The fixed-low baseline keeps the policy enabled while setting p_low and p_high to the same low value. "
-        "Baseline and policy share an ns-3 random-stream seed/run within each pair; successive pairs use distinct runs.",
-        "",
-        congestion_statement,
-        finite_buffer_statement,
-        "",
-        "| Metric | Baseline mean | Policy mean | Mean reduction | 95% CI of reduction | Mean reduction % |",
+        f"| Metric | {baseline_label} mean | {treatment_label} mean "
+        "| Mean reduction | 95% CI of reduction | Mean reduction % |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for metric, values in comparison["aggregate"].items():
+    for metric, values in aggregate.items():
         format_value = _format_bytes if metric in BYTE_METRICS else _format_duration_ns
         ci = values["reduction_ci95_ns"]
         ci_text = (
@@ -372,10 +377,146 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
             )
             + " |"
         )
+    return lines
+
+
+def _coordinate_lines(comparison: dict[str, Any]) -> list[str]:
+    """Expose every reproduction-relevant coordinate the artifact carries."""
+    policy = comparison.get("selection_policy") or {}
+    baseline = policy.get("baseline") or {}
+    treatment = policy.get("policy") or {}
+    coordinates = [
+        ("Profile", comparison.get("profile", "not recorded")),
+        ("Seeds", ", ".join(str(seed) for seed in comparison.get("seeds", []))),
+        (
+            "DP all-reduce implementation",
+            comparison.get("dp_all_reduce_implementation", "not recorded"),
+        ),
+        ("DP fan-in", comparison.get("dp_fan_in", "not recorded")),
+        (
+            "Fixed-low baseline selection",
+            f"p_low = p_high = {baseline.get('p_low', 'not recorded')}",
+        ),
+        (
+            "Fixed-high baseline selection",
+            f"p_low = p_high = {treatment.get('p_high', 'not recorded')} "
+            "(deliberately exposes critical steps)",
+        ),
+        (
+            "Phase-aware policy selection",
+            f"p_low = {treatment.get('p_low', 'not recorded')}, "
+            f"p_high = {treatment.get('p_high', 'not recorded')}",
+        ),
+        (
+            "Per-simulator timeout",
+            f"{comparison.get('simulation_timeout_seconds', 'not recorded')} s",
+        ),
+    ]
+    lines = ["| Coordinate | Value |", "| --- | --- |"]
+    lines.extend(f"| {name} | {value} |" for name, value in coordinates)
+    return lines
+
+
+def _evidence_lines(per_seed: list[dict[str, Any]]) -> list[str]:
+    """Per-arm means of the raw switch counters, one row per arm."""
+    arm_names = [
+        arm for arm in _ARM_TITLES if arm in (per_seed[0].get("congestion") or {})
+    ]
+    if not arm_names:
+        return ["Raw congestion evidence was not recorded."]
+    regimes = {
+        str((seed_entry["congestion"][arm]).get("flow_control_regime", "unknown"))
+        for seed_entry in per_seed
+        for arm in arm_names
+    }
+    lines = [
+        f"Flow-control regime: {', '.join(sorted(regimes))}. "
+        "Values are per-seed means of raw switch counters.",
+        "",
+        "| Arm | " + " | ".join(label for _, label in _EVIDENCE_COLUMNS) + " |",
+        "| --- | " + " | ".join("---:" for _ in _EVIDENCE_COLUMNS) + " |",
+    ]
+    for arm in arm_names:
+        cells = []
+        for field, _ in _EVIDENCE_COLUMNS:
+            values = [
+                float(seed_entry["congestion"][arm].get(field, 0))
+                for seed_entry in per_seed
+            ]
+            mean = _mean(values)
+            cells.append(
+                _format_bytes(mean) if field == "max_queue_bytes" else f"{mean:.1f}"
+            )
+        lines.append(f"| {_ARM_TITLES[arm]} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def render_comparison_report(comparison: dict[str, Any]) -> str:
+    """Render a self-contained Markdown record of the matched comparison."""
+    congestion_statement = (
+        "Every arm passed the required raw-signal gate: "
+        "background microburst traffic, a nonzero queue peak, and the fabric's "
+        "buffer-pressure signature (completed PFC pause intervals on a lossless "
+        "fabric; trimmed or naturally dropped packets on a best-effort fabric)."
+        if comparison.get("congestion_required")
+        else "Raw congestion signals were recorded but not enforced as a comparison gate."
+    )
+    finite_buffer_statement = (
+        "Every run also recorded at least one natural data-plane switch admission "
+        "or egress-queue drop; configured injection remains a separate signal."
+        if comparison.get("finite_buffer_data_drop_required")
+        else "Natural finite-buffer data loss was recorded when available but not enforced."
+    )
+    lines = [
+        "# Matched phase-aware selection comparison",
+        "",
+        "> Every arm of a seed uses identical traces, topology, microburst "
+        "configuration, CLR mask, and ns-3 random stream; successive seeds use "
+        "distinct runs. The fixed-low baseline holds the strict bound "
+        "everywhere, the fixed-high baseline deliberately sheds at the "
+        "permissive bound through critical steps to measure the headroom an "
+        "unbounded policy would take, and the phase-aware policy switches "
+        "bounds on the CLR mask.",
+        "",
+        congestion_statement,
+        finite_buffer_statement,
+        "",
+        "## Experiment coordinates",
+        "",
+        *_coordinate_lines(comparison),
+        "",
+        "## Policy relief over the fixed-low baseline",
+        "",
+        *_metric_table(comparison["aggregate"], ("Fixed-low", "Policy")),
+    ]
+    headroom = comparison.get("headroom_aggregate")
+    if headroom:
+        lines.extend(
+            [
+                "",
+                "## Unbounded-shedding headroom (fixed-high over fixed-low)",
+                "",
+                *_metric_table(headroom, ("Fixed-low", "Fixed-high")),
+                "",
+                "The policy's claim is captured headroom: its relief should "
+                "approach the fixed-high ceiling while critical steps stay at "
+                "the strict bound, which the fixed-high arm abandons.",
+            ]
+        )
+    per_seed = comparison.get("per_seed") or []
+    if per_seed:
+        lines.extend(
+            [
+                "",
+                "## Raw congestion evidence by arm",
+                "",
+                *_evidence_lines(per_seed),
+            ]
+        )
     lines.extend(
         [
             "",
-            "Positive reductions favor the phase-aware selection policy. Logical collective metrics include every completed "
+            "Positive reductions favor the treatment column. Logical collective metrics include every completed "
             "DP All-Reduce regardless of whether its payload used provenance control; all-QP FCT is a "
             "secondary transport diagnostic. Physical-byte reductions are reported against foreground, DP, "
             "and total offered traffic. Do not interpret a single seed or a confidence interval spanning zero "
@@ -506,6 +647,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
         "simulation_timeout_seconds": simulation_timeout_seconds,
         "per_seed": per_seed,
         "aggregate": aggregate_comparisons(per_seed),
+        "headroom_aggregate": aggregate_comparisons(per_seed, "headroom_metrics"),
     }
 
 
@@ -543,64 +685,81 @@ def run_comparison(
     per_seed: list[dict[str, Any]] = []
     for seed in seeds:
         seed_dir = output / f"seed_{seed}"
-        baseline_dir = seed_dir / "fixed_p_low_baseline"
-        policy_dir = seed_dir / "dblp_policy"
-        run_experiment(
-            profile,
-            baseline_dir,
-            binary=binary,
-            clean=True,
-            seed=seed,
-            ns3_rng_run=seed,
-            simulation_timeout_seconds=simulation_timeout_seconds,
-            p_low=baseline_p_low,
-            p_high=baseline_p_high,
-        )
-        run_experiment(
-            profile,
-            policy_dir,
-            binary=binary,
-            clean=True,
-            seed=seed,
-            ns3_rng_run=seed,
-            simulation_timeout_seconds=simulation_timeout_seconds,
-            p_low=profile_policy.p_low,
-            p_high=profile_policy.p_high,
-        )
-        baseline_summary = _read_summary(baseline_dir)
-        policy_summary = _read_summary(policy_dir)
-        require_primary_analysis(baseline_summary, f"seed {seed} fixed-p-low baseline")
-        require_primary_analysis(
-            policy_summary, f"seed {seed} phase-aware selection policy"
-        )
-        baseline_congestion = congestion_evidence(baseline_summary)
-        policy_congestion = congestion_evidence(policy_summary)
-        if require_congestion_signals:
-            baseline_congestion = require_congestion(
-                baseline_summary, f"seed {seed} fixed-p-low baseline"
+        # Three matched arms per seed. Fixed-low is the conservative control,
+        # fixed-high deliberately sheds at the permissive rate through
+        # critical steps to measure the headroom an unbounded policy would
+        # take, and the phase-aware policy is the treatment. The claim is
+        # that the policy captures most of the fixed-high headroom while
+        # keeping critical steps at the strict bound.
+        arms = {
+            "fixed_p_low_baseline": {
+                "directory": seed_dir / "fixed_p_low_baseline",
+                "label": f"seed {seed} fixed-p-low baseline",
+                "p_low": baseline_p_low,
+                "p_high": baseline_p_high,
+                "allow_clr_exposure": False,
+            },
+            "fixed_p_high_baseline": {
+                "directory": seed_dir / "fixed_p_high_baseline",
+                "label": f"seed {seed} fixed-p-high baseline",
+                "p_low": profile_policy.p_high,
+                "p_high": profile_policy.p_high,
+                "allow_clr_exposure": True,
+            },
+            "dblp_policy": {
+                "directory": seed_dir / "dblp_policy",
+                "label": f"seed {seed} phase-aware selection policy",
+                "p_low": profile_policy.p_low,
+                "p_high": profile_policy.p_high,
+                "allow_clr_exposure": False,
+            },
+        }
+        summaries: dict[str, dict[str, Any]] = {}
+        congestion: dict[str, dict[str, bool | int | str]] = {}
+        for arm_name, arm in arms.items():
+            run_experiment(
+                profile,
+                arm["directory"],
+                binary=binary,
+                clean=True,
+                seed=seed,
+                ns3_rng_run=seed,
+                simulation_timeout_seconds=simulation_timeout_seconds,
+                p_low=arm["p_low"],
+                p_high=arm["p_high"],
+                allow_clr_exposure=arm["allow_clr_exposure"],
             )
-            policy_congestion = require_congestion(
-                policy_summary, f"seed {seed} phase-aware selection policy"
-            )
-        if require_finite_buffer_data_drops:
-            baseline_congestion = require_finite_buffer_data_drop(
-                baseline_summary, f"seed {seed} fixed-p-low baseline"
-            )
-            policy_congestion = require_finite_buffer_data_drop(
-                policy_summary, f"seed {seed} phase-aware selection policy"
-            )
+            summary = _read_summary(arm["directory"])
+            require_primary_analysis(summary, arm["label"])
+            evidence = congestion_evidence(summary)
+            if require_congestion_signals:
+                evidence = require_congestion(summary, arm["label"])
+            if require_finite_buffer_data_drops:
+                evidence = require_finite_buffer_data_drop(summary, arm["label"])
+            summaries[arm_name] = summary
+            congestion[arm_name] = evidence
         per_seed.append(
             {
                 "seed": seed,
                 "ns3_rng_seed": 1,
                 "ns3_rng_run": seed,
-                "fixed_p_low_baseline_dir": baseline_dir.relative_to(output).as_posix(),
-                "dblp_policy_dir": policy_dir.relative_to(output).as_posix(),
-                "congestion": {
-                    "fixed_p_low_baseline": baseline_congestion,
-                    "dblp_policy": policy_congestion,
+                **{
+                    f"{arm_name}_dir": arm["directory"]
+                    .relative_to(output)
+                    .as_posix()
+                    for arm_name, arm in arms.items()
                 },
-                "metrics": compare_summaries(baseline_summary, policy_summary),
+                "congestion": congestion,
+                "metrics": compare_summaries(
+                    summaries["fixed_p_low_baseline"], summaries["dblp_policy"]
+                ),
+                # The relief an unbounded permissive policy takes over the
+                # conservative control: the ceiling the phase-aware policy is
+                # measured against.
+                "headroom_metrics": compare_summaries(
+                    summaries["fixed_p_low_baseline"],
+                    summaries["fixed_p_high_baseline"],
+                ),
             }
         )
 
@@ -623,6 +782,7 @@ def run_comparison(
         "simulation_timeout_seconds": simulation_timeout_seconds,
         "per_seed": per_seed,
         "aggregate": aggregate_comparisons(per_seed),
+        "headroom_aggregate": aggregate_comparisons(per_seed, "headroom_metrics"),
     }
     _write_comparison(output, comparison)
     return comparison

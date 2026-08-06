@@ -58,6 +58,7 @@ def run_experiment(
     simulation_timeout_seconds: int | None = None,
     p_low: float | None = None,
     p_high: float | None = None,
+    allow_clr_exposure: bool = False,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
     skip_analysis: bool = False,
 ) -> dict[str, Any]:
@@ -82,6 +83,7 @@ def run_experiment(
         seed_override=seed,
         p_low=p_low,
         p_high=p_high,
+        allow_clr_exposure=allow_clr_exposure,
         clr_schedule_parameters=clr_schedule_parameters,
     )
     binary = binary.resolve() if binary else find_default_binary()

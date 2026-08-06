@@ -86,15 +86,27 @@ uv run --locked python experiments/ring_3d/generate_clr_schedule.py \
 
 `generate.py` and `run.py` expose the same `--clr-decay-rate`, `--clr-epoch-steps`, `--clr-spike-stddev-steps`, and `--clr-spike-amplitude` controls. The seed override controls both the legacy deterministic per-flow admission decision and the static CLR-mask sample, so baseline and policy invocations in a pair ingest identical masks.
 
-## Paired baseline comparison
+## Matched three-arm comparison
 
 Use [compare.py](compare.py) for a matched comparison. For every fixed seed it
-runs a fixed-low baseline first with policy and microbursts still enabled, but
-with both phases set to `p_low` (0.5% by default). It then runs the phase-aware
-selection policy with the same generated workload, topology, seed, and static
-CLR mask: `p_low` in CLR and `p_high` (10% by default) outside CLR. The
-default is five fixed seeds and it writes both individual run bundles,
-`comparison.json`, and `comparison_report.md`.
+runs three arms over the same generated workload, topology, seed, and static
+CLR mask:
+
+1. **Fixed-low baseline**: both phases at `p_low` (0.5% by default) — the
+   conservative control that never risks a critical step.
+2. **Fixed-high baseline**: both phases at `p_high` (10% by default). This arm
+   deliberately sheds at the permissive rate *through critical steps* — the
+   ceiling an unbounded policy would take — and is the only caller allowed to
+   lift the strict-CLR `p_low` cap.
+3. **Phase-aware policy**: `p_low` in CLR, `p_high` outside — the treatment.
+
+The claim under test is captured headroom: the policy's relief over the
+fixed-low control should approach the fixed-high ceiling while critical steps
+stay at the strict bound, which the fixed-high arm abandons. The report
+records the policy relief, the headroom, the experiment coordinates, and the
+raw per-arm congestion evidence. The default is five fixed seeds and it
+writes the individual run bundles, `comparison.json`, and
+`comparison_report.md`.
 
 ```sh
 uv run --locked python experiments/ring_3d/compare.py \

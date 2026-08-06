@@ -1266,8 +1266,16 @@ def resolve_selection_policy(
     *,
     p_low: float | None = None,
     p_high: float | None = None,
+    allow_clr_exposure: bool = False,
 ) -> SelectionPolicy:
-    """Resolve optional command-line overrides against the typed profile policy."""
+    """Resolve optional command-line overrides against the typed profile policy.
+
+    ``allow_clr_exposure`` lifts the strict-CLR ceiling on ``p_low``. It
+    exists for exactly one caller: the fixed-high comparison arm, which
+    deliberately sheds at the permissive rate during critical steps to
+    measure the headroom an unbounded policy would take. A policy run must
+    never pass it.
+    """
     resolved_low = (
         profile.selection_policy.p_low
         if p_low is None
@@ -1278,7 +1286,7 @@ def resolve_selection_policy(
         if p_high is None
         else _probability(p_high, "p_high")
     )
-    if resolved_low == 0.0 or resolved_low > MAX_P_LOW:
+    if resolved_low == 0.0 or (resolved_low > MAX_P_LOW and not allow_clr_exposure):
         raise ValueError("p_low must be greater than zero and at most 0.01")
     if resolved_high < resolved_low:
         raise ValueError("p_high must be at least p_low")
@@ -1424,6 +1432,7 @@ def materialize(
     seed_override: int | None = None,
     p_low: float | None = None,
     p_high: float | None = None,
+    allow_clr_exposure: bool = False,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
@@ -1431,7 +1440,9 @@ def materialize(
         profile = replace(
             profile, seed=_require_positive_int(seed_override, "seed_override")
         )
-    selection_policy = resolve_selection_policy(profile, p_low=p_low, p_high=p_high)
+    selection_policy = resolve_selection_policy(
+        profile, p_low=p_low, p_high=p_high, allow_clr_exposure=allow_clr_exposure
+    )
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

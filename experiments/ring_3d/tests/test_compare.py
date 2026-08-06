@@ -123,9 +123,89 @@ class Ring3DComparisonTests(unittest.TestCase):
 
         self.assertEqual(aggregate["makespan_ns"]["mean_reduction_ns"], 150.0)
         self.assertIsNotNone(aggregate["makespan_ns"]["reduction_ci95_ns"])
-        self.assertIn("Paired phase-aware selection comparison", report)
+        self.assertIn("Matched phase-aware selection comparison", report)
         self.assertIn("makespan_ns", report)
         self.assertIn("95% CI of reduction", report)
+
+    def test_three_arm_report_exposes_headroom_and_evidence(self) -> None:
+        low = summary(1_000, 100)
+        high = summary(700, 70)
+        policy = summary(800, 80)
+        evidence = {
+            "trim_notification_count": 10,
+            "data_natural_buffer_drop_count": 2,
+            "completed_pause_interval_count": 0,
+            "max_queue_bytes": 4 * 1024 * 1024,
+            "flow_control_regime": "best_effort",
+        }
+        per_seed = [
+            {
+                "seed": 1,
+                "metrics": compare_summaries(low, policy),
+                "headroom_metrics": compare_summaries(low, high),
+                "congestion": {
+                    "fixed_p_low_baseline": dict(evidence),
+                    "fixed_p_high_baseline": {
+                        **evidence,
+                        "trim_notification_count": 2,
+                    },
+                    "dblp_policy": {**evidence, "trim_notification_count": 4},
+                },
+            }
+        ]
+        comparison = {
+            "profile": "/runs/profile.json",
+            "seeds": [1],
+            "dp_all_reduce_implementation": "direct2",
+            "dp_fan_in": 2,
+            "selection_policy": {
+                "baseline": {"p_low": 0.005, "p_high": 0.005},
+                "policy": {"p_low": 0.005, "p_high": 0.1},
+            },
+            "simulation_timeout_seconds": 9000,
+            "per_seed": per_seed,
+            "aggregate": aggregate_comparisons(per_seed),
+            "headroom_aggregate": aggregate_comparisons(
+                per_seed, "headroom_metrics"
+            ),
+        }
+        report = render_comparison_report(comparison)
+
+        self.assertIn("## Experiment coordinates", report)
+        self.assertIn("direct2", report)
+        self.assertIn("deliberately exposes critical steps", report)
+        self.assertIn("Unbounded-shedding headroom", report)
+        self.assertIn("## Raw congestion evidence by arm", report)
+        self.assertIn("| Fixed-high baseline | 2.0 |", report)
+        self.assertIn("best_effort", report)
+        # Headroom (300 ns) exceeds achieved relief (200 ns).
+        self.assertEqual(
+            comparison["headroom_aggregate"]["makespan_ns"]["mean_reduction_ns"],
+            300.0,
+        )
+
+    def test_aggregate_comparisons_rejects_mixed_headroom_recording(self) -> None:
+        per_seed = [
+            {
+                "seed": 1,
+                "metrics": compare_summaries(summary(1_000, 100), summary(900, 90)),
+                "headroom_metrics": compare_summaries(
+                    summary(1_000, 100), summary(700, 70)
+                ),
+            },
+            {
+                "seed": 2,
+                "metrics": compare_summaries(summary(1_000, 100), summary(800, 80)),
+            },
+        ]
+        self.assertIsNone(
+            aggregate_comparisons(
+                [entry for entry in per_seed if "headroom_metrics" not in entry],
+                "headroom_metrics",
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "headroom_metrics"):
+            aggregate_comparisons(per_seed, "headroom_metrics")
 
     def test_aggregate_artifacts_validates_and_combines_one_seed_results(self) -> None:
         def one_seed_comparison(seed: int) -> dict[str, object]:
@@ -264,7 +344,7 @@ class Ring3DComparisonTests(unittest.TestCase):
                     simulation_timeout_seconds=960,
                 )
 
-        self.assertEqual(mocked_run.call_count, 2)
+        self.assertEqual(mocked_run.call_count, 3)
         self.assertTrue(
             all(
                 call.kwargs["simulation_timeout_seconds"] == 960
@@ -272,10 +352,23 @@ class Ring3DComparisonTests(unittest.TestCase):
             )
         )
         self.assertEqual(comparison["simulation_timeout_seconds"], 960)
-        self.assertEqual(mocked_run.call_args_list[0].kwargs["p_low"], 0.005)
-        self.assertEqual(mocked_run.call_args_list[0].kwargs["p_high"], 0.005)
-        self.assertEqual(mocked_run.call_args_list[1].kwargs["p_low"], 0.005)
-        self.assertEqual(mocked_run.call_args_list[1].kwargs["p_high"], 0.1)
+        arm_policies = [
+            (
+                call.kwargs["p_low"],
+                call.kwargs["p_high"],
+                call.kwargs["allow_clr_exposure"],
+            )
+            for call in mocked_run.call_args_list
+        ]
+        self.assertEqual(
+            arm_policies,
+            [
+                (0.005, 0.005, False),
+                (0.1, 0.1, True),
+                (0.005, 0.1, False),
+            ],
+        )
+        self.assertIn("headroom_aggregate", comparison)
 
 
 if __name__ == "__main__":

@@ -292,6 +292,22 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 {"1": 0.005, "2": 0.005, "3": 0.005},
             )
 
+    def test_clr_exposure_flag_lifts_only_the_low_ceiling(self) -> None:
+        from experiments.ring_3d.generate import resolve_selection_policy
+
+        profile = load_profile(self.profile_path)
+        with self.assertRaisesRegex(ValueError, "p_low"):
+            resolve_selection_policy(profile, p_low=0.1, p_high=0.1)
+        policy = resolve_selection_policy(
+            profile, p_low=0.1, p_high=0.1, allow_clr_exposure=True
+        )
+        self.assertEqual((policy.p_low, policy.p_high), (0.1, 0.1))
+        # The escape hatch lifts the ceiling only; ordering still holds.
+        with self.assertRaisesRegex(ValueError, "p_high"):
+            resolve_selection_policy(
+                profile, p_low=0.1, p_high=0.05, allow_clr_exposure=True
+            )
+
     def test_selection_policy_rejects_low_value_above_one_percent(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["selection_policy"]["p_low"] = 0.0101

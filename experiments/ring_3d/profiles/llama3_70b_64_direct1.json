@@ -20,7 +20,7 @@
   "network": {
     "topology": "clos",
     "hosts_per_leaf": 8,
-    "spine_count": 4,
+    "spine_count": 6,
     "link_rate": "400Gbps",
     "packet_payload_bytes": 4096,
     "queue_monitor_start_ns": 0,

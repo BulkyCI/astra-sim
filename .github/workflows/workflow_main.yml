@@ -351,9 +351,11 @@ jobs:
       fail-fast: false
       matrix:
         # direct<k> caps concurrent peer transfers at k, so with dp=8 these
-        # four windows sweep receiver fan-in {1, 2, 4, 7} on identical
-        # hardware, traces, seed, and schedule: transport concurrency is the
-        # only variable. The knee table reads congestion against this axis.
+        # four windows sweep DP transfer concurrency {1, 2, 4, 7} on identical
+        # traces, seed, and schedule over the 4:3 knee fabric. The 2:1 fabric
+        # collapsed the baseline (go-back-N under sustained 2x overload) and
+        # 1:1 is capacity-matched with nothing to relieve, so the knee is
+        # where relief from bounded shedding is measurable at all.
         window: [direct1, direct2, direct4, direct]
     uses: ./.github/workflows/ns3-evaluation.yml
     with:

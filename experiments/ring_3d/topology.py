@@ -43,7 +43,13 @@ DEFAULT_HEADROOM_FACTOR = 3
 
 @dataclass(frozen=True)
 class TransportRecovery:
-    """Bounded sender recovery shared by loss and trim mechanisms."""
+    """Bounded sender recovery for silent loss.
+
+    The retry budget counts consecutive retransmission timeouts without ACK
+    progress — silence, the only signal consistent with a dead path. Trim
+    notifications and NACKs are live feedback from the fabric and never
+    consume the budget; congestion is recoverable by definition.
+    """
 
     retransmission_timeout_ns: int
     max_retransmission_retries: int

@@ -36,7 +36,7 @@
     },
     "transport_recovery": {
       "retransmission_timeout_ns": 1000000,
-      "max_retransmission_retries": 8
+      "max_retransmission_retries": 1024
     }
   },
   "microburst_enabled": true,

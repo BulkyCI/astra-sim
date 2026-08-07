@@ -360,6 +360,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                     "retransmission_timeout_ns": 500,
                     "max_retransmission_retries": 3,
                     "selective_repair": False,
+                    "no_progress_timeout_ns": 5_000_000_000,
                 },
             )
             network_config = (output / "network_config.txt").read_text(encoding="utf-8")
@@ -368,6 +369,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertIn("DATA_LOSS_RECEIVER_NODE 8", network_config)
             self.assertIn("RETRANSMISSION_TIMEOUT_NS 500", network_config)
             self.assertIn("MAX_RETRANSMISSION_RETRIES 3", network_config)
+            self.assertIn("NO_PROGRESS_TIMEOUT_NS 5000000000", network_config)
             self.assertIn(
                 f"TRANSPORT_EVENT_OUTPUT_FILE {output / 'ns3' / 'transport_events.csv'}",
                 network_config,
@@ -1016,6 +1018,30 @@ class Ring3DGeneratorTests(unittest.TestCase):
             invalid_profile = Path(temporary_directory) / "invalid.json"
             invalid_profile.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "selective_repair"):
+                load_profile(invalid_profile)
+
+    def test_no_progress_deadline_defaults_on_and_rejects_zero(self) -> None:
+        # The deadline is the liveness bound for budget-exempt recovery
+        # signals, so every recovery-enabled profile must carry one.
+        profile = load_profile(
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/llama3_70b_64_direct2.json"
+        )
+        self.assertEqual(
+            profile.network.transport_recovery.no_progress_timeout_ns,
+            5_000_000_000,
+        )
+        document = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/llama3_70b_64_sr2x.json"
+            ).read_text(encoding="utf-8")
+        )
+        document["network"]["transport_recovery"]["no_progress_timeout_ns"] = 0
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            invalid_profile = Path(temporary_directory) / "invalid.json"
+            invalid_profile.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "no_progress_timeout_ns"):
                 load_profile(invalid_profile)
 
     def test_degraded_clos_requires_a_live_spine(self) -> None:

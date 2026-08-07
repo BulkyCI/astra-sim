@@ -501,7 +501,10 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
             ? "retry_exhausted"
             : reason == static_cast<uint32_t>(RdmaFailureReason::TrimRetryExhausted)
                   ? "trim_retry_exhausted"
-                  : "unknown";
+                  : reason == static_cast<uint32_t>(
+                                  RdmaFailureReason::NoForwardProgress)
+                        ? "no_forward_progress"
+                        : "unknown";
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
         if (pending_background_flows == 0) {
@@ -521,8 +524,11 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     release_source_port(sid, did, q->sport);
     transport_failure = true;
     transport_failure_message =
-        "QP retry budget exhausted for " + to_string(sid) + "->" +
-        to_string(did) + " source_port=" + to_string(q->sport);
+        "QP failed (" + flow.failure_reason + ") for " + to_string(sid) +
+        "->" + to_string(did) + " source_port=" + to_string(q->sport) +
+        " snd_una=" + to_string(q->snd_una) + "/" + to_string(q->m_size) +
+        " recovery_events=" + to_string(q->m_recovery_events) +
+        " trim_notifications=" + to_string(q->m_trim_notifications);
 }
 
 int setup_ns3_simulation(string network_configuration) {

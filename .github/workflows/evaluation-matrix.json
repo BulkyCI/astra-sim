@@ -8,10 +8,10 @@
     "comparison": true,
     "comparison_seed": 314159265,
     "execution_timeout_minutes": 330,
-    "simulation_timeout_seconds": 9000,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 358979323)",
@@ -22,10 +22,10 @@
     "comparison": true,
     "comparison_seed": 358979323,
     "execution_timeout_minutes": 330,
-    "simulation_timeout_seconds": 9000,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 846264338)",
@@ -36,10 +36,10 @@
     "comparison": true,
     "comparison_seed": 846264338,
     "execution_timeout_minutes": 330,
-    "simulation_timeout_seconds": 9000,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 327950288)",
@@ -50,10 +50,10 @@
     "comparison": true,
     "comparison_seed": 327950288,
     "execution_timeout_minutes": 330,
-    "simulation_timeout_seconds": 9000,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 419716939)",
@@ -64,10 +64,10 @@
     "comparison": true,
     "comparison_seed": 419716939,
     "execution_timeout_minutes": 330,
-    "simulation_timeout_seconds": 9000,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
     "name": "Llama 3 70B 32-rank direct-DP incast pair",
@@ -224,18 +224,18 @@
     "notes": "Selective retransmission on the designed-2:1 fabric that collapsed go-back-N: trims repair exactly the reported range and the receiver accepts out-of-order payload. If this pair completes, sustained oversubscription returns as a swept axis; its contrast with the go-back-N sweep is itself a paper finding."
   },
   {
-    "name": "Historical Phase-1 64-rank native reference pair",
+    "name": "Historical Phase-1 64-rank native reference run",
     "profile": "experiments/ring_3d/profiles/dblp_phase1_effnet_64dp.json",
-    "run_directory": "runs/ring_3d/dblp_phase1_effnet_64dp_comparison",
-    "artifact_name": "ring-3d-dblp-phase1-effnet-64dp-comparison",
+    "run_directory": "runs/ring_3d/dblp_phase1_effnet_64dp",
+    "artifact_name": "ring-3d-dblp-phase1-effnet-64dp",
     "ledger_key": "dblp-phase1-effnet-64dp",
-    "comparison": true,
-    "comparison_seed": 314159265,
-    "execution_timeout_minutes": 350,
-    "simulation_timeout_seconds": 21600,
+    "comparison": false,
+    "comparison_seed": 0,
+    "execution_timeout_minutes": 220,
+    "simulation_timeout_seconds": 14400,
     "require_congestion": false,
     "gate": "always",
-    "notes": "Lossless-at-scale sentinel: one arm measured 2.75 h at 5.999M queue pairs, so the per-simulator cap is twice a conservative 3 h round-up. The only arm that exercises the zero-recovery verification at scale; no background-incast gate."
+    "notes": "Lossless-at-scale sentinel, structural single run: its scientific role is zero-recovery verification at 5.999M queue pairs, which any one arm provides. One arm measured 2.75 h, so three matched arms (8.25 h) can never fit the six-hour job ceiling; a comparison here would be arithmetic failure, not evidence."
   },
   {
     "name": "100B 256-card Clos structural evaluation",

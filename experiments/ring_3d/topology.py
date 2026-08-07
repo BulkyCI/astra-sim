@@ -58,6 +58,14 @@ class TransportRecovery:
     # timeout/retry budget remains the silent-loss fallback. Off by default so
     # every existing arm keeps go-back-N semantics.
     selective_repair: bool = False
+    # Forward-progress deadline: fail a queue pair whose cumulative
+    # acknowledgement has not advanced for this simulated interval. The retry
+    # budget cannot bound a recovery loop sustained by budget-exempt signals
+    # (NACKs, trim notifications); this deadline bounds the transfer itself.
+    # Five simulated seconds is orders beyond any legitimate no-progress span
+    # (the engineered burst is ~19 ms) yet ends a livelocked arm in minutes
+    # of wall clock instead of hours.
+    no_progress_timeout_ns: int = 5_000_000_000
 
     def manifest(self) -> dict[str, int | bool]:
         return {
@@ -65,6 +73,7 @@ class TransportRecovery:
             "retransmission_timeout_ns": self.retransmission_timeout_ns,
             "max_retransmission_retries": self.max_retransmission_retries,
             "selective_repair": self.selective_repair,
+            "no_progress_timeout_ns": self.no_progress_timeout_ns,
         }
 
 
@@ -390,18 +399,20 @@ def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | No
     if not isinstance(recovery, dict):
         raise ValueError("network.transport_recovery must be an object")
     required = {"retransmission_timeout_ns", "max_retransmission_retries"}
-    if not required <= set(recovery) or set(recovery) - required - {
-        "selective_repair"
-    }:
+    optional = {"selective_repair", "no_progress_timeout_ns"}
+    if not required <= set(recovery) or set(recovery) - required - optional:
         raise ValueError(
             f"network.transport_recovery must contain exactly {sorted(required)} "
-            "plus an optional selective_repair"
+            f"plus optional {sorted(optional)}"
         )
     selective_repair = recovery.get("selective_repair", False)
     if not isinstance(selective_repair, bool):
         raise ValueError(
             "network.transport_recovery.selective_repair must be a boolean"
         )
+    no_progress_timeout_ns = recovery.get(
+        "no_progress_timeout_ns", TransportRecovery.no_progress_timeout_ns
+    )
     return TransportRecovery(
         retransmission_timeout_ns=_positive_int(
             recovery["retransmission_timeout_ns"],
@@ -412,6 +423,10 @@ def _load_transport_recovery(document: dict[str, Any]) -> TransportRecovery | No
             "network.transport_recovery.max_retransmission_retries",
         ),
         selective_repair=selective_repair,
+        no_progress_timeout_ns=_positive_int(
+            no_progress_timeout_ns,
+            "network.transport_recovery.no_progress_timeout_ns",
+        ),
     )
 
 

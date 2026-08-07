@@ -69,12 +69,20 @@ Failures are reported as invalid or unavailable data; they are never silently re
 
 Run every primary condition with the five fixed paired seeds currently used by `compare.py`.
 The historical Phase-1 native reference is the declared exception: it is one
-fixed-seed transport-scaling/reproducibility pair, not a multi-seed primary
-policy result. The always-on CI Llama condition schedules the five matched pairs
-independently, then validates and aggregates their retained artifacts. Each pair
-uses GitHub Actions' six-hour job limit, a 330-minute pair guard, and a
-9,000-second cap for each of its two ns-3 simulator processes. The 30-minute
-difference reserves job time for setup, artifact upload, and failure reporting.
+fixed-seed structural transport-scaling/reproducibility run, not a multi-seed
+primary policy result — its role is zero-recovery verification at scale, which
+any single arm provides, and its measured 2.75-hour arm makes a three-arm
+comparison arithmetically impossible inside the six-hour job ceiling. The
+always-on CI Llama condition schedules the five matched comparisons
+independently, then validates and aggregates their retained artifacts. Each
+comparison uses GitHub Actions' six-hour job limit, a 330-minute command guard,
+and a 14,400-second cap on each of its three ns-3 simulator arms; the guard
+bounds their sum, so the budget assumes at most one arm runs near its cap. The
+30-minute difference reserves job time for setup, artifact upload, and failure
+reporting. A livelocked arm no longer consumes its cap: the transport
+forward-progress deadline (`no_progress_timeout_ns`) fails any queue pair whose
+cumulative acknowledgement stalls for five simulated seconds, with the failure
+reason and counters retained.
 The Llama matrix and the historical reference job have six concurrent jobs;
 native integration and the two manual 100B topology studies bring the maximum
 simultaneous evaluation count to nine, below the account-level concurrency limit
@@ -91,7 +99,7 @@ six-hour job for setup, reporting, and artifacts.
 | Fixed-high headroom arm | Every matched comparison, both phases at the permissive 10% bound including critical steps | Bound the relief an unbounded policy would take, so the phase-aware result reads as captured headroom rather than an unanchored gain | Runs inside every comparison seed; its CLR exposure is deliberate and never a policy configuration. Report relief and headroom side by side. |
 | Healthy-fabric episodic condition | `profiles/llama3_70b_32_direct.json`, $DP=4$ direct on a healthy 1:1 rail fabric | Bound the achievable benefit when steady-state load fits the fabric and congestion is purely episodic (microburst incast plus ECMP collisions) | One fixed-seed pair with the best-effort congestion gate; a near-zero relief here is expected and calibrates the degraded conditions rather than refuting the thesis. |
 | Degraded-fabric concurrency sweep | `profiles/llama3_70b_64_direct{1,2,4,}.json`, $DP=8$ with windows $\{1,2,4,7\}$ on a 1:1 fabric degraded by two failed spines (4:3 live) | Measure congestion and policy relief against DP transfer concurrency with the fabric held at the knee that spine failure produces | One fixed-seed pair per point under the best-effort congestion gate; treat the first `direct2` arm as the completion canary before trusting the matrix. In symmetric all-to-all a sender's NIC divides across its window, so the swept count changes flow structure and collision statistics rather than aggregate receiver load; the pure receiver-overload axis remains the microburst source count below. `fan_in_sweep.py` renders pressure and relief against the swept concurrency. |
-| Historical Phase-1 native reference | `profiles/dblp_phase1_effnet_64dp.json`, fixed 0.8% versus phase-aware 0.8%/40.8% logical selection with the imported four-step CLR mask | Reproduce the old 64-rank, 186-round communication-only trace shape through the native packet/RDMA path | One fixed-seed pair; no microburst, packet loss, or congestion gate. It is not a DBLP residual-loss or accuracy result. |
+| Historical Phase-1 native reference | `profiles/dblp_phase1_effnet_64dp.json`, one structural run with the imported four-step CLR mask | Reproduce the old 64-rank, 186-round communication-only trace shape through the native packet/RDMA path and verify zero-recovery transport at 5.999M queue pairs | One fixed-seed structural run; no microburst, packet loss, or congestion gate. It is not a DBLP residual-loss or accuracy result, and it is not a policy comparison. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one two-step 256-card structural policy run with the shared step-two incast | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, the identical two-step workload and incast schedule | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |
 | DP payload scale | 128 MiB, 256 MiB, 512 MiB, and 1 GiB representative buckets | Establish whether eligible traffic is large enough to relieve the bottleneck | Maintain topology and background schedule within each rate block. |

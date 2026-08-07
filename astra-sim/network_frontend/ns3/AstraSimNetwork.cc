@@ -19,6 +19,7 @@
 #undef NS3_LOG_COMPAT_UNDEF_SYSLOG
 #include "astra-sim/network_frontend/ns3/ns3_log_monkey_patch.h"
 
+#include <chrono>
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
@@ -94,12 +95,33 @@ class NS3BackendCompletionTracker {
     }
 
     void liveness_checkpoint() {
+        // Self-profiling: the wall-clock and event-count deltas since the
+        // previous checkpoint make every run its own profiler. Per-event wall
+        // cost separates "each event became slower" (a code or build
+        // regression) from "the same simulated interval now executes more
+        // events" (a behavioral regression), a distinction no external
+        // timeout can make after killing the process.
+        const auto wall_now = std::chrono::steady_clock::now();
+        const uint64_t events_now = Simulator::GetEventCount();
+        const uint64_t wall_ms_delta =
+            last_checkpoint_wall_.time_since_epoch().count() == 0
+                ? 0
+                : std::chrono::duration_cast<std::chrono::milliseconds>(
+                      wall_now - last_checkpoint_wall_)
+                      .count();
+        const uint64_t events_delta =
+            events_now >= last_checkpoint_events_
+                ? events_now - last_checkpoint_events_
+                : 0;
+        last_checkpoint_wall_ = wall_now;
+        last_checkpoint_events_ = events_now;
         AstraSim::LoggerFactory::get_logger("network")->info(
             "Liveness checkpoint: simulated_time_ns={} completed_qps={} "
-            "active_qps={} completed_ranks={}/{} pending_background_flows={}",
+            "active_qps={} completed_ranks={}/{} pending_background_flows={} "
+            "wall_ms_delta={} events_delta={}",
             Simulator::Now().GetNanoSeconds(), completed_qp_count(),
             active_qp_count(), num_ranks_ - num_unfinished_ranks_, num_ranks_,
-            pending_background_flows);
+            pending_background_flows, wall_ms_delta, events_delta);
         if (is_complete()) {
             return;
         }
@@ -146,6 +168,8 @@ class NS3BackendCompletionTracker {
     uint64_t last_completed_qp_count_ = 0;
     int last_unfinished_rank_count_ = 0;
     uint64_t quiescent_checkpoints_ = 0;
+    std::chrono::steady_clock::time_point last_checkpoint_wall_{};
+    uint64_t last_checkpoint_events_ = 0;
     vector<int> completion_tracker_;
 };
 

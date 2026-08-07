@@ -71,6 +71,9 @@ checks that are intentionally not run, especially costly simulator runs.
   [docs/agents/loss-tolerant-rdma-decision.md](docs/agents/loss-tolerant-rdma-decision.md)
 - Verified current ns-3/QBB/RDMA implementation gaps for that direction:
   [docs/agents/loss-tolerant-rdma-audit.md](docs/agents/loss-tolerant-rdma-audit.md)
+- Timeout triage, transport hot-path rules, liveness bounds, and CI budget
+  arithmetic:
+  [docs/agents/simulation-liveness-and-performance.md](docs/agents/simulation-liveness-and-performance.md)
 - Ring-3D generator, policy, telemetry, or profile changes:
   [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
 - CI workflows, cache trust boundary, and the experiment ledger:

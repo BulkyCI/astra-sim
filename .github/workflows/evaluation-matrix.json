@@ -231,11 +231,11 @@
     "ledger_key": "dblp-phase1-effnet-64dp",
     "comparison": false,
     "comparison_seed": 0,
-    "execution_timeout_minutes": 220,
+    "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": false,
-    "gate": "always",
-    "notes": "Lossless-at-scale sentinel, structural single run: its scientific role is zero-recovery verification at 5.999M queue pairs, which any one arm provides. One arm measured 2.75 h, so three matched arms (8.25 h) can never fit the six-hour job ceiling; a comparison here would be arithmetic failure, not evidence."
+    "gate": "structural",
+    "notes": "Lossless-at-scale sentinel, structural single run behind the manual structural dispatch: the 2026-08-07 run measured 46% of its 5.999M queue pairs in 3h37m of simulator wall clock, a ~7.8 h full run that no six-hour hosted job can hold on any budget split. Its zero-recovery verification therefore runs on demand, not per push."
   },
   {
     "name": "100B 256-card Clos structural evaluation",

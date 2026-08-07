@@ -74,6 +74,8 @@ checks that are intentionally not run, especially costly simulator runs.
 - Timeout triage, transport hot-path rules, liveness bounds, and CI budget
   arithmetic:
   [docs/agents/simulation-liveness-and-performance.md](docs/agents/simulation-liveness-and-performance.md)
+- Building the ns-3 backend without root, with an ephemeral `/tmp` toolchain:
+  [docs/agents/rootless-ephemeral-build.md](docs/agents/rootless-ephemeral-build.md)
 - Ring-3D generator, policy, telemetry, or profile changes:
   [experiments/ring_3d/AGENTS.md](experiments/ring_3d/AGENTS.md)
 - CI workflows, cache trust boundary, and the experiment ledger:

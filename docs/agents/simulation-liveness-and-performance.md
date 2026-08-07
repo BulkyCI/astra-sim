@@ -109,21 +109,13 @@ slow step was a fact the process took to its grave.
 
 Static cost estimation was wrong by ~50× in the August incident; two
 same-machine builds differing by one commit settled in an hour what a day of
-log forensics could not. The repository builds without root:
-
-1. Install the toolchain userland via micromamba (`libprotobuf=3.21.12`,
-   `libboost-devel`, `openmpi`, `zlib`, `gxx`, `ccache`), export
-   `CC`/`CXX`/`CMAKE_PREFIX_PATH` into it, and run protoc over
-   `extern/graph_frontend/chakra/schema/protobuf/et_def.proto`.
-2. Configure and build exactly as CI does: `./ns3 configure --enable-mpi
-   --build-profile release --enable-asserts`, then `./ns3 build
-   AstraSimNetwork`. Run the `ns3` CLI under the project venv's Python;
-   newer interpreters break its argparse usage. Wrap with ccache so the
-   second build of an A/B costs minutes.
-3. Materialize a profile with `experiments/ring_3d/generate.py` and invoke
-   the binary directly with its config files. One or two liveness
-   checkpoints (10 ms of simulated time each) give the pace; kill the run.
-4. A/B across submodule commits by checking out in place and rebuilding.
-   Compare `wall_ms_delta` at equal `simulated_time_ns`. Architecture does
-   not matter for a relative comparison; the incident's regression
-   reproduced on aarch64 at ≥7× against an x86 CI signature of 93×.
+log forensics could not. The full verified procedure — from a bare-bones
+Ubuntu machine with no root and no preinstalled protobuf/boost/MPI to a
+running binary, with the entire toolchain ephemeral under `/tmp` — is
+[rootless ephemeral build](rootless-ephemeral-build.md). The A/B itself:
+build, measure one or two liveness checkpoints against a materialized
+profile, check out the comparison submodule commit in place, rebuild
+through ccache, re-measure, and compare `wall_ms_delta` at equal
+`simulated_time_ns`. Architecture does not matter for a relative
+comparison; the incident's regression reproduced on aarch64 at ≥7× against
+an x86 CI signature of 93×.

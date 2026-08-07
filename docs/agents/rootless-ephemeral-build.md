@@ -2,23 +2,59 @@
 
 Verified procedure for compiling and running `AstraSimNetwork` starting from
 a bare-bones Ubuntu 24.04 machine: no root, no sudo password, and nothing
-preinstalled beyond a gcc toolchain, a system `python3`, `git`, `curl`, and
-`tar`/`bzip2`. No `apt` package is required at any step. Every tool the
-build needs — CPython 3.11, uv, protobuf, boost, OpenMPI, zlib, cmake,
-ninja, ccache, the C++ compiler actually used — is installed under `/tmp`,
-so the entire toolchain is temporary by design: nothing survives a reboot,
-nothing touches `$HOME`, and the repository tree keeps only its normal
-`build/` outputs.
+guaranteed beyond a gcc toolchain, a system `python3`, `git`, `curl`, and
+`tar`/`bzip2`. No `apt` package is required at any step. Whatever the build
+needs and the machine lacks — CPython 3.11, uv, protobuf, boost, OpenMPI,
+zlib, cmake, ninja, ccache, possibly the C++ compiler itself — is installed
+under `/tmp`, so the added toolchain is temporary by design: nothing
+survives a reboot, nothing touches `$HOME`, and the repository tree keeps
+only its normal `build/` outputs.
 
 Distilled from the 2026-08-07 incident work, where this setup enabled the
 local A/B that found a 93× hot-path regression; every step is the exact
-verified path, with the failures preserved as gotchas. The system `python3`
-(3.12 on 24.04) and system gcc are never used: 3.12+ breaks the `ns3` CLI,
-and the conda compiler keeps the ABI consistent with the conda-built
-libraries.
+verified path, with the failures preserved as gotchas.
+
+## 0. Detect before installing
+
+Tools already on the machine are preferred — but only where mixing is safe.
+The dependencies split into two classes with different rules:
+
+- **ABI-neutral drivers** — `cmake`, `ninja`, `ccache`, `git`, `curl`,
+  `tar`. These never link into the binary; use any system copy that exists
+  and install only the missing ones via micromamba. The verified incident
+  build drove system cmake/ninja against conda compilers and libraries.
+- **The ABI-coupled unit** — `libprotobuf`+`protoc`, boost, OpenMPI, zlib,
+  and the C++ compiler that links against them. Resolve this set as a
+  single unit, never piecewise. If the machine has the full system unit
+  (`protoc`, `libprotobuf-dev`, `libboost-dev`,
+  `libboost-program-options-dev`, `libopenmpi-dev`, zlib headers — i.e.
+  what `.github/workflows/setup.sh` installs in CI), build with the system
+  compiler and skip micromamba for all of them. If any member is missing,
+  take the whole unit from conda-forge, including the conda compiler:
+  conda-built libraries carry a newer libstdc++ than the system toolchain,
+  and a mixed link is an unverified path.
+
+```sh
+# ABI-neutral: list what must come from micromamba
+NEUTRAL=""
+for t in cmake ninja ccache; do command -v "$t" >/dev/null || NEUTRAL="$NEUTRAL $t"; done
+
+# ABI-coupled: system unit only if every member is present
+if command -v protoc >/dev/null \
+   && [ -e /usr/include/google/protobuf/message.h ] \
+   && [ -e /usr/include/boost/version.hpp ] \
+   && command -v mpicxx >/dev/null \
+   && [ -e /usr/include/zlib.h ]; then
+  UNIT=system
+else
+  UNIT=conda
+fi
+echo "neutral to install:${NEUTRAL:- none}; ABI unit: $UNIT"
+```
 
 ## 1. Create the ephemeral native toolchain
 
+Skip this step entirely only when `UNIT=system` and `$NEUTRAL` is empty.
 Pick a scratch root in `/tmp` (`$SCRATCH` below). Detect the architecture
 first — micromamba downloads are arch-specific and the wrong one fails with
 `Exec format error`:
@@ -33,14 +69,16 @@ case "$ARCH" in
 esac
 curl -sL "https://micro.mamba.pm/api/micromamba/${MM_ARCH}/latest" -o mm.tar.bz2
 tar -xjf mm.tar.bz2 bin/micromamba
-./bin/micromamba create -y -p "$SCRATCH/buildenv" -c conda-forge \
-    "libprotobuf=3.21.12" libboost-devel openmpi zlib "$GXX" \
-    cmake ninja ccache
-./buildenv/bin/protoc --version   # expect: libprotoc 3.21.12
-./buildenv/bin/cmake --version    # any recent version works (verified 4.4.2)
+
+PKGS="$NEUTRAL"
+if [ "$UNIT" = conda ]; then
+  PKGS="$PKGS libprotobuf=3.21.12 libboost-devel openmpi zlib $GXX"
+fi
+./bin/micromamba create -y -p "$SCRATCH/buildenv" -c conda-forge $PKGS
+[ "$UNIT" = conda ] && ./buildenv/bin/protoc --version  # expect: libprotoc 3.21.12
 ```
 
-Why each pin exists:
+Why each conda-unit pin exists:
 
 - `libprotobuf=3.21.12` — conda-forge's default protobuf is the abseil-era
   35.x line; the repository's CMake uses module-mode `find_package(Protobuf)`
@@ -53,20 +91,26 @@ Why each pin exists:
   ~90% in `protoio.cc`.
 - `$GXX` — the conda cross-named compiler (`<arch>-conda-linux-gnu-g++`)
   keeps libstdc++ consistent with the conda-built protobuf/boost binaries;
-  the system gcc is left unused.
-- `cmake`, `ninja` — assume absent on a bare machine; the conda versions
-  are what the build actually invokes once `PATH` is set below.
-- `ccache` — makes the second build of any A/B a minutes-long relink.
+  with the conda unit, the system gcc is left unused.
+- `ccache` (when missing) — makes the second build of any A/B a
+  minutes-long relink.
 
 ## 2. Create the ephemeral project Python environment
 
 The `ns3` CLI needs Python ≤3.11 (its legacy argparse usage raises
 `ValueError: action 'store_true' is not valid for positional arguments` on
 3.12+, which includes Ubuntu 24.04's system `python3`), and the experiment
-tooling needs the locked project dependencies. uv provides both without
-root and without touching `$HOME`. Read the exact uv version bound from
-`required-version` in `pyproject.toml` (verified: 0.11.28 against the
-`>=0.11.28,<0.12` bound; a newer uv refuses the project outright):
+tooling needs the locked project dependencies. Prefer an environment that
+already exists before creating one:
+
+1. If `<repository_root>/.venv/bin/python3` exists and reports 3.11.x, use
+   it directly: `PY=$PROJ/.venv/bin/python3`. This is the normal case on a
+   machine where `./utils/setup.sh` has run.
+2. Otherwise, bootstrap an ephemeral uv environment. Read the exact uv
+   version bound from `required-version` in `pyproject.toml` (verified:
+   0.11.28 against the `>=0.11.28,<0.12` bound; a newer uv — including a
+   system-installed one — refuses the project outright, so check any
+   existing `uv` on `PATH` against the bound before installing):
 
 ```sh
 PROJ=<repository_root>            # checked out with submodules initialized
@@ -88,16 +132,26 @@ the repository's `.venv`. If the repository lacks submodules, run
 
 ## 3. Export the native build environment
 
+Putting `$ENV/bin` at the *end* of `PATH` keeps existing system tools
+preferred and uses the conda copies only as fill-ins; the compiler and
+library variables are set only when the ABI unit comes from conda:
+
 ```sh
 ENV=$SCRATCH/buildenv
-export PATH="$ENV/bin:$PATH"
-export CC="$ENV/bin/${ARCH}-conda-linux-gnu-gcc"
-export CXX="$ENV/bin/${ARCH}-conda-linux-gnu-g++"
-export CMAKE_PREFIX_PATH="$ENV"
+[ -d "$ENV/bin" ] && export PATH="$PATH:$ENV/bin"
 export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CCACHE_DIR="$SCRATCH/ccache"
-export LD_LIBRARY_PATH="$ENV/lib"
+if [ "$UNIT" = conda ]; then
+  export CC="$ENV/bin/${ARCH}-conda-linux-gnu-gcc"
+  export CXX="$ENV/bin/${ARCH}-conda-linux-gnu-g++"
+  export CMAKE_PREFIX_PATH="$ENV"
+  export LD_LIBRARY_PATH="$ENV/lib"
+fi
 ```
+
+With `UNIT=system`, none of the conda-specific variables are needed and
+the build behaves exactly like CI's `.github/workflows/setup.sh` +
+`build.sh` path.
 
 ## 4. Generate the chakra protobuf sources
 
@@ -153,7 +207,8 @@ from generate import materialize
 from pathlib import Path
 materialize(Path('$PROJ/experiments/ring_3d/profiles/<profile>.json'), Path('$CFG'))"
 
-export LD_LIBRARY_PATH=$PROJ/extern/network_backend/ns-3/build/lib:$ENV/lib
+export LD_LIBRARY_PATH=$PROJ/extern/network_backend/ns-3/build/lib
+[ "$UNIT" = conda ] && export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$ENV/lib"
 $PROJ/extern/network_backend/ns-3/build/scratch/ns3.42-AstraSimNetwork \
   --workload-configuration="$CFG/workload/ring_3d" \
   --system-configuration="$CFG/system.json" \
@@ -190,6 +245,11 @@ otherwise identical builds.
 
 ## Gotchas
 
+- Never resolve the ABI-coupled unit piecewise (for example, system boost
+  with conda protobuf, or conda libraries with the system compiler). The
+  two verified configurations are all-system (the CI path) and all-conda
+  with the conda compiler; anything in between risks libstdc++ and ABI
+  mismatches that surface as link or runtime errors far from their cause.
 - Wrong-arch micromamba fails with `Exec format error`; always derive the
   download URL from `uname -m`.
 - Conda-forge default protobuf (35.x) configures but is the wrong API

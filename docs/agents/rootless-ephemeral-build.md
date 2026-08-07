@@ -69,6 +69,9 @@ case "$ARCH" in
 esac
 curl -sL "https://micro.mamba.pm/api/micromamba/${MM_ARCH}/latest" -o mm.tar.bz2
 tar -xjf mm.tar.bz2 bin/micromamba
+# Without this, micromamba leaks a multi-GB package cache into
+# ~/.local/share/mamba, violating the nothing-outside-/tmp property.
+export MAMBA_ROOT_PREFIX="$SCRATCH/mamba-root"
 
 PKGS="$NEUTRAL"
 if [ "$UNIT" = conda ]; then
@@ -116,6 +119,7 @@ already exists before creating one:
 PROJ=<repository_root>            # checked out with submodules initialized
 curl -LsSf https://astral.sh/uv/0.11.28/install.sh | \
     UV_INSTALL_DIR="$SCRATCH/uvhome" UV_NO_MODIFY_PATH=1 sh
+rm -f ~/.config/uv/uv-receipt.json   # the installer writes this outside /tmp
 cd "$PROJ"
 UV_PROJECT_ENVIRONMENT="$SCRATCH/uvenv" \
 UV_CACHE_DIR="$SCRATCH/uvcache" \
@@ -265,7 +269,15 @@ otherwise identical builds.
   install the pinned version, not "latest".
 - Without the three `UV_*` environment overrides, uv writes its
   interpreter, cache, and venv outside `/tmp`, breaking the
-  nothing-survives-a-reboot property.
+  nothing-survives-a-reboot property. Two leaks survive even correct
+  overrides and were caught only by a post-hoc `$HOME` audit: micromamba's
+  package cache (multi-GB under `~/.local/share/mamba`, prevented by
+  `MAMBA_ROOT_PREFIX`) and the uv installer's `~/.config/uv/uv-receipt.json`
+  (delete it; `UV_UNMANAGED_INSTALL` does not work in this installer
+  version). After any session, verify with
+  `ls -d ~/micromamba ~/.mamba ~/.local/share/mamba ~/.config/uv` and check
+  timestamps before deleting — a pre-existing `~/.local/share/uv` belongs
+  to the machine's owner, not to this procedure.
 - Stale `cmake-cache`/`build` directories from another machine poison
   ninja with foreign absolute paths; delete both before first configure.
 - The scratch `AstraSim` objects compile with `-O0` appended after `-O3` by

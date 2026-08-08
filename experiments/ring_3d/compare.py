@@ -728,6 +728,21 @@ def run_comparison(
                 "allow_clr_exposure": False,
             },
         }
+        if analyze_only:
+            # Parse, don't validate: an arm's summary.json exists exactly when
+            # its simulations and gates completed, so totality is checked here,
+            # before any comparison work, instead of surfacing as a
+            # FileNotFoundError from whichever arm happens to be read first.
+            incomplete = [
+                arm_name
+                for arm_name, arm in arms.items()
+                if not (arm["directory"] / "summary.json").exists()
+            ]
+            if incomplete:
+                raise ValueError(
+                    f"seed {seed}: arm(s) {', '.join(incomplete)} never completed "
+                    "(no summary.json); inspect those arm jobs, not this analysis"
+                )
         summaries: dict[str, dict[str, Any]] = {}
         congestion: dict[str, dict[str, bool | int | str]] = {}
         for arm_name, arm in arms.items():

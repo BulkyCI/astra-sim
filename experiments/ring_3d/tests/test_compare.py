@@ -396,6 +396,11 @@ class Ring3DComparisonTests(unittest.TestCase):
                 # The analyze pass must never launch a simulation.
                 self.assertEqual(mocked_run.call_count, len(arms))
             self.assertTrue((output.resolve() / "comparison.json").exists())
+            # An incomplete arm must be named up front, not surface as a
+            # FileNotFoundError from deep inside the comparison.
+            (output.resolve() / "seed_17" / arms[1] / "summary.json").unlink()
+            with self.assertRaisesRegex(ValueError, arms[1]):
+                run_comparison(profile, output, [17], analyze_only=True)
         self.assertEqual(len(comparison["per_seed"]), 1)
         self.assertIn("aggregate", comparison)
 

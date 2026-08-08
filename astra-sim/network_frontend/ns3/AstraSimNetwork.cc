@@ -88,8 +88,13 @@ class NS3BackendCompletionTracker {
     static constexpr uint64_t kQuiescentCheckpointsBeforeStall = 1000;
     static const Time kLivenessCheckpointInterval;
 
+    // Deliberately ignores whether QPs are "active": the observed wedge is a
+    // lone registered flow whose queue pair has no pending events at all, so
+    // requiring active_qp_count() == 0 made this detector blind to exactly
+    // the state it exists to catch. Ten simulated seconds without a single
+    // QP or rank completing is a stall regardless of what the registry says.
     bool is_quiescent() const {
-        return active_qp_count() == 0 && !has_pending_background_traffic() &&
+        return !has_pending_background_traffic() &&
                completed_qp_count() == last_completed_qp_count_ &&
                num_unfinished_ranks_ == last_unfinished_rank_count_;
     }
@@ -138,10 +143,18 @@ class NS3BackendCompletionTracker {
         if (quiescent_checkpoints_ >= kQuiescentCheckpointsBeforeStall) {
             AstraSim::LoggerFactory::get_logger("network")->critical(
                 "Simulation stalled: no flow or rank completed in the last {} "
-                "ns of simulated time while {} of {} ranks were unfinished and "
-                "no flow was in flight.",
+                "ns of simulated time while {} of {} ranks were unfinished "
+                "and {} flows were registered as active.",
                 kQuiescentCheckpointsBeforeStall * kLivenessCheckpointIntervalNs,
-                num_unfinished_ranks_, num_ranks_);
+                num_unfinished_ranks_, num_ranks_, active_qp_count());
+            for (const auto& entry : active_flow_registry) {
+                const auto& flow = entry.second;
+                AstraSim::LoggerFactory::get_logger("network")->critical(
+                    "Stalled flow: {}->{} source_port={} logical_bytes={} "
+                    "started_at_ns={}",
+                    flow.src, flow.dst, flow.source_port, flow.logical_bytes,
+                    flow.start_time_ns);
+            }
             Simulator::Stop();
             return;
         }

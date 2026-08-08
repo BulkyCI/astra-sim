@@ -23,16 +23,29 @@ function compile {
     # -march=native, and a hosted runner's CPU model varies between runs, so
     # one binary would stop being reproducible across them.
     local profile="${NS3_BUILD_PROFILE:-release}"
-    # Asserts are re-enabled on top of the profile. They cost a predictable
-    # branch and are the only in-model check on a transport under active
-    # change; ns-3 removes the profile's -DNS3_ASSERT=OFF for this flag.
-    local configure_args=(--enable-mpi --build-profile "${profile}" --enable-asserts)
+    # No --enable-asserts: measured at 13.7% of evaluation wall time
+    # (59.3s vs 51.2s per 10ms of simulated time, identical config), and
+    # every evaluation arm pays it for hours. The smoke and liveness
+    # scripts check behavior from the outside; set NS3_BUILD_PROFILE or
+    # add the flag back locally when chasing a transport bug.
+    local configure_args=(--enable-mpi --build-profile "${profile}")
+    # LTO is ISA-neutral (unlike `optimized`'s -march=native, which a
+    # mixed hosted-runner fleet cannot run reliably).
+    local cmake_args=(-DNS3_LINK_TIME_OPTIMIZATION=ON)
+    # x86-64-v3 (AVX2/FMA/BMI2) is the highest ISA level every amd64 VM
+    # GitHub has fielded supports; AVX-512 is not fleet-wide, and the
+    # build VM and evaluation VMs differ, so -march=native is unsafe.
+    if [[ "$(uname -m)" == "x86_64" ]]; then
+        cmake_args+=(-DCMAKE_C_FLAGS=-march=x86-64-v3
+                     -DCMAKE_CXX_FLAGS=-march=x86-64-v3)
+    fi
     # CI supplies a launcher through CMake's standard environment variable.
     # Bypass ns-3's own integration there: it weakens ccache correctness by
     # enabling sloppiness for timestamps and include-file metadata.
     if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
-        configure_args+=(-- -DNS3_CCACHE=OFF)
+        cmake_args+=(-DNS3_CCACHE=OFF)
     fi
+    configure_args+=(-- "${cmake_args[@]}")
     ./ns3 configure "${configure_args[@]}"
     ./ns3 build AstraSimNetwork -j $(nproc)
     cd "${SCRIPT_DIR:?}"

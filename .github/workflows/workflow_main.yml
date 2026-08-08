@@ -341,9 +341,7 @@ jobs:
     needs: [ evaluations, ledger ]
     # `always()` so an unrelated arm's failure cannot skip this aggregation;
     # the exact artifact count inside the reusable workflow is the real gate.
-    # Structural-only: routine pushes run just the canary seed, which can
-    # never satisfy the five-artifact count this aggregation requires.
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
+    if: ${{ always() }}
     permissions:
       contents: write
       issues: write
@@ -364,7 +362,7 @@ jobs:
   aggregate-fanin-sweep:
     name: Aggregate the DP fan-in sweep
     needs: [ evaluations, ledger ]
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
+    if: ${{ always() }}
     permissions:
       contents: write
       issues: write
@@ -385,7 +383,7 @@ jobs:
   aggregate-burst-sweep:
     name: Aggregate the microburst source-count sweep
     needs: [ evaluations, ledger ]
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
+    if: ${{ always() }}
     permissions:
       contents: write
       issues: write

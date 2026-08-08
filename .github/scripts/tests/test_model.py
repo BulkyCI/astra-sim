@@ -34,7 +34,7 @@ from ci_ledger.model import (
 )
 
 CONTEXT = RunContext(
-    repository="BTreeMap/astra-sim",
+    repository="BulkyCI/astra-sim",
     run_id="1234567890",
     run_number="42",
     run_attempt="2",
@@ -125,11 +125,11 @@ class MarkerRoundTrip(unittest.TestCase):
                 parse_key(bad)
 
     def test_run_marker_identifies_exactly_one_run(self) -> None:
-        body = render_run_marker("BTreeMap/astra-sim", "1234567890")
-        self.assertTrue(issue_matches_run(body, "BTreeMap/astra-sim", "1234567890"))
-        self.assertFalse(issue_matches_run(body, "BTreeMap/astra-sim", "999"))
+        body = render_run_marker("BulkyCI/astra-sim", "1234567890")
+        self.assertTrue(issue_matches_run(body, "BulkyCI/astra-sim", "1234567890"))
+        self.assertFalse(issue_matches_run(body, "BulkyCI/astra-sim", "999"))
         self.assertFalse(issue_matches_run(body, "other/repo", "1234567890"))
-        self.assertFalse(issue_matches_run("", "BTreeMap/astra-sim", "1"))
+        self.assertFalse(issue_matches_run("", "BulkyCI/astra-sim", "1"))
 
     def test_unknown_status_degrades_to_missing(self) -> None:
         self.assertIs(parse_status("neutral"), Status.MISSING)

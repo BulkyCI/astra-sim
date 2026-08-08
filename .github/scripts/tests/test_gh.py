@@ -13,7 +13,7 @@ import unittest
 
 from ci_ledger.gh import Gh, GhError
 
-REPOSITORY = "BTreeMap/astra-sim"
+REPOSITORY = "BulkyCI/astra-sim"
 
 
 class RecordingRunner:

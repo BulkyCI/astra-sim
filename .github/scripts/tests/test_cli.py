@@ -18,7 +18,7 @@ from ci_ledger import cli
 from ci_ledger.model import RemoteComment, issue_matches_run
 
 ENVIRONMENT = {
-    "GITHUB_REPOSITORY": "BTreeMap/astra-sim",
+    "GITHUB_REPOSITORY": "BulkyCI/astra-sim",
     "GITHUB_RUN_ID": "1234567890",
     "GITHUB_RUN_NUMBER": "42",
     "GITHUB_RUN_ATTEMPT": "1",
@@ -135,7 +135,7 @@ class LedgerLifecycle(unittest.TestCase):
         self.assertIn("experiment-ledger", self.gh.labels)
         self.assertTrue(
             issue_matches_run(
-                str(self.gh.issues[1]["body"]), "BTreeMap/astra-sim", "1234567890"
+                str(self.gh.issues[1]["body"]), "BulkyCI/astra-sim", "1234567890"
             )
         )
 

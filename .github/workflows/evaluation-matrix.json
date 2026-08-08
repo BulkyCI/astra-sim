@@ -24,7 +24,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
@@ -38,7 +38,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
@@ -52,7 +52,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
@@ -66,7 +66,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
   },
   {
@@ -80,7 +80,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 9000,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Healthy 1:1 rail fabric: steady-state DP fits, congestion is purely episodic (microburst incast plus ECMP collisions). Near-zero relief is expected and calibrates the degraded conditions."
   },
   {
@@ -94,7 +94,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 9000,
     "require_congestion": false,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Negative control of the burst-source sweep: no microburst, so no congestion gate. Relief here should be near zero."
   },
   {
@@ -108,7 +108,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 9000,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Burst-source sweep point: 2 asymmetric senders at one receiver downlink on the healthy 1:1 fabric."
   },
   {
@@ -122,7 +122,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 9000,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Burst-source sweep point: 4 asymmetric senders at one receiver downlink on the healthy 1:1 fabric."
   },
   {
@@ -136,7 +136,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 9000,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Burst-timing contrast: the burst fires at step 1, which the schedule holds at probability 1.0 so it is CLR under every seed. The policy must shed almost nothing here; contrast with the step-18 arm is the directional signature of phase-awareness."
   },
   {
@@ -150,7 +150,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "pp=2 puts non-sheddable pipeline activations on the degraded knee fabric alongside sheddable DP gradients. The policy's eligibility is dp_all_reduce_only, so PP flow completion must stay intact while DP is relieved."
   },
   {
@@ -164,7 +164,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point; 64 ranks move roughly four times the 16-rank arm's bytes, hence the 4 h per-arm backstop."
   },
   {
@@ -178,7 +178,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Degraded 1:1 sweep point and the completion canary: judge the matrix by this arm first, since it is the window that collapsed on the designed-2:1 fabric."
   },
   {
@@ -192,7 +192,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point."
   },
   {
@@ -206,7 +206,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point at the unwindowed maximum."
   },
   {
@@ -220,7 +220,7 @@
     "execution_timeout_minutes": 330,
     "simulation_timeout_seconds": 14400,
     "require_congestion": true,
-    "gate": "always",
+    "gate": "structural",
     "notes": "Selective retransmission on the designed-2:1 fabric that collapsed go-back-N: trims repair exactly the reported range and the receiver accepts out-of-order payload. If this pair completes, sustained oversubscription returns as a swept axis; its contrast with the go-back-N sweep is itself a paper finding."
   },
   {

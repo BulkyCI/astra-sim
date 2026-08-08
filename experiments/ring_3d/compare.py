@@ -668,8 +668,17 @@ def run_comparison(
     simulation_timeout_seconds: int | None = None,
     p_low: float | None = None,
     p_high: float | None = None,
+    only_arm: str | None = None,
+    analyze_only: bool = False,
 ) -> dict[str, Any]:
-    """Run the matched experiment pairs and retain their individual artifacts."""
+    """Run the matched experiment pairs and retain their individual artifacts.
+
+    ``only_arm`` runs a single arm's simulations and gates without building
+    the comparison; ``analyze_only`` skips the simulations and builds the
+    comparison from arm directories produced earlier. Together they let CI
+    chain one job per arm, so the per-job wall-clock ceiling bounds one arm
+    instead of the whole triple.
+    """
     if not seeds:
         raise ValueError("at least one seed is required")
     if len(set(seeds)) != len(seeds):
@@ -722,18 +731,21 @@ def run_comparison(
         summaries: dict[str, dict[str, Any]] = {}
         congestion: dict[str, dict[str, bool | int | str]] = {}
         for arm_name, arm in arms.items():
-            run_experiment(
-                profile,
-                arm["directory"],
-                binary=binary,
-                clean=True,
-                seed=seed,
-                ns3_rng_run=seed,
-                simulation_timeout_seconds=simulation_timeout_seconds,
-                p_low=arm["p_low"],
-                p_high=arm["p_high"],
-                allow_clr_exposure=arm["allow_clr_exposure"],
-            )
+            if only_arm is not None and arm_name != only_arm:
+                continue
+            if not analyze_only:
+                run_experiment(
+                    profile,
+                    arm["directory"],
+                    binary=binary,
+                    clean=True,
+                    seed=seed,
+                    ns3_rng_run=seed,
+                    simulation_timeout_seconds=simulation_timeout_seconds,
+                    p_low=arm["p_low"],
+                    p_high=arm["p_high"],
+                    allow_clr_exposure=arm["allow_clr_exposure"],
+                )
             summary = _read_summary(arm["directory"])
             require_primary_analysis(summary, arm["label"])
             evidence = congestion_evidence(summary)
@@ -743,6 +755,8 @@ def run_comparison(
                 evidence = require_finite_buffer_data_drop(summary, arm["label"])
             summaries[arm_name] = summary
             congestion[arm_name] = evidence
+        if only_arm is not None:
+            continue
         per_seed.append(
             {
                 "seed": seed,
@@ -767,6 +781,9 @@ def run_comparison(
                 ),
             }
         )
+
+    if only_arm is not None:
+        return {"arm": only_arm, "seeds": seeds}
 
     comparison = {
         "profile": profile.resolve().as_posix(),
@@ -844,11 +861,23 @@ def main() -> int:
         help="override the high logical-admission selection probability",
     )
     parser.add_argument(
+        "--arm",
+        choices=tuple(_ARM_TITLES),
+        help="run only this arm's simulations and gates; compare later with --analyze-only",
+    )
+    parser.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="skip simulations and build the comparison from existing arm directories",
+    )
+    parser.add_argument(
         "--clean", action="store_true", help="replace an existing comparison directory"
     )
     arguments = parser.parse_args()
     if (arguments.profile is None) == (arguments.aggregate_inputs is None):
         parser.error("provide exactly one of --profile or --aggregate-inputs")
+    if arguments.arm and arguments.analyze_only:
+        parser.error("--arm and --analyze-only are mutually exclusive")
     if arguments.aggregate_inputs is not None:
         if arguments.clean and arguments.output.exists():
             shutil.rmtree(arguments.output)
@@ -869,6 +898,8 @@ def main() -> int:
             simulation_timeout_seconds=arguments.simulation_timeout_seconds,
             p_low=arguments.p_low,
             p_high=arguments.p_high,
+            only_arm=arguments.arm,
+            analyze_only=arguments.analyze_only,
         )
     print(json.dumps(comparison, indent=2))
     return 0

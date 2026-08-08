@@ -370,6 +370,35 @@ class Ring3DComparisonTests(unittest.TestCase):
         )
         self.assertIn("headroom_aggregate", comparison)
 
+    def test_chained_arm_runs_then_analyze_only_matches_full_comparison(self) -> None:
+        def fake_run_experiment(
+            _profile: Path, output: Path, **_kwargs: object
+        ) -> dict[str, object]:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "summary.json").write_text(
+                json.dumps(congested_summary()), encoding="utf-8"
+            )
+            return {}
+
+        profile = REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+        arms = ("fixed_p_low_baseline", "fixed_p_high_baseline", "dblp_policy")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "comparison"
+            with patch(
+                "experiments.ring_3d.compare.run_experiment",
+                side_effect=fake_run_experiment,
+            ) as mocked_run:
+                for arm in arms:
+                    partial = run_comparison(profile, output, [17], only_arm=arm)
+                    self.assertEqual(partial, {"arm": arm, "seeds": [17]})
+                self.assertEqual(mocked_run.call_count, len(arms))
+                comparison = run_comparison(profile, output, [17], analyze_only=True)
+                # The analyze pass must never launch a simulation.
+                self.assertEqual(mocked_run.call_count, len(arms))
+            self.assertTrue((output.resolve() / "comparison.json").exists())
+        self.assertEqual(len(comparison["per_seed"]), 1)
+        self.assertIn("aggregate", comparison)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,7 @@ permissions:
 jobs:
   evaluate:
     name: ${{ inputs.evaluation_name }}
+    if: ${{ !inputs.comparison }}
     runs-on: ubuntu-22.04
     # The reusable workflow owns a complete hosted job. Callers reserve their
     # simulator and wrapper budgets below the six-hour GitHub Actions limit.
@@ -100,7 +101,6 @@ jobs:
         artifact: ${{ inputs.runtime_artifact }}
 
     - name: Run structural ns-3 experiment
-      if: ${{ !inputs.comparison }}
       run: |
         timeout --foreground ${{ inputs.execution_timeout_minutes }}m \
           uv run --locked python experiments/ring_3d/run.py \
@@ -109,15 +109,68 @@ jobs:
           --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }} \
           --clean
 
-    - name: Run paired ns-3 comparison
-      if: ${{ inputs.comparison }}
+    - name: Publish structural researcher report
+      if: ${{ always() }}
+      run: |
+        uv run --locked python experiments/ring_3d/report.py \
+          --profile "$EXPERIMENT_PROFILE" \
+          --run-dir "$EXPERIMENT_RUN_DIRECTORY" \
+          --output "$EXPERIMENT_RUN_DIRECTORY/research_report.md"
+        cat "$EXPERIMENT_RUN_DIRECTORY/research_report.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload reproducibility bundle
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        path: ${{ inputs.run_directory }}
+        if-no-files-found: ignore
+
+  arm:
+    name: ${{ inputs.evaluation_name }} (${{ matrix.arm }})
+    if: ${{ inputs.comparison }}
+    runs-on: ubuntu-22.04
+    # Each arm owns a complete hosted job, so the six-hour ceiling and the
+    # caller's execution guard bound one arm rather than the whole triple.
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    strategy:
+      # Sequential by design: the account-wide concurrent-job limit is the
+      # scarce resource, and the matrix caller already fills it with one job
+      # per evaluation pair. One arm at a time keeps this workflow's runner
+      # footprint identical to the single-job version it replaced.
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        arm: [ fixed_p_low_baseline, fixed_p_high_baseline, dblp_policy ]
+    env:
+      EXPERIMENT_PROFILE: ${{ inputs.profile }}
+      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
+
+    steps:
+    - name: Check out source
+      uses: actions/checkout@v7
+      with:
+        submodules: false
+        persist-credentials: false
+
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
+
+    - name: Unpack the native runtime built once for this run
+      uses: ./.github/actions/native-runtime
+      with:
+        artifact: ${{ inputs.runtime_artifact }}
+
+    - name: Run one comparison arm
       run: |
         command=(
           uv run --locked python experiments/ring_3d/compare.py
           --profile "$EXPERIMENT_PROFILE"
           --output "$EXPERIMENT_RUN_DIRECTORY"
           --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
-          --clean
+          --arm ${{ matrix.arm }}
         )
         if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
           command+=(--require-congestion)
@@ -127,17 +180,70 @@ jobs:
         fi
         timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
 
-    - name: Publish structural researcher report
-      if: ${{ always() && !inputs.comparison }}
+    - name: Upload the arm's telemetry for the analyze job
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        # The run ID sits before the arm suffix so the aggregation globs,
+        # which anchor on `-<run id>` at the end, can never match these
+        # intermediates.
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}-arm-${{ matrix.arm }}
+        path: ${{ inputs.run_directory }}
+        if-no-files-found: ignore
+        # Intermediate: the analyze job folds these into the durable bundle.
+        retention-days: 1
+
+  analyze:
+    name: Compare ${{ inputs.evaluation_name }}
+    needs: arm
+    # Runs even when an arm failed: it fails fast on the missing summary and
+    # carries the failure into the ledger status, while whatever arm
+    # telemetry did upload is preserved for diagnosis.
+    if: ${{ !cancelled() && inputs.comparison }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      EXPERIMENT_PROFILE: ${{ inputs.profile }}
+      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
+
+    steps:
+    - name: Check out source
+      uses: actions/checkout@v7
+      with:
+        submodules: false
+        persist-credentials: false
+
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
+
+    - name: Collect the arm telemetry
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ inputs.artifact_name }}-${{ github.run_id }}-arm-*
+        path: ${{ inputs.run_directory }}
+        merge-multiple: true
+
+    - name: Build the comparison from the completed arms
       run: |
-        uv run --locked python experiments/ring_3d/report.py \
-          --profile "$EXPERIMENT_PROFILE" \
-          --run-dir "$EXPERIMENT_RUN_DIRECTORY" \
-          --output "$EXPERIMENT_RUN_DIRECTORY/research_report.md"
-        cat "$EXPERIMENT_RUN_DIRECTORY/research_report.md" >> "$GITHUB_STEP_SUMMARY"
+        command=(
+          uv run --locked python experiments/ring_3d/compare.py
+          --profile "$EXPERIMENT_PROFILE"
+          --output "$EXPERIMENT_RUN_DIRECTORY"
+          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
+          --analyze-only
+        )
+        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
+          command+=(--require-congestion)
+        fi
+        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
+          command+=(--seeds ${{ inputs.comparison_seed }})
+        fi
+        "${command[@]}"
 
     - name: Publish paired comparison report
-      if: ${{ always() && inputs.comparison }}
+      if: ${{ always() }}
       run: |
         if [[ -f "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" ]]; then
           cat "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" >> "$GITHUB_STEP_SUMMARY"
@@ -155,7 +261,7 @@ jobs:
 
   archive:
     name: Record ${{ inputs.evaluation_name }}
-    needs: evaluate
+    needs: [ evaluate, analyze ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
@@ -190,7 +296,8 @@ jobs:
         key: ${{ inputs.ledger_key }}
         title: ${{ inputs.evaluation_name }}
         body-file: ${{ inputs.run_directory }}/${{ inputs.comparison && 'comparison_report.md' || 'research_report.md' }}
-        status: ${{ needs.evaluate.result }}
+        # Exactly one of the two paths ran; report the status of that one.
+        status: ${{ inputs.comparison && needs.analyze.result || needs.evaluate.result }}
 
     - name: Archive the reproducibility bundle permanently
       uses: ./.github/actions/release-archive

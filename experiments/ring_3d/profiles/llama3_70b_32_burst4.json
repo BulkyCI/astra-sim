@@ -57,6 +57,6 @@
     "microbatch_size": 1,
     "activation_dtype_bytes": 2,
     "tensor_parallel_all_reduces_per_layer": 2,
-    "gradient_accumulation_steps": 8
+    "gradient_accumulation_steps": 2
   }
 }

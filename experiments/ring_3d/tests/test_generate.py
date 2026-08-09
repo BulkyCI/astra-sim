@@ -712,10 +712,10 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
             self.assertEqual(
                 manifest["model_trace"]["gradient_accumulation_steps"],
-                8,
+                2,
             )
             self.assertEqual(
-                manifest["model_trace"]["sampled_tp_all_reduces_per_step"], 16
+                manifest["model_trace"]["sampled_tp_all_reduces_per_step"], 4
             )
             policy = json.loads(
                 (output / "experiment.json").read_text(encoding="utf-8")
@@ -758,7 +758,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 dp_bytes_by_step, {step: 68_359_375 for step in steps}
             )
             self.assertEqual(dp_buckets_by_step, {step: 1 for step in steps})
-            self.assertEqual(tp_collectives_by_step, {step: 16 for step in steps})
+            self.assertEqual(tp_collectives_by_step, {step: 4 for step in steps})
 
     def test_phase1_reference_profile_materializes_exact_sequential_dp_trace(
         self,

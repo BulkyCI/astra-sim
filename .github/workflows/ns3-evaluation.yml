@@ -125,6 +125,7 @@ jobs:
         name: ${{ inputs.artifact_name }}-${{ github.run_id }}
         path: ${{ inputs.run_directory }}
         if-no-files-found: ignore
+        overwrite: true
 
   arm:
     name: ${{ inputs.evaluation_name }} (${{ matrix.arm }})
@@ -164,7 +165,24 @@ jobs:
         artifact: ${{ inputs.runtime_artifact }}
 
     - name: Run one comparison arm
+      # The vitals loop exists because two hosted runners died with "lost
+      # communication with the server" 3.5-4 h into heavy arms while the
+      # simulator's own resident set was flat: whatever kills the VM is
+      # invisible from inside the process. A once-a-minute line in the live
+      # job log shows whole-VM memory, root-disk space, and load right up to
+      # the moment of death, so the next death either names the exhausted
+      # resource or proves the VM was healthy when the host pulled the plug.
+      # It shares this step because a background process that outlives its
+      # step keeps the step's stdout pipe open and hangs the job; here it is
+      # killed before the script exits.
       run: |
+        (while sleep 60; do
+          echo "vitals $(date -u +%H:%M:%S)" \
+            "$(free -m | awk '/^Mem:/{printf "mem_used_mb=%s mem_avail_mb=%s", $3, $7}')" \
+            "root_avail_mb=$(df -m --output=avail / | tail -1 | tr -d ' ')" \
+            "load=$(cut -d' ' -f1 /proc/loadavg)"
+        done) &
+        vitals_pid=$!
         command=(
           uv run --locked python experiments/ring_3d/compare.py
           --profile "$EXPERIMENT_PROFILE"
@@ -178,7 +196,11 @@ jobs:
         if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
           command+=(--seeds ${{ inputs.comparison_seed }})
         fi
-        timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
+        status=0
+        timeout --foreground ${{ inputs.execution_timeout_minutes }}m \
+          "${command[@]}" || status=$?
+        kill "$vitals_pid" 2>/dev/null || true
+        exit "$status"
 
     - name: Upload the arm's telemetry for the analyze job
       if: always()
@@ -190,6 +212,7 @@ jobs:
         name: ${{ inputs.artifact_name }}-${{ github.run_id }}-arm-${{ matrix.arm }}
         path: ${{ inputs.run_directory }}
         if-no-files-found: ignore
+        overwrite: true
         # Intermediate: the analyze job folds these into the durable bundle.
         retention-days: 1
 
@@ -258,6 +281,7 @@ jobs:
         name: ${{ inputs.artifact_name }}-${{ github.run_id }}
         path: ${{ inputs.run_directory }}
         if-no-files-found: ignore
+        overwrite: true
 
   archive:
     name: Record ${{ inputs.evaluation_name }}

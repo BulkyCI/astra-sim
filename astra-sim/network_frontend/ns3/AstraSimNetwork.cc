@@ -108,6 +108,19 @@ class NS3BackendCompletionTracker {
         // timeout can make after killing the process.
         const auto wall_now = std::chrono::steady_clock::now();
         const uint64_t events_now = Simulator::GetEventCount();
+        // Resident set in MB, from statm page counts. A hosted CI runner that
+        // runs out of memory kills the runner agent and reports only "lost
+        // communication with the server"; this field is the only way to tell
+        // that death from an infrastructure flake after the fact.
+        uint64_t rss_mb = 0;
+        if (FILE* statm = fopen("/proc/self/statm", "r")) {
+            unsigned long size_pages = 0, resident_pages = 0;
+            if (fscanf(statm, "%lu %lu", &size_pages, &resident_pages) == 2) {
+                rss_mb = resident_pages *
+                         static_cast<uint64_t>(sysconf(_SC_PAGESIZE)) >> 20;
+            }
+            fclose(statm);
+        }
         const uint64_t wall_ms_delta =
             last_checkpoint_wall_.time_since_epoch().count() == 0
                 ? 0
@@ -123,10 +136,10 @@ class NS3BackendCompletionTracker {
         AstraSim::LoggerFactory::get_logger("network")->info(
             "Liveness checkpoint: simulated_time_ns={} completed_qps={} "
             "active_qps={} completed_ranks={}/{} pending_background_flows={} "
-            "wall_ms_delta={} events_delta={}",
+            "wall_ms_delta={} events_delta={} rss_mb={}",
             Simulator::Now().GetNanoSeconds(), completed_qp_count(),
             active_qp_count(), num_ranks_ - num_unfinished_ranks_, num_ranks_,
-            pending_background_flows, wall_ms_delta, events_delta);
+            pending_background_flows, wall_ms_delta, events_delta, rss_mb);
         if (is_complete()) {
             return;
         }

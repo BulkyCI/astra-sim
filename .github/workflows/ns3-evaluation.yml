@@ -4,7 +4,11 @@ on:
   workflow_call:
     inputs:
       evaluation_name:
-        description: Human-readable evaluation name.
+        description: >
+          Human-readable name for the ledger entry. Job names are static:
+          the caller's job is already named after the evaluation, and GitHub
+          prefixes called jobs with it, so repeating it here only duplicated
+          the prefix.
         required: true
         type: string
       profile:
@@ -63,7 +67,7 @@ permissions:
 
 jobs:
   evaluate:
-    name: ${{ inputs.evaluation_name }}
+    name: Structural experiment
     if: ${{ !inputs.comparison }}
     runs-on: ubuntu-22.04
     # The reusable workflow owns a complete hosted job. Callers reserve their
@@ -123,7 +127,7 @@ jobs:
         overwrite: true
 
   provision:
-    name: Provision a DCS runner for ${{ inputs.evaluation_name }}
+    name: Provision the cluster runner
     # Every paired comparison runs on the cluster: heavy pairs cannot finish
     # under the 6-hour hosted ceiling, and self-hosted jobs may run 5 days.
     if: ${{ inputs.comparison }}
@@ -179,7 +183,7 @@ jobs:
           "$SSH_DEST" "$RUNNER_NAME"
 
   evaluate_cluster:
-    name: ${{ inputs.evaluation_name }} (cluster)
+    name: Cluster comparison
     needs: provision
     if: ${{ inputs.comparison }}
     # The run-scoped label pins this job to the one runner its provision
@@ -250,7 +254,7 @@ jobs:
         overwrite: true
 
   archive:
-    name: Record ${{ inputs.evaluation_name }}
+    name: Record the result
     needs: [ evaluate, evaluate_cluster ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04

@@ -4,6 +4,11 @@
 #SBATCH --mem=16G
 #SBATCH --time=4-20:00:00
 #SBATCH --output=runner-%j.log
+# Anything but the 2018 Threadrippers: the simulator is single-threaded and
+# their Zen+ cores run it roughly half as fast as the modern nodes. A hard
+# constraint is safe - the allowed set has 1184 CPUs and a full fleet needs
+# 64 - and unlike --nodelist it never serializes behind specific hosts.
+#SBATCH --constraint=EPYC_9634|AMD_Epyc7453|XeonGold-6348|AMD_Epyc9754
 #
 # Runs one just-in-time GitHub Actions runner for exactly one workflow job.
 # The runner deregisters itself and exits when its job ends - completed,

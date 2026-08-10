@@ -16,7 +16,16 @@ export CMAKE_PREFIX_PATH="$ENV"
 export LD_LIBRARY_PATH="$ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
-export CCACHE_DIR="$ROOT/ccache"
+
+# Each job compiles on the node that runs the binary, so per-node codegen
+# is safe here. ccache hashes the literal '-march=native' string, though:
+# without a per-target cache, one CPU family's objects would be served to
+# another's build and crash it. Namespace the cache by the compiler's
+# resolved target instead.
+export NS3_MARCH=native
+target_sig=$("$CC" -march=native -Q --help=target 2>/dev/null \
+    | sha256sum | cut -c1-12)
+export CCACHE_DIR="$ROOT/ccache-${target_sig}"
 ccache --set-config=max_size=5G
 
 exec bash "$(dirname "$0")/../../build/astra_ns3/build.sh" -c

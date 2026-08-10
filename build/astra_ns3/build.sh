@@ -40,10 +40,13 @@ function compile {
     local cmake_args=(-DNS3_LINK_TIME_OPTIMIZATION=ON -DNS3_FAST_LINKERS=OFF)
     # x86-64-v3 (AVX2/FMA/BMI2) is the highest ISA level every amd64 VM
     # GitHub has fielded supports; AVX-512 is not fleet-wide, and the
-    # build VM and evaluation VMs differ, so -march=native is unsafe.
+    # build VM and evaluation VMs differ, so -march=native is unsafe
+    # there. Environments where the compile node IS the run node (the DCS
+    # runners) override with NS3_MARCH=native.
     if [[ "$(uname -m)" == "x86_64" ]]; then
-        cmake_args+=(-DCMAKE_C_FLAGS=-march=x86-64-v3
-                     -DCMAKE_CXX_FLAGS=-march=x86-64-v3)
+        local march="${NS3_MARCH:-x86-64-v3}"
+        cmake_args+=("-DCMAKE_C_FLAGS=-march=${march}"
+                     "-DCMAKE_CXX_FLAGS=-march=${march}")
     fi
     # CI supplies a launcher through CMake's standard environment variable.
     # Bypass ns-3's own integration there: it weakens ccache correctness by

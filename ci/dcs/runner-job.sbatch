@@ -1,6 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=astra-gh-runner
-#SBATCH --cpus-per-task=4
+# Two, not one: the simulator is single-threaded, but the uncached LTO
+# link runs on every job and parallelizes with the core count, and the
+# runner's own streaming threads would otherwise steal cycles from the
+# sim for days. Two, not four: everything past the link uses one core,
+# and allocation - not load - is what blocks other cluster users.
+#SBATCH --cpus-per-task=2
 # Covers the simulator (<1 GB) plus the job's scratch: compute nodes mount
 # /tmp as tmpfs, so the checkout and whatever survives the post-build
 # cleanup are RAM charged to this limit. A 16G ask left so little headroom

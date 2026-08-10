@@ -28,12 +28,6 @@ on:
         description: Stable ledger section identity, reused across re-runs.
         required: true
         type: string
-      runtime_artifact:
-        description: >
-          Artifact name published by the caller's `native-build` job. Passed in
-          so producer and consumer share one definition site.
-        required: true
-        type: string
       release_tag:
         description: >
           Release tag from the calling run's `ledger` job; empty disables
@@ -84,21 +78,22 @@ jobs:
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
 
     steps:
-    - name: Check out source
+    - name: Check out source and submodules
       uses: actions/checkout@v7
       with:
-        # The prebuilt runtime replaces the native tree, so the expensive
-        # recursive ns-3 clone is not needed here.
-        submodules: false
+        submodules: recursive
         persist-credentials: false
 
     - name: Set up the locked Python environment
       uses: ./.github/actions/python-env
 
-    - name: Unpack the native runtime built once for this run
-      uses: ./.github/actions/native-runtime
-      with:
-        artifact: ${{ inputs.runtime_artifact }}
+    # Builds its own backends through the shared compiler cache instead of
+    # consuming the native-build artifact. Structural experiments run only
+    # on dispatch, and paying a cached build here frees every evaluation
+    # from gating on - and failing with - a build job whose artifact the
+    # cluster path never used.
+    - name: Build the native backends through the trusted compiler cache
+      uses: ./.github/actions/native-build
 
     - name: Run structural ns-3 experiment
       run: |

@@ -307,7 +307,12 @@ jobs:
 
   evaluations:
     name: ${{ matrix.name }}
-    needs: [ native-build, ledger, evaluation-plan ]
+    # Deliberately independent of native-build: cluster evaluations compile
+    # with their own rootless toolchain and structural ones build for
+    # themselves through the shared compiler cache, so a hosted build
+    # failure cannot strand 16 SLURM runners and provisioning starts the
+    # moment the plan exists.
+    needs: [ ledger, evaluation-plan ]
     # Ceiling for the called workflow, not a grant to the simulator. Its
     # `evaluate` job declares `contents: read`; only `archive` takes the write.
     permissions:
@@ -328,7 +333,6 @@ jobs:
       artifact_name: ${{ matrix.artifact_name }}
       ledger_issue: ${{ fromJSON(needs.ledger.outputs.issue || '0') }}
       release_tag: ${{ needs.ledger.outputs.release_tag }}
-      runtime_artifact: ${{ needs.native-build.outputs.runtime_artifact }}
       ledger_key: ${{ matrix.ledger_key }}
       comparison: ${{ matrix.comparison }}
       comparison_seed: ${{ matrix.comparison_seed }}

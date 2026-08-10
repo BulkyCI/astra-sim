@@ -28,4 +28,12 @@ target_sig=$("$CC" -march=native -Q --help=target 2>/dev/null \
 export CCACHE_DIR="$ROOT/ccache-${target_sig}"
 ccache --set-config=max_size=5G
 
-exec bash "$(dirname "$0")/../../build/astra_ns3/build.sh" -c
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+bash "$repo_root/build/astra_ns3/build.sh" -c
+
+# Compute nodes mount /tmp as tmpfs, so every byte of the job's scratch is
+# charged against its SLURM memory limit. The object tree is the largest
+# single charge (~3-4 GB) and is dead weight once the binary links; the
+# runtime needs only build/ (binary and rpath'd libraries). Reclaiming it
+# here is what keeps the sims from being OOM-killed hours later.
+rm -rf "$repo_root/extern/network_backend/ns-3/cmake-cache"

@@ -1,7 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=astra-gh-runner
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+# Covers the simulator (<1 GB) plus the job's scratch: compute nodes mount
+# /tmp as tmpfs, so the checkout and whatever survives the post-build
+# cleanup are RAM charged to this limit. A 16G ask left so little headroom
+# that the OOM killer took the simulator mid-run.
+#SBATCH --mem=32G
 #SBATCH --time=4-20:00:00
 #SBATCH --output=runner-%j.log
 # Anything but the 2018 Threadrippers: the simulator is single-threaded and

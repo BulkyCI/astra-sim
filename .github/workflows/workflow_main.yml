@@ -89,7 +89,7 @@ jobs:
         git diff --check
 
   native-build:
-    name: Build the native backends once
+    name: Build the native backends
     needs: python-quality
     runs-on: ubuntu-22.04
     timeout-minutes: 60

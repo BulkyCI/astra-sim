@@ -6,17 +6,26 @@ the cluster, nothing from the system but glibc.
 
 ## How it works
 
-For a matrix entry with `"runs_on": "dcs"`, the reusable workflow replaces
-the hosted per-arm chain with two jobs:
+Every paired comparison in the evaluation matrix runs on the cluster
+(structural experiments stay GitHub-hosted); the reusable workflow runs two
+jobs per comparison:
 
 1. `provision` (GitHub-hosted, ~1 min) mints a single-job JIT runner config
    with a one-hour GitHub App installation token, then pipes it over SSH to
    the cluster. The SSH key is bound to a forced command
    (`accept-runner.sh`) that can only submit one SLURM runner job — a
-   leaked key gets no shell.
-2. `evaluate_cluster` waits for that runner, builds the ns-3 binary with the
-   rootless conda toolchain, and runs the whole three-arm comparison as one
-   job (self-hosted jobs may run 5 days; no per-arm chaining needed).
+   leaked key gets no shell. The runner is labeled with the run id, so
+   concurrent experiments can never swap runners.
+2. `Cluster comparison` waits for that runner, builds the ns-3 binary with
+   the rootless conda toolchain (`-march=native`: compile node is run
+   node), and runs the whole three-arm comparison as one job (self-hosted
+   jobs may run 5 days).
+
+Job scratch lives in the cluster's sanctioned network scratch — the newest
+`/scratch/scratch-space/expires-<date>` directory, whose expiry always
+exceeds the job walltime — never in quota'd NFS home, the small `/var/tmp`
+partition, or RAM-billed tmpfs `/tmp` (each of which has caused a distinct
+fleet failure; the sbatch script probes them only as fallbacks).
 
 The JIT runner deregisters itself and exits when its one job ends —
 completed, failed, or cancelled — which ends the SLURM job and returns the
@@ -24,6 +33,11 @@ allocation. A 30-minute idle guard in `runner-job.sbatch` covers the
 cancelled-while-queued case; `#SBATCH --time` is the absolute backstop.
 Write-scoped jobs (`archive`, ledger) stay on GitHub-hosted runners: the
 cluster only ever holds a `contents: read` token.
+
+`accept-runner.sh` fast-forwards the repository clone and submits the
+repo's own `runner-job.sbatch`, so a push deploys cluster-side changes on
+the next provision; only `accept-runner.sh` itself still deploys through
+`setup.sh`.
 
 ## Cluster setup (once)
 
@@ -49,17 +63,13 @@ Administration: Read and write) and install it on this repository only.
 | var    | `DCS_SSH_DEST`        | e.g. `jfang@comps0.cs.toronto.edu` |
 | var    | `DCS_SSH_HOST_KEY`    | One line from `ssh-keyscan -t ed25519 <host>` (pins the host, defeats MITM on the jitconfig hand-off). |
 
-## Routing an experiment to the cluster
+## Routing
 
-Add one field to its record in `.github/workflows/evaluation-matrix.json`:
-
-```json
-"runs_on": "dcs"
-```
-
-Entries without the field keep the hosted per-arm chain. Aggregations and
-the ledger are unaffected: the cluster job uploads the same
-`<artifact_name>-<run id>` bundle the hosted path produces.
+Nothing to configure per entry: `comparison: true` in
+`.github/workflows/evaluation-matrix.json` is what routes an experiment to
+the cluster. Aggregations and the ledger are unaffected: the cluster job
+uploads the same `<artifact_name>-<run id>` bundle the hosted single-job
+path produced before the pivot.
 
 ## Pilot
 

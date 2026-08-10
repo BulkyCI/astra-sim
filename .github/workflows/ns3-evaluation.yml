@@ -100,12 +100,15 @@ jobs:
       uses: ./.github/actions/native-build
 
     - name: Run structural ns-3 experiment
+      env:
+        EXECUTION_TIMEOUT_MINUTES: ${{ inputs.execution_timeout_minutes }}
+        SIMULATION_TIMEOUT_SECONDS: ${{ inputs.simulation_timeout_seconds }}
       run: |
-        timeout --foreground ${{ inputs.execution_timeout_minutes }}m \
+        timeout --foreground "${EXECUTION_TIMEOUT_MINUTES}m" \
           uv run --locked python experiments/ring_3d/run.py \
           --profile "$EXPERIMENT_PROFILE" \
           --output "$EXPERIMENT_RUN_DIRECTORY" \
-          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }} \
+          --simulation-timeout-seconds "$SIMULATION_TIMEOUT_SECONDS" \
           --clean
 
     - name: Publish structural researcher report
@@ -219,21 +222,28 @@ jobs:
       run: bash ci/dcs/build.sh
 
     - name: Run the full paired comparison
+      # Inputs cross into the shell as environment data, never as text
+      # spliced into the script.
+      env:
+        EXECUTION_TIMEOUT_MINUTES: ${{ inputs.execution_timeout_minutes }}
+        SIMULATION_TIMEOUT_SECONDS: ${{ inputs.simulation_timeout_seconds }}
+        REQUIRE_CONGESTION: ${{ inputs.require_congestion }}
+        COMPARISON_SEED: ${{ inputs.comparison_seed }}
       run: |
         command=(
           uv run --locked python experiments/ring_3d/compare.py
           --profile "$EXPERIMENT_PROFILE"
           --output "$EXPERIMENT_RUN_DIRECTORY"
-          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
+          --simulation-timeout-seconds "$SIMULATION_TIMEOUT_SECONDS"
           --clean
         )
-        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
+        if [[ "$REQUIRE_CONGESTION" == "true" ]]; then
           command+=(--require-congestion)
         fi
-        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
-          command+=(--seeds ${{ inputs.comparison_seed }})
+        if [[ "$COMPARISON_SEED" != "0" ]]; then
+          command+=(--seeds "$COMPARISON_SEED")
         fi
-        timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
+        timeout --foreground "${EXECUTION_TIMEOUT_MINUTES}m" "${command[@]}"
 
     - name: Publish paired comparison report
       if: ${{ always() }}

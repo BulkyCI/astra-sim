@@ -30,15 +30,35 @@ jit_file=$1
 jit=$(cat "$jit_file")
 rm -f "$jit_file"
 
-# Private copy of the runner install on node-local DISK: the runner state,
-# checkout, and multi-GB build tree all live under this directory. NFS
-# home is quota'd (observed: provision failing on a 10 KB write) and /tmp
-# is tmpfs on these nodes, RAM billed against the job's memory limit
-# (observed: the OOM killer taking the simulator mid-run). Probe scratch
-# candidates in preference order and take the first that accepts writes;
-# tmpfs is the last resort and the 16G ask is sized to survive it.
+# The cluster's sanctioned scratch is /scratch/scratch-space/expires-<date>
+# (support.cs.toronto.edu/systems/slurmresource.html): network-backed,
+# shared by every node, wiped on expiry. The newest directory is guaranteed
+# to expire more than five days out, which outlives this job's 4d20h
+# walltime. Month names do not sort lexically, so rank by parsed date.
+newest_scratch_space() {
+    local dir stamp y m d epoch best="" best_epoch=0
+    for dir in "${DCS_SCRATCH_BASE:-/scratch/scratch-space}"/expires-*; do
+        [[ -d "$dir" ]] || continue
+        stamp="${dir##*expires-}"
+        read -r y m d <<< "${stamp//-/ }"
+        epoch=$(date -d "$d $m $y" +%s 2>/dev/null) || continue
+        if (( epoch > best_epoch )); then
+            best="$dir"
+            best_epoch=$epoch
+        fi
+    done
+    [[ -n "$best" ]] && printf '%s\n' "$best"
+}
+
+# Everything mutable lives under this job's private directory: runner
+# state, checkout, build tree. Candidates, best first. NFS home is quota'd
+# (observed: provision failing on a 10 KB write); /var/tmp is a small root
+# partition that co-located jobs fill (observed: runners dying logless on
+# ENOSPC); /tmp is tmpfs billed to the job's memory limit (observed: the
+# OOM killer taking the simulator). The 16G ask is sized to survive the
+# tmpfs last resort.
 dir=""
-for base in "${SLURM_TMPDIR:-}" /scratch/scratch-space /var/tmp /tmp; do
+for base in "${SLURM_TMPDIR:-}" "$(newest_scratch_space)" /var/tmp /tmp; do
     [[ -n "$base" ]] || continue
     if mkdir -p "$base/astra-runner-$SLURM_JOB_ID" 2>/dev/null; then
         dir="$base/astra-runner-$SLURM_JOB_ID"

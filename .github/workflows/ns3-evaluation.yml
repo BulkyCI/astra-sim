@@ -63,16 +63,6 @@ on:
         description: Fail a paired evaluation without raw queue, PFC, and background-traffic evidence.
         required: true
         type: boolean
-      runs_on:
-        description: >
-          Where a paired comparison executes. `hosted` chains one GitHub-hosted
-          job per arm to stay under the 6-hour hosted ceiling; `dcs` provisions
-          one just-in-time SLURM runner on the DCS cluster and runs the whole
-          comparison as a single job, which self-hosted limits allow up to
-          5 days.
-        required: false
-        default: hosted
-        type: string
 
 permissions:
   contents: read
@@ -137,165 +127,11 @@ jobs:
         if-no-files-found: ignore
         overwrite: true
 
-  arm:
-    name: ${{ inputs.evaluation_name }} (${{ matrix.arm }})
-    if: ${{ inputs.comparison && inputs.runs_on == 'hosted' }}
-    runs-on: ubuntu-22.04
-    # Each arm owns a complete hosted job, so the six-hour ceiling and the
-    # caller's execution guard bound one arm rather than the whole triple.
-    timeout-minutes: 360
-    permissions:
-      contents: read
-    strategy:
-      # Sequential by design: the account-wide concurrent-job limit is the
-      # scarce resource, and the matrix caller already fills it with one job
-      # per evaluation pair. One arm at a time keeps this workflow's runner
-      # footprint identical to the single-job version it replaced.
-      max-parallel: 1
-      fail-fast: true
-      matrix:
-        arm: [ fixed_p_low_baseline, fixed_p_high_baseline, dblp_policy ]
-    env:
-      EXPERIMENT_PROFILE: ${{ inputs.profile }}
-      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
-
-    steps:
-    - name: Check out source
-      uses: actions/checkout@v7
-      with:
-        submodules: false
-        persist-credentials: false
-
-    - name: Set up the locked Python environment
-      uses: ./.github/actions/python-env
-
-    - name: Unpack the native runtime built once for this run
-      uses: ./.github/actions/native-runtime
-      with:
-        artifact: ${{ inputs.runtime_artifact }}
-
-    - name: Run one comparison arm
-      # The vitals loop exists because two hosted runners died with "lost
-      # communication with the server" 3.5-4 h into heavy arms while the
-      # simulator's own resident set was flat: whatever kills the VM is
-      # invisible from inside the process. A once-a-minute line in the live
-      # job log shows whole-VM memory, root-disk space, and load right up to
-      # the moment of death, so the next death either names the exhausted
-      # resource or proves the VM was healthy when the host pulled the plug.
-      # It shares this step because a background process that outlives its
-      # step keeps the step's stdout pipe open and hangs the job; here it is
-      # killed before the script exits.
-      run: |
-        (while sleep 60; do
-          echo "vitals $(date -u +%H:%M:%S)" \
-            "$(free -m | awk '/^Mem:/{printf "mem_used_mb=%s mem_avail_mb=%s", $3, $7}')" \
-            "root_avail_mb=$(df -m --output=avail / | tail -1 | tr -d ' ')" \
-            "load=$(cut -d' ' -f1 /proc/loadavg)"
-        done) &
-        vitals_pid=$!
-        command=(
-          uv run --locked python experiments/ring_3d/compare.py
-          --profile "$EXPERIMENT_PROFILE"
-          --output "$EXPERIMENT_RUN_DIRECTORY"
-          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
-          --arm ${{ matrix.arm }}
-        )
-        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
-          command+=(--require-congestion)
-        fi
-        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
-          command+=(--seeds ${{ inputs.comparison_seed }})
-        fi
-        status=0
-        timeout --foreground ${{ inputs.execution_timeout_minutes }}m \
-          "${command[@]}" || status=$?
-        kill "$vitals_pid" 2>/dev/null || true
-        exit "$status"
-
-    - name: Upload the arm's telemetry for the analyze job
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        # The run ID sits before the arm suffix so the aggregation globs,
-        # which anchor on `-<run id>` at the end, can never match these
-        # intermediates.
-        name: ${{ inputs.artifact_name }}-${{ github.run_id }}-arm-${{ matrix.arm }}
-        path: ${{ inputs.run_directory }}
-        if-no-files-found: ignore
-        overwrite: true
-        # Intermediate: the analyze job folds these into the durable bundle.
-        retention-days: 1
-
-  analyze:
-    name: Compare ${{ inputs.evaluation_name }}
-    needs: arm
-    # Runs even when an arm failed: it fails fast on the missing summary and
-    # carries the failure into the ledger status, while whatever arm
-    # telemetry did upload is preserved for diagnosis.
-    if: ${{ !cancelled() && inputs.comparison && inputs.runs_on == 'hosted' }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    env:
-      EXPERIMENT_PROFILE: ${{ inputs.profile }}
-      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
-
-    steps:
-    - name: Check out source
-      uses: actions/checkout@v7
-      with:
-        submodules: false
-        persist-credentials: false
-
-    - name: Set up the locked Python environment
-      uses: ./.github/actions/python-env
-
-    - name: Collect the arm telemetry
-      uses: actions/download-artifact@v8
-      with:
-        pattern: ${{ inputs.artifact_name }}-${{ github.run_id }}-arm-*
-        path: ${{ inputs.run_directory }}
-        merge-multiple: true
-
-    - name: Build the comparison from the completed arms
-      run: |
-        command=(
-          uv run --locked python experiments/ring_3d/compare.py
-          --profile "$EXPERIMENT_PROFILE"
-          --output "$EXPERIMENT_RUN_DIRECTORY"
-          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
-          --analyze-only
-        )
-        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
-          command+=(--require-congestion)
-        fi
-        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
-          command+=(--seeds ${{ inputs.comparison_seed }})
-        fi
-        "${command[@]}"
-
-    - name: Publish paired comparison report
-      if: ${{ always() }}
-      run: |
-        if [[ -f "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" ]]; then
-          cat "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" >> "$GITHUB_STEP_SUMMARY"
-        else
-          echo "Paired evaluation did not produce a comparison report; inspect the retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
-        fi
-
-    - name: Upload reproducibility bundle
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
-        path: ${{ inputs.run_directory }}
-        if-no-files-found: ignore
-        overwrite: true
-
   provision:
     name: Provision a DCS runner for ${{ inputs.evaluation_name }}
-    if: ${{ inputs.comparison && inputs.runs_on == 'dcs' }}
+    # Every paired comparison runs on the cluster: heavy pairs cannot finish
+    # under the 6-hour hosted ceiling, and self-hosted jobs may run 5 days.
+    if: ${{ inputs.comparison }}
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     # Authenticates with repository secrets, not the workflow token.
@@ -319,6 +155,12 @@ jobs:
         SSH_DEST: ${{ vars.DCS_SSH_DEST }}
         SSH_HOST_KEY: ${{ vars.DCS_SSH_HOST_KEY }}
         RUNNER_NAME: dcs-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.ledger_key }}
+        # Also the exact label the companion evaluate_cluster job requires.
+        # Pinning each runner to its own experiment keeps the assignment
+        # 1:1 by construction - a runner can never pick up a concurrent
+        # experiment's job - so a SLURM job id always maps to one known
+        # Actions run, and per-experiment resource shapes stay possible.
+        RUN_LABEL: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}
       run: |
         set -euo pipefail
         # A JIT config registers a runner that executes exactly one job and
@@ -326,7 +168,8 @@ jobs:
         jit="$(gh api -X POST \
           "repos/${GITHUB_REPOSITORY}/actions/runners/generate-jitconfig" \
           -f name="$RUNNER_NAME" -F runner_group_id=1 -f work_folder=_work \
-          -f 'labels[]=dcs' --jq .encoded_jit_config)"
+          -f 'labels[]=dcs' -f "labels[]=${RUN_LABEL}" \
+          --jq .encoded_jit_config)"
         install -d -m 700 ~/.ssh
         printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ci
         chmod 600 ~/.ssh/id_ci
@@ -343,11 +186,13 @@ jobs:
   evaluate_cluster:
     name: ${{ inputs.evaluation_name }} (cluster)
     needs: provision
-    if: ${{ inputs.comparison && inputs.runs_on == 'dcs' }}
-    # Only the custom label: a JIT registration carries exactly the labels
-    # passed to generate-jitconfig, so the implicit self-hosted/Linux/X64
-    # defaults that config.sh-registered runners self-report never exist.
-    runs-on: dcs
+    if: ${{ inputs.comparison }}
+    # The run-scoped label pins this job to the one runner its provision
+    # job minted: concurrent experiments can never swap runners, so a SLURM
+    # job id always identifies one Actions run. (A JIT registration carries
+    # exactly the labels passed to generate-jitconfig - the implicit
+    # self-hosted/Linux/X64 defaults of config.sh registration never exist.)
+    runs-on: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}
     # Self-hosted jobs may run for 5 days; the SLURM walltime (4d20h) is the
     # effective bound. Comfortably above the ~10 h heavy arms need tripled.
     timeout-minutes: 6900
@@ -411,7 +256,7 @@ jobs:
 
   archive:
     name: Record ${{ inputs.evaluation_name }}
-    needs: [ evaluate, analyze, evaluate_cluster ]
+    needs: [ evaluate, evaluate_cluster ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
@@ -446,8 +291,8 @@ jobs:
         key: ${{ inputs.ledger_key }}
         title: ${{ inputs.evaluation_name }}
         body-file: ${{ inputs.run_directory }}/${{ inputs.comparison && 'comparison_report.md' || 'research_report.md' }}
-        # Exactly one of the three paths ran; report the status of that one.
-        status: ${{ inputs.comparison && (inputs.runs_on == 'dcs' && needs.evaluate_cluster.result || needs.analyze.result) || needs.evaluate.result }}
+        # Exactly one of the two paths ran; report the status of that one.
+        status: ${{ inputs.comparison && needs.evaluate_cluster.result || needs.evaluate.result }}
 
     - name: Archive the reproducibility bundle permanently
       uses: ./.github/actions/release-archive

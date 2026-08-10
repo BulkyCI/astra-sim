@@ -335,10 +335,7 @@ jobs:
       execution_timeout_minutes: ${{ matrix.execution_timeout_minutes }}
       simulation_timeout_seconds: ${{ matrix.simulation_timeout_seconds }}
       require_congestion: ${{ matrix.require_congestion }}
-      # Absent from a matrix record means GitHub-hosted; "dcs" sends the
-      # whole comparison to one just-in-time SLURM runner on the cluster.
-      runs_on: ${{ matrix.runs_on || 'hosted' }}
-    # For the DCS provision job only: the runner PAT and deploy key live in
+    # For the DCS provision job only: the app key and deploy key live in
     # repository secrets, which a called workflow cannot see unless inherited.
     secrets: inherit
 

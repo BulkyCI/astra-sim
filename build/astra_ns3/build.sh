@@ -30,8 +30,14 @@ function compile {
     # add the flag back locally when chasing a transport bug.
     local configure_args=(--enable-mpi --build-profile "${profile}")
     # LTO is ISA-neutral (unlike `optimized`'s -march=native, which a
-    # mixed hosted-runner fleet cannot run reliably).
-    local cmake_args=(-DNS3_LINK_TIME_OPTIMIZATION=ON)
+    # mixed hosted-runner fleet cannot run reliably). Fast-linker
+    # detection is disabled because it grabs whatever mold/lld the host
+    # happens to ship: lld cannot read GCC's GIMPLE LTO objects (with
+    # -fno-fat-lto-objects they hold no machine code), which fails the
+    # final link with 'undefined symbol: main' on any machine where
+    # ns-3's probe finds lld. The toolchain's own GNU ld auto-loads the
+    # GCC LTO plugin and links these objects correctly everywhere.
+    local cmake_args=(-DNS3_LINK_TIME_OPTIMIZATION=ON -DNS3_FAST_LINKERS=OFF)
     # x86-64-v3 (AVX2/FMA/BMI2) is the highest ISA level every amd64 VM
     # GitHub has fielded supports; AVX-512 is not fleet-wide, and the
     # build VM and evaluation VMs differ, so -march=native is unsafe.

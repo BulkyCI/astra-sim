@@ -6,11 +6,10 @@
 # sim for days. Two, not four: everything past the link uses one core,
 # and allocation - not load - is what blocks other cluster users.
 #SBATCH --cpus-per-task=2
-# Covers the simulator (<1 GB) plus the job's scratch: compute nodes mount
-# /tmp as tmpfs, so the checkout and whatever survives the post-build
-# cleanup are RAM charged to this limit. A 16G ask left so little headroom
-# that the OOM killer took the simulator mid-run.
-#SBATCH --mem=32G
+# The simulator needs <1 GB; the rest is headroom for the build phase and
+# for the last-resort case where scratch selection below lands on tmpfs
+# /tmp, whose bytes are RAM charged to this limit.
+#SBATCH --mem=16G
 #SBATCH --time=4-20:00:00
 #SBATCH --output=runner-%j.log
 # Anything but the 2018 Threadrippers: the simulator is single-threaded and
@@ -31,14 +30,26 @@ jit_file=$1
 jit=$(cat "$jit_file")
 rm -f "$jit_file"
 
-# Private copy of the runner install on NODE-LOCAL disk: the runner state,
-# checkout, and multi-GB build tree all live under this directory, and a
-# fleet of concurrent jobs putting that on NFS home exhausts the quota
-# (observed: provision failing on a 10 KB write). Node-local scratch is
-# also faster and dies with the node. Only the toolchain, ccache, and this
-# log remain on NFS.
-dir="${SLURM_TMPDIR:-/tmp}/astra-runner-$SLURM_JOB_ID"
-cp -r "$ROOT/runner" "$dir"
+# Private copy of the runner install on node-local DISK: the runner state,
+# checkout, and multi-GB build tree all live under this directory. NFS
+# home is quota'd (observed: provision failing on a 10 KB write) and /tmp
+# is tmpfs on these nodes, RAM billed against the job's memory limit
+# (observed: the OOM killer taking the simulator mid-run). Probe scratch
+# candidates in preference order and take the first that accepts writes;
+# tmpfs is the last resort and the 16G ask is sized to survive it.
+dir=""
+for base in "${SLURM_TMPDIR:-}" /scratch/scratch-space /var/tmp /tmp; do
+    [[ -n "$base" ]] || continue
+    if mkdir -p "$base/astra-runner-$SLURM_JOB_ID" 2>/dev/null; then
+        dir="$base/astra-runner-$SLURM_JOB_ID"
+        break
+    fi
+done
+if [[ -z "$dir" ]]; then
+    echo "no writable scratch base found" >&2
+    exit 1
+fi
+cp -r "$ROOT/runner/." "$dir/"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
 

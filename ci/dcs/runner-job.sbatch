@@ -17,9 +17,13 @@ jit_file=$1
 jit=$(cat "$jit_file")
 rm -f "$jit_file"
 
-# Private copy of the runner install: concurrent runner jobs must not share
-# runner state or work directories, and NFS home is visible on every node.
-dir="$ROOT/jobs/runner-$SLURM_JOB_ID"
+# Private copy of the runner install on NODE-LOCAL disk: the runner state,
+# checkout, and multi-GB build tree all live under this directory, and a
+# fleet of concurrent jobs putting that on NFS home exhausts the quota
+# (observed: provision failing on a 10 KB write). Node-local scratch is
+# also faster and dies with the node. Only the toolchain, ccache, and this
+# log remain on NFS.
+dir="${SLURM_TMPDIR:-/tmp}/astra-runner-$SLURM_JOB_ID"
 cp -r "$ROOT/runner" "$dir"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT

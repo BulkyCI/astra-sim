@@ -73,6 +73,14 @@ fi
 # that compares this path against what a process or tool reports must see
 # one spelling, not two.
 dir=$(cd "$dir" && pwd -P)
+echo "scratch: $dir"
+# The build cache must NOT live in quota'd NFS home: 16 concurrent jobs
+# writing per-CPU-family 5G caches there exhausted the quota and failed
+# every compile. Publish the chosen base into the runner's environment -
+# job steps inherit it - so ci/dcs/build.sh caches on the same expiring
+# scratch, shared by every job of the same CPU family and reaped by the
+# scratch system's own expiry.
+export DCS_SCRATCH_BASE_DIR="${dir%/*}"
 cp -r "$ROOT/runner/." "$dir/"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
@@ -92,8 +100,12 @@ trap 'kill "$runner_pid" 2>/dev/null || true' TERM INT
 # their cleanup traps deleted trees under live compilers.
 (
     sleep "${DCS_IDLE_GRACE_SECONDS:-1800}"
-    compgen -G "$dir/_diag/Worker_*" >/dev/null \
-        || kill "$runner_pid" 2>/dev/null
+    if compgen -G "$dir/_diag/Worker_*" >/dev/null; then
+        echo "guard: worker log present, job was assigned; standing down"
+    else
+        echo "guard: no job assigned after ${DCS_IDLE_GRACE_SECONDS:-1800}s; tearing down"
+        kill "$runner_pid" 2>/dev/null
+    fi
 ) &
 guard_pid=$!
 

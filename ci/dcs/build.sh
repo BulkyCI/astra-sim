@@ -25,7 +25,13 @@ export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export NS3_MARCH=native
 target_sig=$("$CC" -march=native -Q --help=target 2>/dev/null \
     | sha256sum | cut -c1-12)
-export CCACHE_DIR="$ROOT/ccache-${target_sig}"
+# On the expiring scratch the sbatch script selected, never in NFS home:
+# concurrent jobs writing per-family caches into the quota'd home failed
+# every compile with 'Disk quota exceeded'. All jobs of one CPU family
+# share one warm cache here, and the scratch system's expiry is the
+# pruning policy a cache deserves.
+export CCACHE_DIR="${DCS_SCRATCH_BASE_DIR:-$ROOT}/astra-ccache-${target_sig}"
+echo "ccache: $CCACHE_DIR"
 ccache --set-config=max_size=5G
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"

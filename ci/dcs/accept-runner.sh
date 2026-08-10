@@ -19,4 +19,10 @@ if [[ ! -s "$jit_file" ]]; then
     exit 1
 fi
 
-sbatch --parsable "$ROOT/bin/runner-job.sbatch" "$jit_file"
+# The client's command word carries a display name for the SLURM job so
+# squeue shows which experiment a runner serves. It is never executed;
+# sanitize it to a safe token before using it as a name.
+name=$(printf '%s' "${SSH_ORIGINAL_COMMAND:-runner}" \
+    | tr -cd 'A-Za-z0-9._-' | head -c 64)
+sbatch --parsable --job-name="${name:-runner}" \
+    "$ROOT/bin/runner-job.sbatch" "$jit_file"

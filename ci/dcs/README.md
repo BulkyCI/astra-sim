@@ -10,9 +10,10 @@ For a matrix entry with `"runs_on": "dcs"`, the reusable workflow replaces
 the hosted per-arm chain with two jobs:
 
 1. `provision` (GitHub-hosted, ~1 min) mints a single-job JIT runner config
-   with a repo-secret PAT, then pipes it over SSH to the cluster. The SSH
-   key is bound to a forced command (`accept-runner.sh`) that can only
-   submit one SLURM runner job — a leaked key gets no shell.
+   with a one-hour GitHub App installation token, then pipes it over SSH to
+   the cluster. The SSH key is bound to a forced command
+   (`accept-runner.sh`) that can only submit one SLURM runner job — a
+   leaked key gets no shell.
 2. `evaluate_cluster` waits for that runner, builds the ns-3 binary with the
    rootless conda toolchain, and runs the whole three-arm comparison as one
    job (self-hosted jobs may run 5 days; no per-arm chaining needed).
@@ -37,12 +38,16 @@ prints — with the forced command and `restrict`.
 
 ## GitHub configuration (once)
 
-| Kind   | Name              | Value |
-|--------|-------------------|-------|
-| secret | `DCS_RUNNER_PAT`  | Fine-grained PAT, this repo only, Administration read/write (mints JIT configs). |
-| secret | `DCS_SSH_KEY`     | Private half of the dedicated key pair. |
-| var    | `DCS_SSH_DEST`    | e.g. `jfang@comps0.cs.toronto.edu` |
-| var    | `DCS_SSH_HOST_KEY`| One line from `ssh-keyscan -t ed25519 <host>` (pins the host, defeats MITM on the jitconfig hand-off). |
+First create an org-owned GitHub App (no webhook, Repository permissions →
+Administration: Read and write) and install it on this repository only.
+
+| Kind   | Name                  | Value |
+|--------|-----------------------|-------|
+| secret | `DCS_APP_PRIVATE_KEY` | The app's .pem private key, file contents verbatim. |
+| secret | `DCS_SSH_KEY`         | Private half of the dedicated key pair. |
+| var    | `DCS_APP_ID`          | The app's Client ID (or numeric App ID). |
+| var    | `DCS_SSH_DEST`        | e.g. `jfang@comps0.cs.toronto.edu` |
+| var    | `DCS_SSH_HOST_KEY`    | One line from `ssh-keyscan -t ed25519 <host>` (pins the host, defeats MITM on the jitconfig hand-off). |
 
 ## Routing an experiment to the cluster
 

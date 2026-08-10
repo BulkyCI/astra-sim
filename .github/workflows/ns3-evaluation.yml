@@ -302,9 +302,19 @@ jobs:
     permissions: {}
 
     steps:
+    # An app installation token instead of a PAT: owned by the org rather
+    # than a person, scoped to this one repository's Administration
+    # permission, and valid for one hour - no standing credential exists.
+    - name: Mint an installation token
+      id: app
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ vars.DCS_APP_ID }}
+        private-key: ${{ secrets.DCS_APP_PRIVATE_KEY }}
+
     - name: Mint a just-in-time runner and hand it to SLURM
       env:
-        GH_TOKEN: ${{ secrets.DCS_RUNNER_PAT }}
+        GH_TOKEN: ${{ steps.app.outputs.token }}
         SSH_KEY: ${{ secrets.DCS_SSH_KEY }}
         SSH_DEST: ${{ vars.DCS_SSH_DEST }}
         SSH_HOST_KEY: ${{ vars.DCS_SSH_HOST_KEY }}

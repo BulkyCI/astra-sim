@@ -334,16 +334,20 @@ jobs:
         # JIT config and impersonate the runner for this one job.
         printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
         # The key is bound to a forced command on the cluster that reads a
-        # jitconfig from stdin and submits one SLURM runner job; the command
-        # word here is ignored and present only because ssh requires one.
+        # jitconfig from stdin and submits one SLURM runner job. The command
+        # word is never executed; the forced command sanitizes it and uses
+        # it as the SLURM job name so squeue identifies the experiment.
         printf '%s' "$jit" | ssh -i ~/.ssh/id_ci -o BatchMode=yes \
-          "$SSH_DEST" submit-runner
+          "$SSH_DEST" "$RUNNER_NAME"
 
   evaluate_cluster:
     name: ${{ inputs.evaluation_name }} (cluster)
     needs: provision
     if: ${{ inputs.comparison && inputs.runs_on == 'dcs' }}
-    runs-on: [ self-hosted, dcs ]
+    # Only the custom label: a JIT registration carries exactly the labels
+    # passed to generate-jitconfig, so the implicit self-hosted/Linux/X64
+    # defaults that config.sh-registered runners self-report never exist.
+    runs-on: dcs
     # Self-hosted jobs may run for 5 days; the SLURM walltime (4d20h) is the
     # effective bound. Comfortably above the ~10 h heavy arms need tripled.
     timeout-minutes: 6900

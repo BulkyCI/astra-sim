@@ -63,6 +63,16 @@ on:
         description: Fail a paired evaluation without raw queue, PFC, and background-traffic evidence.
         required: true
         type: boolean
+      runs_on:
+        description: >
+          Where a paired comparison executes. `hosted` chains one GitHub-hosted
+          job per arm to stay under the 6-hour hosted ceiling; `dcs` provisions
+          one just-in-time SLURM runner on the DCS cluster and runs the whole
+          comparison as a single job, which self-hosted limits allow up to
+          5 days.
+        required: false
+        default: hosted
+        type: string
 
 permissions:
   contents: read
@@ -129,7 +139,7 @@ jobs:
 
   arm:
     name: ${{ inputs.evaluation_name }} (${{ matrix.arm }})
-    if: ${{ inputs.comparison }}
+    if: ${{ inputs.comparison && inputs.runs_on == 'hosted' }}
     runs-on: ubuntu-22.04
     # Each arm owns a complete hosted job, so the six-hour ceiling and the
     # caller's execution guard bound one arm rather than the whole triple.
@@ -222,7 +232,7 @@ jobs:
     # Runs even when an arm failed: it fails fast on the missing summary and
     # carries the failure into the ledger status, while whatever arm
     # telemetry did upload is preserved for diagnosis.
-    if: ${{ !cancelled() && inputs.comparison }}
+    if: ${{ !cancelled() && inputs.comparison && inputs.runs_on == 'hosted' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -283,9 +293,111 @@ jobs:
         if-no-files-found: ignore
         overwrite: true
 
+  provision:
+    name: Provision a DCS runner for ${{ inputs.evaluation_name }}
+    if: ${{ inputs.comparison && inputs.runs_on == 'dcs' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    # Authenticates with repository secrets, not the workflow token.
+    permissions: {}
+
+    steps:
+    - name: Mint a just-in-time runner and hand it to SLURM
+      env:
+        GH_TOKEN: ${{ secrets.DCS_RUNNER_PAT }}
+        SSH_KEY: ${{ secrets.DCS_SSH_KEY }}
+        SSH_DEST: ${{ vars.DCS_SSH_DEST }}
+        SSH_HOST_KEY: ${{ vars.DCS_SSH_HOST_KEY }}
+        RUNNER_NAME: dcs-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.ledger_key }}
+      run: |
+        set -euo pipefail
+        # A JIT config registers a runner that executes exactly one job and
+        # then deregisters itself: runner lifetime equals experiment lifetime.
+        jit="$(gh api -X POST \
+          "repos/${GITHUB_REPOSITORY}/actions/runners/generate-jitconfig" \
+          -f name="$RUNNER_NAME" -F runner_group_id=1 -f work_folder=_work \
+          -f 'labels[]=dcs' --jq .encoded_jit_config)"
+        install -d -m 700 ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ci
+        chmod 600 ~/.ssh/id_ci
+        # Pinned host key: a man in the middle could otherwise capture the
+        # JIT config and impersonate the runner for this one job.
+        printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+        # The key is bound to a forced command on the cluster that reads a
+        # jitconfig from stdin and submits one SLURM runner job; the command
+        # word here is ignored and present only because ssh requires one.
+        printf '%s' "$jit" | ssh -i ~/.ssh/id_ci -o BatchMode=yes \
+          "$SSH_DEST" submit-runner
+
+  evaluate_cluster:
+    name: ${{ inputs.evaluation_name }} (cluster)
+    needs: provision
+    if: ${{ inputs.comparison && inputs.runs_on == 'dcs' }}
+    runs-on: [ self-hosted, dcs ]
+    # Self-hosted jobs may run for 5 days; the SLURM walltime (4d20h) is the
+    # effective bound. Comfortably above the ~10 h heavy arms need tripled.
+    timeout-minutes: 6900
+    permissions:
+      contents: read
+    env:
+      EXPERIMENT_PROFILE: ${{ inputs.profile }}
+      EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v7
+      with:
+        # The cluster builds its own binary against the rootless toolchain,
+        # so it needs the full native tree.
+        submodules: recursive
+        persist-credentials: false
+
+    - name: Set up the locked Python environment
+      uses: ./.github/actions/python-env
+      with:
+        cache: 'false'
+
+    - name: Build the ns-3 backend with the rootless toolchain
+      run: bash ci/dcs/build.sh
+
+    - name: Run the full paired comparison
+      run: |
+        command=(
+          uv run --locked python experiments/ring_3d/compare.py
+          --profile "$EXPERIMENT_PROFILE"
+          --output "$EXPERIMENT_RUN_DIRECTORY"
+          --simulation-timeout-seconds ${{ inputs.simulation_timeout_seconds }}
+          --clean
+        )
+        if [[ "${{ inputs.require_congestion }}" == "true" ]]; then
+          command+=(--require-congestion)
+        fi
+        if [[ "${{ inputs.comparison_seed }}" != "0" ]]; then
+          command+=(--seeds ${{ inputs.comparison_seed }})
+        fi
+        timeout --foreground ${{ inputs.execution_timeout_minutes }}m "${command[@]}"
+
+    - name: Publish paired comparison report
+      if: ${{ always() }}
+      run: |
+        if [[ -f "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" ]]; then
+          cat "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "Paired evaluation did not produce a comparison report; inspect the retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload reproducibility bundle
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact_name }}-${{ github.run_id }}
+        path: ${{ inputs.run_directory }}
+        if-no-files-found: ignore
+        overwrite: true
+
   archive:
     name: Record ${{ inputs.evaluation_name }}
-    needs: [ evaluate, analyze ]
+    needs: [ evaluate, analyze, evaluate_cluster ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
@@ -320,8 +432,8 @@ jobs:
         key: ${{ inputs.ledger_key }}
         title: ${{ inputs.evaluation_name }}
         body-file: ${{ inputs.run_directory }}/${{ inputs.comparison && 'comparison_report.md' || 'research_report.md' }}
-        # Exactly one of the two paths ran; report the status of that one.
-        status: ${{ inputs.comparison && needs.analyze.result || needs.evaluate.result }}
+        # Exactly one of the three paths ran; report the status of that one.
+        status: ${{ inputs.comparison && (inputs.runs_on == 'dcs' && needs.evaluate_cluster.result || needs.analyze.result) || needs.evaluate.result }}
 
     - name: Archive the reproducibility bundle permanently
       uses: ./.github/actions/release-archive

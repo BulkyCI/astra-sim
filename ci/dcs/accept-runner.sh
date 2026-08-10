@@ -24,5 +24,13 @@ fi
 # sanitize it to a safe token before using it as a name.
 name=$(printf '%s' "${SSH_ORIGINAL_COMMAND:-runner}" \
     | tr -cd 'A-Za-z0-9._-' | head -c 64)
+
+# Submit the repository's copy of the sbatch script, freshened by a quiet
+# fast-forward pull, so a pushed fix is live on the next provision without
+# re-running setup.sh. A push already gates what this script does; offline
+# or diverged, the pull is skipped and the last checkout still works. Only
+# this accept script itself still deploys through setup.sh.
+REPO="${DCS_CI_REPO:-$HOME/astra-sim}"
+git -C "$REPO" pull --ff-only --quiet 2>/dev/null || true
 sbatch --parsable --job-name="${name:-runner}" \
-    "$ROOT/bin/runner-job.sbatch" "$jit_file"
+    "$REPO/ci/dcs/runner-job.sbatch" "$jit_file"

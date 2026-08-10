@@ -69,6 +69,10 @@ if [[ -z "$dir" ]]; then
     echo "no writable scratch base found" >&2
     exit 1
 fi
+# Canonical physical path: /scratch and /u are symlinks, and any consumer
+# that compares this path against what a process or tool reports must see
+# one spelling, not two.
+dir=$(cd "$dir" && pwd -P)
 cp -r "$ROOT/runner/." "$dir/"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
@@ -79,11 +83,16 @@ runner_pid=$!
 trap 'kill "$runner_pid" 2>/dev/null || true' TERM INT
 
 # Leak guard: a JIT runner whose workflow job was cancelled while still
-# queued would listen forever for work that never arrives. If no worker
-# process has started within 30 minutes, tear down and return the cores.
+# queued would listen forever for work that never arrives. The evidence
+# that a job WAS assigned is the Worker diagnostic log the runner writes
+# on pickup - a filesystem fact. Never process-table matching here: pgrep
+# against $dir once missed every worker because the pattern spelled the
+# path through the /scratch symlink while cmdlines carried the resolved
+# path, and the guard then killed all 16 jobs at exactly minute 30 while
+# their cleanup traps deleted trees under live compilers.
 (
-    sleep 1800
-    pgrep -f "$dir/bin/Runner.Worker" >/dev/null \
+    sleep "${DCS_IDLE_GRACE_SECONDS:-1800}"
+    compgen -G "$dir/_diag/Worker_*" >/dev/null \
         || kill "$runner_pid" 2>/dev/null
 ) &
 guard_pid=$!

@@ -8,6 +8,25 @@ set -euo pipefail
 
 ROOT="${DCS_CI_ROOT:-$HOME/astra-ci}"
 ENV="$ROOT/buildenv"
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# Reconcile the toolchain with the repo's declared package list, so a push
+# that adds a build dependency deploys like any other change instead of
+# demanding a manual setup.sh re-run. The stamp keeps the steady state a
+# no-op; the lock serializes the sixteen first arrivals after a change.
+spec="$repo_root/ci/dcs/buildenv-packages.txt"
+stamp="$ENV/.provisioned-packages"
+if ! cmp -s "$spec" "$stamp"; then
+    (
+        flock 9
+        if ! cmp -s "$spec" "$stamp"; then
+            export MAMBA_ROOT_PREFIX="$ROOT/mamba-root"
+            grep -vE '^[[:space:]]*(#|$)' "$spec" \
+                | xargs "$ROOT/bin/micromamba" install -y -p "$ENV" -c conda-forge
+            cp "$spec" "$stamp"
+        fi
+    ) 9>"$ENV/.provision.lock"
+fi
 
 export PATH="$ENV/bin:$PATH"
 export CC="$ENV/bin/x86_64-conda-linux-gnu-gcc"
@@ -34,7 +53,6 @@ export CCACHE_DIR="${DCS_SCRATCH_BASE_DIR:-$ROOT}/astra-ccache-${target_sig}"
 echo "ccache: $CCACHE_DIR"
 ccache --set-config=max_size=5G
 
-repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 bash "$repo_root/build/astra_ns3/build.sh" -c
 
 # Compute nodes mount /tmp as tmpfs, so every byte of the job's scratch is

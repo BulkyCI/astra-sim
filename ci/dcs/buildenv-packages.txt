@@ -1,0 +1,20 @@
+# Conda-forge packages for the DCS build environment. Single source of
+# truth: setup.sh creates the env from this list and ci/dcs/build.sh
+# reconciles the env against it at job start, so adding a package here
+# deploys with a push like any other change.
+#
+# libprotobuf pinned pre-abseil so ns-3's module-mode find_package works;
+# python 3.11 because the ns3 CLI breaks under newer argparse. The conda
+# cross-compilers link everything against the env's own runtimes, which is
+# what satisfies the "only glibc from the system" constraint.
+gcc_linux-64
+gxx_linux-64
+cmake
+ninja
+ccache
+libprotobuf=3.21.12
+boost
+openmpi
+zlib
+zstd
+python=3.11

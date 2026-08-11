@@ -36,8 +36,9 @@ cluster only ever holds a `contents: read` token.
 
 `accept-runner.sh` fast-forwards the repository clone and submits the
 repo's own `runner-job.sbatch`, so a push deploys cluster-side changes on
-the next provision; only `accept-runner.sh` itself still deploys through
-`setup.sh`.
+the next provision. `build.sh` likewise reconciles the conda toolchain
+against `buildenv-packages.txt` at job start; only `accept-runner.sh`
+itself still deploys through `setup.sh`.
 
 ## Cluster setup (once)
 

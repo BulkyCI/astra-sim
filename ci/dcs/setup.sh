@@ -22,15 +22,13 @@ if [[ ! -x "$ROOT/bin/micromamba" ]]; then
         | tar -xj -C "$ROOT" bin/micromamba
 fi
 
-# libprotobuf pinned pre-abseil so ns-3's module-mode find_package works;
-# python 3.11 because the ns3 CLI breaks under newer argparse. The conda
-# cross-compilers link everything against the env's own runtimes, which is
-# what satisfies the "only glibc from the system" constraint.
+# The package list lives in buildenv-packages.txt (single source of truth;
+# pin rationale documented there). ci/dcs/build.sh reconciles a live env
+# against the same file on every job, so this create only seeds a new host.
 export MAMBA_ROOT_PREFIX="$ROOT/mamba-root"
 if [[ ! -d "$ROOT/buildenv" ]]; then
-    "$ROOT/bin/micromamba" create -y -p "$ROOT/buildenv" -c conda-forge \
-        gcc_linux-64 gxx_linux-64 cmake ninja ccache \
-        libprotobuf=3.21.12 boost openmpi zlib zstd python=3.11
+    grep -vE '^[[:space:]]*(#|$)' "$script_dir/buildenv-packages.txt" \
+        | xargs "$ROOT/bin/micromamba" create -y -p "$ROOT/buildenv" -c conda-forge
 fi
 
 if [[ ! -x "$ROOT/runner/run.sh" ]]; then

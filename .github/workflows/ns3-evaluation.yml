@@ -195,8 +195,11 @@ jobs:
     # exactly the labels passed to generate-jitconfig - the implicit
     # self-hosted/Linux/X64 defaults of config.sh registration never exist.)
     runs-on: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}
-    # Self-hosted jobs may run for 5 days; the SLURM walltime (4d20h) is the
-    # effective bound. Comfortably above the ~10 h heavy arms need tripled.
+    # Timeout chain, derived from the SLURM walltime in runner-job.sbatch:
+    # per-sim 396000 s < comparison 6720 min (both in evaluation-matrix.json)
+    # < this job ceiling 6900 min < walltime 6960 min. Each layer leaves the
+    # next enough headroom to report and upload; wall clocks are backstops,
+    # not budgets - wedges die via the sim's forward-progress deadline.
     timeout-minutes: 6900
     permissions:
       contents: read

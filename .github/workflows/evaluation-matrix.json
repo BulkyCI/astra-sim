@@ -7,11 +7,11 @@
     "ledger_key": "llama3-70b-16-seed-314159265",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 358979323)",
@@ -21,11 +21,11 @@
     "ledger_key": "llama3-70b-16-seed-358979323",
     "comparison": true,
     "comparison_seed": 358979323,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 846264338)",
@@ -35,11 +35,11 @@
     "ledger_key": "llama3-70b-16-seed-846264338",
     "comparison": true,
     "comparison_seed": 846264338,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 327950288)",
@@ -49,11 +49,11 @@
     "ledger_key": "llama3-70b-16-seed-327950288",
     "comparison": true,
     "comparison_seed": 327950288,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B congestion pair (seed 419716939)",
@@ -63,11 +63,11 @@
     "ledger_key": "llama3-70b-16-seed-419716939",
     "comparison": true,
     "comparison_seed": 419716939,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. The 4 h per-arm cap reflects the measured lossy crawl; a livelocked arm now dies in minutes via the transport forward-progress deadline instead of consuming the cap."
+    "notes": "Designed-2:1 hard condition; one of five pi-chunk seeds forming the pre-registered statistical anchor. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B 32-rank direct-DP incast pair",
@@ -77,8 +77,8 @@
     "ledger_key": "llama3-70b-32-direct",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Healthy 1:1 rail fabric: steady-state DP fits, congestion is purely episodic (microburst incast plus ECMP collisions). Near-zero relief is expected and calibrates the degraded conditions."
@@ -91,8 +91,8 @@
     "ledger_key": "llama3-70b-32-burst0",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": false,
     "gate": "always",
     "notes": "Negative control of the burst-source sweep: no microburst, so no congestion gate. Relief here should be near zero."
@@ -105,8 +105,8 @@
     "ledger_key": "llama3-70b-32-burst2",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Burst-source sweep point: 2 asymmetric senders at one receiver downlink on the healthy 1:1 fabric."
@@ -119,8 +119,8 @@
     "ledger_key": "llama3-70b-32-burst4",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Burst-source sweep point: 4 asymmetric senders at one receiver downlink on the healthy 1:1 fabric."
@@ -133,8 +133,8 @@
     "ledger_key": "llama3-70b-32-clrburst",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Burst-timing contrast: the burst fires at step 1, which the schedule holds at probability 1.0 so it is CLR under every seed. The policy must shed almost nothing here; contrast with the step-18 arm is the directional signature of phase-awareness."
@@ -147,8 +147,8 @@
     "ledger_key": "llama3-70b-64-pp2",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "pp=2 puts non-sheddable pipeline activations on the degraded knee fabric alongside sheddable DP gradients. The policy's eligibility is dp_all_reduce_only, so PP flow completion must stay intact while DP is relieved."
@@ -161,11 +161,11 @@
     "ledger_key": "llama3-70b-64-fanin-direct1",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
-    "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point; 64 ranks move roughly four times the 16-rank arm's bytes, hence the 4 h per-arm backstop."
+    "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point; 64 ranks move roughly four times the 16-rank arm's bytes. Timeout chain, derived from the SLURM walltime (4d20h = 6960 min): per-sim last-resort 396000 s (6600 min) < whole-comparison 6720 min < Actions job ceiling 6900 min < walltime. Wedged arms die in minutes via the transport forward-progress deadline; the wall clocks are backstops, not budgets."
   },
   {
     "name": "Llama 3 70B 64-rank fan-in direct2 pair",
@@ -175,8 +175,8 @@
     "ledger_key": "llama3-70b-64-fanin-direct2",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Degraded 1:1 sweep point and the completion canary: judge the matrix by this arm first, since it is the window that collapsed on the designed-2:1 fabric."
@@ -189,8 +189,8 @@
     "ledger_key": "llama3-70b-64-fanin-direct4",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point."
@@ -203,8 +203,8 @@
     "ledger_key": "llama3-70b-64-fanin-direct",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Degraded 1:1 (two failed spines, 4:3 live) concurrency sweep point at the unwindowed maximum."
@@ -217,8 +217,8 @@
     "ledger_key": "llama3-70b-64-sr2x",
     "comparison": true,
     "comparison_seed": 314159265,
-    "execution_timeout_minutes": 4200,
-    "simulation_timeout_seconds": 19200,
+    "execution_timeout_minutes": 6720,
+    "simulation_timeout_seconds": 396000,
     "require_congestion": true,
     "gate": "always",
     "notes": "Selective retransmission on the designed-2:1 fabric that collapsed go-back-N: trims repair exactly the reported range and the receiver accepts out-of-order payload. If this pair completes, sustained oversubscription returns as a swept axis; its contrast with the go-back-N sweep is itself a paper finding."

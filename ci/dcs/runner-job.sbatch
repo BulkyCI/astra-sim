@@ -10,6 +10,9 @@
 # for the last-resort case where scratch selection below lands on tmpfs
 # /tmp, whose bytes are RAM charged to this limit.
 #SBATCH --mem=16G
+# Root of the timeout chain: 4 h under SLURM's 5-day cap, and 60 min above
+# the Actions job ceiling (6900 min in ns3-evaluation.yml), which in turn
+# bounds the comparison and per-sim timeouts in evaluation-matrix.json.
 #SBATCH --time=4-20:00:00
 #SBATCH --output=runner-%j.log
 # Anything but the 2018 Threadrippers: the simulator is single-threaded and

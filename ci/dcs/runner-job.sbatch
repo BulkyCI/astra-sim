@@ -75,6 +75,24 @@ dir=$(cd "$dir" && pwd -P)
 echo "scratch: $dir"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
+# SLURM propagates the submitter's entire login environment into this job
+# (sbatch --export defaults to ALL), and every convention-following tool
+# derives its write paths from HOME and the XDG base dirs. Re-root both
+# into the job's scratch before the runner starts: the runner daemon and
+# every workflow step inherit them, so incidental writes - uv caches,
+# micromamba's ~/.mamba fallback and its NFS lock, git config, runner
+# telemetry - land inside $dir by construction and die with the cleanup
+# trap. The quota'd NFS home stays control plane only. This is the single
+# definition site for the job's isolation; workflow steps must not
+# redefine HOME or XDG_* themselves.
+export HOME="$dir/home"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_RUNTIME_DIR="$HOME/.runtime"
+mkdir -p "$HOME"
+mkdir -m 700 -p "$XDG_RUNTIME_DIR"
 # The runner is downloaded per job - the home directory is strictly control
 # plane and holds no runtime payloads; the network is unmetered. Pinned
 # version and digest, extracted straight onto this job's scratch.

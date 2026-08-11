@@ -48,12 +48,13 @@ function compile {
         cmake_args+=("-DCMAKE_C_FLAGS=-march=${march}"
                      "-DCMAKE_CXX_FLAGS=-march=${march}")
     fi
-    # CI supplies a launcher through CMake's standard environment variable.
-    # Bypass ns-3's own integration there: it weakens ccache correctness by
-    # enabling sloppiness for timestamps and include-file metadata.
-    if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
-        cmake_args+=(-DNS3_CCACHE=OFF)
-    fi
+    # ns-3's own ccache integration defaults ON and adopts whatever ccache
+    # the host happens to have - a hermeticity leak (it also weakens
+    # correctness with timestamp/include sloppiness), and on the cluster it
+    # would silently write a shared cache into quota'd NFS home. Always
+    # off; a build that wants ccache supplies it through CMake's standard
+    # CMAKE_*_COMPILER_LAUNCHER environment variables, as hosted CI does.
+    cmake_args+=(-DNS3_CCACHE=OFF)
     configure_args+=(-- "${cmake_args[@]}")
     ./ns3 configure "${configure_args[@]}"
     ./ns3 build AstraSimNetwork -j $(nproc)

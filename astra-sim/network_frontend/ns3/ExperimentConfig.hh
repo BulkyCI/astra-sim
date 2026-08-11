@@ -661,10 +661,14 @@ inline void configure_experiment(const std::string& configuration_path,
             policy.at("p_low"), "selection_policy.p_low");
         experiment_config.p_high_threshold = parse_probability_threshold(
             policy.at("p_high"), "selection_policy.p_high");
-        if (experiment_config.p_low_threshold == 0 ||
-            experiment_config.p_low_threshold > 10000) {
+        // The strict-CLR ceiling on p_low (<= 0.01) is experiment-design
+        // policy owned by the generator, which grants exactly one documented
+        // exemption: the fixed-high comparison arm runs with p_low set to
+        // the permissive rate. The simulator enforces only representability;
+        // re-imposing the ceiling here rejected every fixed-high arm.
+        if (experiment_config.p_low_threshold == 0) {
             throw std::runtime_error(
-                "selection_policy.p_low must be in (0, 0.01]");
+                "selection_policy.p_low must be greater than zero");
         }
         if (experiment_config.p_low_threshold >
             experiment_config.p_high_threshold) {

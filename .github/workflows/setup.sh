@@ -14,7 +14,7 @@ sudo apt-get install --yes --no-install-recommends \
     gcc-11 g++-11 make cmake ninja-build \
     clang-format \
     libboost-dev libboost-program-options-dev \
-    libprotobuf-dev protobuf-compiler \
+    libprotobuf-dev protobuf-compiler libzstd-dev \
     openmpi-bin openmpi-doc libopenmpi-dev
 
 ### ======================================================

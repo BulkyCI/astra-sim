@@ -371,13 +371,19 @@ class Ring3DGeneratorTests(unittest.TestCase):
             self.assertIn("MAX_RETRANSMISSION_RETRIES 3", network_config)
             self.assertIn("NO_PROGRESS_TIMEOUT_NS 5000000000", network_config)
             self.assertIn(
-                f"TRANSPORT_EVENT_OUTPUT_FILE {output / 'ns3' / 'transport_events.csv'}",
+                "TRANSPORT_EVENT_OUTPUT_FILE "
+                f"{output / 'ns3' / 'transport_events.csv.zst'}",
+                network_config,
+            )
+            self.assertIn(
+                "TRANSPORT_EVENT_SUMMARY_OUTPUT_FILE "
+                f"{output / 'ns3' / 'transport_summary.csv'}",
                 network_config,
             )
             self.assertIn("ACK_HIGH_PRIO 1", network_config)
             self.assertEqual(
                 Path(manifest["transport_event_file"]),
-                output / "ns3" / "transport_events.csv",
+                output / "ns3" / "transport_events.csv.zst",
             )
 
     def test_retry_exhaustion_profile_is_a_data_only_failure_fixture(self) -> None:

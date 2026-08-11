@@ -1119,7 +1119,12 @@ def write_network_config(
         "FCT_OUTPUT_FILE": output_dir / "fct.txt",
         "PFC_OUTPUT_FILE": output_dir / "pfc.txt",
         "QLEN_MON_FILE": output_dir / "qlen.txt",
-        "TRANSPORT_EVENT_OUTPUT_FILE": output_dir / "transport_events.csv",
+        # The raw per-packet research artifact, in its historic ns-3 CSV
+        # syntax, zstd-compressed by the simulator on a worker thread.
+        "TRANSPORT_EVENT_OUTPUT_FILE": output_dir / "transport_events.csv.zst",
+        # Aggregated per-(event, plane) totals; what analysis consumes.
+        "TRANSPORT_EVENT_SUMMARY_OUTPUT_FILE": output_dir
+        / "transport_summary.csv",
     }
     if data_loss is None:
         data_loss_settings = (
@@ -1587,7 +1592,10 @@ def materialize(
         "clr_schedule": schedule_metadata(clr_schedule),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
         "transport_event_file": str(
-            (output_dir / "ns3" / "transport_events.csv").resolve()
+            (output_dir / "ns3" / "transport_events.csv.zst").resolve()
+        ),
+        "transport_event_summary_file": str(
+            (output_dir / "ns3" / "transport_summary.csv").resolve()
         ),
     }
     if model_metadata is not None:

@@ -233,7 +233,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, self.valid_shed_flow())
             ns3 = root / "ns3"
             ns3.mkdir()
-            (ns3 / "transport_events.csv").write_text(
+            (ns3 / "transport_summary.csv").write_text(
                 "event,plane,event_count,total_bytes\n"
                 "data_arrival,data,1,1024\n"
                 "data_injected_drop,data,1,1024\n"
@@ -257,7 +257,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, self.valid_shed_flow())
             ns3 = root / "ns3"
             ns3.mkdir()
-            (ns3 / "transport_events.csv").write_text(
+            (ns3 / "transport_summary.csv").write_text(
                 "event,plane,event_count,total_bytes\n"
                 "switch_admission_drop,data,1,1024\n"
                 "switch_egress_queue_drop,data,1,1024\n"
@@ -296,7 +296,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, trimmed)
             ns3 = root / "ns3"
             ns3.mkdir()
-            (ns3 / "transport_events.csv").write_text(
+            (ns3 / "transport_summary.csv").write_text(
                 "event,plane,event_count,total_bytes\n"
                 "trim_ftd_admission,data,1,1000\n"
                 "control_arrival,control,1,60\n"
@@ -339,7 +339,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, trimmed)
             ns3 = root / "ns3"
             ns3.mkdir()
-            (ns3 / "transport_events.csv").write_text(
+            (ns3 / "transport_summary.csv").write_text(
                 "event,plane,event_count,total_bytes\n"
                 "trim_ftd_lasthop_admission,data,1,1000\n"
                 "switch_trimmed_queue_drop,data,1,60\n",
@@ -404,7 +404,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, self.valid_shed_flow())
             ns3 = root / "ns3"
             ns3.mkdir()
-            (ns3 / "transport_events.csv").write_text(
+            (ns3 / "transport_summary.csv").write_text(
                 "event,plane,event_count,total_bytes\n"
                 "data_injected_drop,control,1,60\n",
                 encoding="utf-8",

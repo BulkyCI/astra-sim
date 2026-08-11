@@ -30,7 +30,7 @@ export MAMBA_ROOT_PREFIX="$ROOT/mamba-root"
 if [[ ! -d "$ROOT/buildenv" ]]; then
     "$ROOT/bin/micromamba" create -y -p "$ROOT/buildenv" -c conda-forge \
         gcc_linux-64 gxx_linux-64 cmake ninja ccache \
-        libprotobuf=3.21.12 boost openmpi zlib python=3.11
+        libprotobuf=3.21.12 boost openmpi zlib zstd python=3.11
 fi
 
 if [[ ! -x "$ROOT/runner/run.sh" ]]; then

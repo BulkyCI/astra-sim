@@ -551,7 +551,7 @@ class _FctJoin:
 
 
 def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
-    path = ns3_dir / "transport_events.csv"
+    path = ns3_dir / "transport_summary.csv"
     if not path.is_file():
         return {"status": "not_available"}
     event_count = 0

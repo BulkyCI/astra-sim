@@ -28,21 +28,12 @@ export CC="$ENV/bin/x86_64-conda-linux-gnu-gcc"
 export CXX="$ENV/bin/x86_64-conda-linux-gnu-g++"
 export CMAKE_PREFIX_PATH="$ENV"
 export LD_LIBRARY_PATH="$ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export CMAKE_C_COMPILER_LAUNCHER=ccache
-export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 
 # Each job compiles on the node that runs the binary, so per-node codegen
-# is safe here. ccache hashes the literal '-march=native' string, though:
-# without a per-target cache, one CPU family's objects would be served to
-# another's build and crash it. Namespace the cache by the compiler's
-# resolved target instead. Shared across jobs of one CPU family on the
-# expiring scratch (ccache manages its own concurrency); never NFS home.
+# is safe. No ccache here: every job builds cold in a fresh env, so a
+# cache would never see a warm hit within a job, and sharing one across
+# jobs on NFS is exactly the cross-run coupling this pipeline forbids.
 export NS3_MARCH=native
-target_sig=$("$CC" -march=native -Q --help=target 2>/dev/null \
-    | sha256sum | cut -c1-12)
-export CCACHE_DIR="${DCS_SCRATCH_BASE_DIR:-$work}/astra-ccache-${target_sig}"
-echo "ccache: $CCACHE_DIR"
-ccache --set-config=max_size=5G
 
 bash "$repo_root/build/astra_ns3/build.sh" -c
 

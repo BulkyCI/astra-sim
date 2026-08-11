@@ -73,13 +73,6 @@ fi
 # one spelling, not two.
 dir=$(cd "$dir" && pwd -P)
 echo "scratch: $dir"
-# The build cache must NOT live in quota'd NFS home: 16 concurrent jobs
-# writing per-CPU-family 5G caches there exhausted the quota and failed
-# every compile. Publish the chosen base into the runner's environment -
-# job steps inherit it - so ci/dcs/build.sh caches on the same expiring
-# scratch, shared by every job of the same CPU family and reaped by the
-# scratch system's own expiry.
-export DCS_SCRATCH_BASE_DIR="${dir%/*}"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
 # The runner is downloaded per job - the home directory is strictly control

@@ -17,11 +17,16 @@ ENV="$work/buildenv"
 
 # A fresh env per job from the declared package list: adding a package to
 # ci/dcs/buildenv-packages.txt deploys with the push that declares it.
+# Announce the stages: the cold create downloads ~1 GB and extracts ~100k
+# files onto NFS scratch, and a silent 15-minute step reads as a hang.
+echo "toolchain: fetching micromamba ${MAMBA_VERSION}"
 curl -fsSL "https://micro.mamba.pm/api/micromamba/linux-64/${MAMBA_VERSION}" \
     | tar -xj -C "$work" bin/micromamba
 export MAMBA_ROOT_PREFIX="$work/mamba-root"
+echo "toolchain: creating the build env (cold, expect 10-20 min on NFS)"
 grep -vE '^[[:space:]]*(#|$)' "$repo_root/ci/dcs/buildenv-packages.txt" \
-    | xargs "$work/bin/micromamba" create -y -q -p "$ENV" -c conda-forge
+    | xargs "$work/bin/micromamba" create -y -p "$ENV" -c conda-forge
+echo "toolchain: env ready at $ENV"
 
 export PATH="$ENV/bin:$PATH"
 export CC="$ENV/bin/x86_64-conda-linux-gnu-gcc"

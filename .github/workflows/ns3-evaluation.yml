@@ -213,6 +213,15 @@ jobs:
         submodules: recursive
         persist-credentials: false
 
+    # uv defaults its wheel cache and managed-Python installs to $HOME,
+    # which on the cluster is quota'd NFS that repeated waves exhausted
+    # (observed: provisions failing on a 10 KB write). Both go to the
+    # node-selected scratch base instead, shared across jobs like ccache.
+    - name: Keep Python caches off the quota'd home directory
+      run: |
+        echo "UV_CACHE_DIR=${DCS_SCRATCH_BASE_DIR:-$RUNNER_TEMP}/astra-uv-cache" >> "$GITHUB_ENV"
+        echo "UV_PYTHON_INSTALL_DIR=${DCS_SCRATCH_BASE_DIR:-$RUNNER_TEMP}/astra-uv-python" >> "$GITHUB_ENV"
+
     - name: Set up the locked Python environment
       uses: ./.github/actions/python-env
       with:

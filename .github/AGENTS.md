@@ -50,7 +50,7 @@ only takes effect if seeds are added.
 `native-build` is the only job that compiles. It packages
 `extern/network_backend/ns-3/build` and `build/astra_analytical/build` into a
 tarball, and every other native job unpacks it through
-`actions/native-runtime`. A push to `dev` schedules seven native jobs; without
+`actions/native-runtime`. A push to `main` schedules seven native jobs; without
 this it paid for seven identical ns-3 builds, because they start together and
 no cache can serve a job that has not finished yet.
 
@@ -76,8 +76,8 @@ Consequences to keep in mind when editing:
 build, save — so no caller can restore an entry without the matching save
 policy. Two properties keep it safe:
 
-- **Only a push to `master` or `dev` publishes an entry.** The predicate has
-  exactly one definition site, in the action's `identity` step. A caller's
+- **Only a push to `main` publishes an entry.** The predicate has exactly one
+  definition site, in the action's `identity` step. A caller's
   `allow-cache-write` input can restrict it and can never widen it.
   Pull-request code restores but never writes. There is deliberately **no fork
   check**: GitHub scopes caches per repository, so a fork and its parent share

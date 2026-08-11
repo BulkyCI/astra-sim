@@ -83,9 +83,12 @@ runs:
       # another. This repository *is* a fork, so testing
       # `github.event.repository.fork` would make `trusted` permanently false
       # and disable the cache outright.
+      #
+      # `main` is the only trusted branch. `zee/master` is deliberately absent:
+      # it never runs CI, so it can never publish an entry either.
       trusted=false
       if [[ "$ALLOW_CACHE_WRITE" == "true" && "$EVENT_NAME" == "push" \
-            && ( "$REF" == "refs/heads/master" || "$REF" == "refs/heads/dev" ) ]]; then
+            && "$REF" == "refs/heads/main" ]]; then
         trusted=true
       fi
 

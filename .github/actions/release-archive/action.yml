@@ -55,13 +55,42 @@ runs:
         exit 0
       fi
 
+      # Partition by size. Large files ship as their own assets, byte for
+      # byte as the run produced them - the raw zstd stream must never be
+      # compressed a second time - while small files travel together in one
+      # tarball. GitHub hard-caps a single asset at 2 GiB: a larger file
+      # cannot be carried at all, so it is warned about and left to the
+      # run's Actions artifact rather than failing the archive.
+      asset_cap=2147483648
+      while IFS= read -r -d '' file; do
+        rel="${file#"$source"/}"
+        size="$(stat -c %s "$file")"
+        if (( size >= asset_cap )); then
+          echo "::warning::${rel} ($(( size / 2**20 )) MiB) exceeds the" \
+            "2 GiB release-asset cap; it survives only in the Actions artifact"
+          echo "Skipped \`${rel}\` ($(( size / 2**20 )) MiB): over the 2 GiB" \
+            "release-asset cap." >> "$GITHUB_STEP_SUMMARY"
+          rm "$file"
+          continue
+        fi
+        # Asset names are flat; encode the in-bundle path into the name.
+        name="${ASSET_NAME}--${rel//\//__}"
+        mv "$file" "${ARCHIVE_ROOT}/${name}"
+        echo "large asset: ${name} ($(( size / 2**20 )) MiB)"
+        gh release upload "$RELEASE_TAG" "${ARCHIVE_ROOT}/${name}" \
+          --clobber --repo "$REPOSITORY"
+        echo "Archived \`${name}\` ($(( size / 2**20 )) MiB) to release" \
+          "\`${RELEASE_TAG}\`." >> "$GITHUB_STEP_SUMMARY"
+      done < <(find "$source" -type f -size +100M -print0)
+
       asset="${ARCHIVE_ROOT}/${ASSET_NAME}.tar.gz"
       tar -czf "$asset" -C "$source" .
+      du -h "$asset" | cut -f1 | xargs echo "bundle asset size:"
 
       # `--clobber` is what makes a re-run idempotent: the asset is replaced in
       # place rather than rejected as a duplicate name.
       gh release upload "$RELEASE_TAG" "$asset" --clobber --repo "$REPOSITORY"
 
       size="$(du -h "$asset" | cut -f1)"
-      echo "Archived \`${ASSET_NAME}.tar.gz\` (${size}) to release \`${RELEASE_TAG}\`." \
-        >> "$GITHUB_STEP_SUMMARY"
+      echo "Archived \`${ASSET_NAME}.tar.gz\` (${size}) to release \
+      \`${RELEASE_TAG}\`." >> "$GITHUB_STEP_SUMMARY"

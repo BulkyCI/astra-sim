@@ -25,7 +25,6 @@
 # 5-day Actions self-hosted job limit will never be hit in practice.
 set -euo pipefail
 
-ROOT="${DCS_CI_ROOT:-$HOME/astra-ci}"
 jit_file=$1
 jit=$(cat "$jit_file")
 rm -f "$jit_file"
@@ -81,9 +80,18 @@ echo "scratch: $dir"
 # scratch, shared by every job of the same CPU family and reaped by the
 # scratch system's own expiry.
 export DCS_SCRATCH_BASE_DIR="${dir%/*}"
-cp -r "$ROOT/runner/." "$dir/"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
+# The runner is downloaded per job - the home directory is strictly control
+# plane and holds no runtime payloads; the network is unmetered. Pinned
+# version and digest, extracted straight onto this job's scratch.
+RUNNER_VERSION=2.336.0
+RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+curl -fsSL -o "$dir/runner.tar.gz" \
+    "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+echo "${RUNNER_SHA256}  $dir/runner.tar.gz" | sha256sum -c -
+tar -xzf "$dir/runner.tar.gz" -C "$dir"
+rm "$dir/runner.tar.gz"
 
 cd "$dir"
 ./run.sh --jitconfig "$jit" &

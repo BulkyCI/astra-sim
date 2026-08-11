@@ -1,32 +1,27 @@
 #!/bin/bash
 # Build the ns-3 backend on a DCS node from the job's checkout, using only
-# the rootless toolchain that ci/dcs/setup.sh installed: compiler, protoc,
-# boost, MPI, and zlib all come from the conda env, nothing from the system
-# but glibc. Delegates to the same build/astra_ns3/build.sh CI uses, so the
-# flags (release, no asserts, LTO, x86-64-v3) stay defined in one place.
+# a rootless toolchain created fresh for this one job: compiler, protoc,
+# boost, MPI, zlib, and zstd all come from a conda env on the job's own
+# scratch, nothing from the system but glibc. The home directory is
+# strictly control plane - jobs download their own tools (the network is
+# unmetered), so there is no shared mutable state and no locks, and the
+# job's cleanup trap reaps everything. Delegates to the same
+# build/astra_ns3/build.sh CI uses, so the flags (release, no asserts,
+# LTO, march) stay defined in one place.
 set -euo pipefail
 
-ROOT="${DCS_CI_ROOT:-$HOME/astra-ci}"
-ENV="$ROOT/buildenv"
+MAMBA_VERSION=2.3.2
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+work="${RUNNER_TEMP:?}"
+ENV="$work/buildenv"
 
-# Reconcile the toolchain with the repo's declared package list, so a push
-# that adds a build dependency deploys like any other change instead of
-# demanding a manual setup.sh re-run. The stamp keeps the steady state a
-# no-op; the lock serializes the sixteen first arrivals after a change.
-spec="$repo_root/ci/dcs/buildenv-packages.txt"
-stamp="$ENV/.provisioned-packages"
-if ! cmp -s "$spec" "$stamp"; then
-    (
-        flock 9
-        if ! cmp -s "$spec" "$stamp"; then
-            export MAMBA_ROOT_PREFIX="$ROOT/mamba-root"
-            grep -vE '^[[:space:]]*(#|$)' "$spec" \
-                | xargs "$ROOT/bin/micromamba" install -y -p "$ENV" -c conda-forge
-            cp "$spec" "$stamp"
-        fi
-    ) 9>"$ENV/.provision.lock"
-fi
+# A fresh env per job from the declared package list: adding a package to
+# ci/dcs/buildenv-packages.txt deploys with the push that declares it.
+curl -fsSL "https://micro.mamba.pm/api/micromamba/linux-64/${MAMBA_VERSION}" \
+    | tar -xj -C "$work" bin/micromamba
+export MAMBA_ROOT_PREFIX="$work/mamba-root"
+grep -vE '^[[:space:]]*(#|$)' "$repo_root/ci/dcs/buildenv-packages.txt" \
+    | xargs "$work/bin/micromamba" create -y -q -p "$ENV" -c conda-forge
 
 export PATH="$ENV/bin:$PATH"
 export CC="$ENV/bin/x86_64-conda-linux-gnu-gcc"
@@ -40,16 +35,12 @@ export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 # is safe here. ccache hashes the literal '-march=native' string, though:
 # without a per-target cache, one CPU family's objects would be served to
 # another's build and crash it. Namespace the cache by the compiler's
-# resolved target instead.
+# resolved target instead. Shared across jobs of one CPU family on the
+# expiring scratch (ccache manages its own concurrency); never NFS home.
 export NS3_MARCH=native
 target_sig=$("$CC" -march=native -Q --help=target 2>/dev/null \
     | sha256sum | cut -c1-12)
-# On the expiring scratch the sbatch script selected, never in NFS home:
-# concurrent jobs writing per-family caches into the quota'd home failed
-# every compile with 'Disk quota exceeded'. All jobs of one CPU family
-# share one warm cache here, and the scratch system's expiry is the
-# pruning policy a cache deserves.
-export CCACHE_DIR="${DCS_SCRATCH_BASE_DIR:-$ROOT}/astra-ccache-${target_sig}"
+export CCACHE_DIR="${DCS_SCRATCH_BASE_DIR:-$work}/astra-ccache-${target_sig}"
 echo "ccache: $CCACHE_DIR"
 ccache --set-config=max_size=5G
 

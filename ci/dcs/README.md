@@ -36,15 +36,18 @@ cluster only ever holds a `contents: read` token.
 
 `accept-runner.sh` fast-forwards the repository clone and submits the
 repo's own `runner-job.sbatch`, so a push deploys cluster-side changes on
-the next provision. `build.sh` likewise reconciles the conda toolchain
-against `buildenv-packages.txt` at job start; only `accept-runner.sh`
-itself still deploys through `setup.sh`.
+the next provision. Jobs are self-contained: each downloads its pinned
+runner and creates its conda toolchain from `buildenv-packages.txt` on
+job-local scratch, so no shared environment or lock exists and the home
+directory stays control-plane only (checkout, forced-command script,
+jitconfigs, logs - under 1 GB). Only `accept-runner.sh` itself still
+deploys through `setup.sh`.
 
 ## Cluster setup (once)
 
 ```sh
 git clone --no-recurse-submodules <repo-url> ~/astra-sim && cd ~/astra-sim
-bash ci/dcs/setup.sh          # toolchain + pinned runner into ~/astra-ci
+bash ci/dcs/setup.sh          # control-plane scripts into ~/astra-ci
 ```
 
 Generate a dedicated key pair (`ssh-keygen -t ed25519 -f astra-ci -N ''`)

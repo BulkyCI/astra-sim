@@ -27,9 +27,9 @@ The dependencies split into two classes with different rules:
   and the C++ compiler that links against them. Resolve this set as a
   single unit, never piecewise. If the machine has the full system unit
   (`protoc`, `libprotobuf-dev`, `libboost-dev`,
-  `libboost-program-options-dev`, `libopenmpi-dev`, zlib headers — i.e.
-  what `.github/workflows/setup.sh` installs in CI), build with the system
-  compiler and skip micromamba for all of them. If any member is missing,
+  `libboost-program-options-dev`, `libopenmpi-dev`, zlib and zstd headers —
+  i.e. what `.github/workflows/setup.sh` installs in CI), build with the
+  system compiler and skip micromamba for all of them. If any member is missing,
   take the whole unit from conda-forge, including the conda compiler:
   conda-built libraries carry a newer libstdc++ than the system toolchain,
   and a mixed link is an unverified path.
@@ -44,7 +44,8 @@ if command -v protoc >/dev/null \
    && [ -e /usr/include/google/protobuf/message.h ] \
    && [ -e /usr/include/boost/version.hpp ] \
    && command -v mpicxx >/dev/null \
-   && [ -e /usr/include/zlib.h ]; then
+   && [ -e /usr/include/zlib.h ] \
+   && [ -e /usr/include/zstd.h ]; then
   UNIT=system
 else
   UNIT=conda
@@ -75,7 +76,7 @@ export MAMBA_ROOT_PREFIX="$SCRATCH/mamba-root"
 
 PKGS="$NEUTRAL"
 if [ "$UNIT" = conda ]; then
-  PKGS="$PKGS libprotobuf=3.21.12 libboost-devel openmpi zlib $GXX"
+  PKGS="$PKGS libprotobuf=3.21.12 libboost-devel openmpi zlib zstd $GXX"
 fi
 ./bin/micromamba create -y -p "$SCRATCH/buildenv" -c conda-forge $PKGS
 [ "$UNIT" = conda ] && ./buildenv/bin/protoc --version  # expect: libprotoc 3.21.12
@@ -92,6 +93,8 @@ Why each conda-unit pin exists:
   `protoc`.
 - `zlib` — `gzip_stream.h` includes `zlib.h`; without it the build dies at
   ~90% in `protoio.cc`.
+- `zstd` — `scratch/common.h` compresses the raw transport-event stream at
+  runtime (`#include <zstd.h>`, linked via the scratch CMakeLists).
 - `$GXX` — the conda cross-named compiler (`<arch>-conda-linux-gnu-g++`)
   keeps libstdc++ consistent with the conda-built protobuf/boost binaries;
   with the conda unit, the system gcc is left unused.

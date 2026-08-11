@@ -75,13 +75,12 @@ the cluster. Aggregations and the ledger are unaffected: the cluster job
 uploads the same `<artifact_name>-<run id>` bundle the hosted single-job
 path produced before the pivot.
 
-## Pilot
+## Verifying the lifecycle contract
 
-Route a single heavy entry (e.g. the CLR-step burst pair) to `dcs`, push,
-and watch: the provision job logs the SLURM job id; `squeue` shows the
-runner job; the evaluation appears in the Actions UI as
-"<name> (cluster)". Cancel the Actions job mid-run and confirm the SLURM
-job ends within a minute — that is the lifecycle contract working.
+The provision job logs the SLURM job id and `squeue` shows the runner job.
+Cancelling an Actions job mid-run must end its SLURM job within a minute —
+that is the lifecycle contract working; a runner whose job never arrives
+tears itself down after the 30-minute idle guard.
 
 ## Teardown
 

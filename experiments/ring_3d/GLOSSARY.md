@@ -13,7 +13,7 @@ paper term in a profile, report, or code symbol.
 | CLR | `is_clr=1` selects the strict policy threshold | Step-dependent | `ExperimentConfig.hh` | `experiment.json`, flow rows |
 | `selection_policy.p_low` | Logical-payload selection probability in CLR; **not paper $P_\mathrm{low}$ residual loss** | 0.5% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
 | `selection_policy.p_high` | Logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 10% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
-| $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_events.csv` injected data drops |
+| $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_summary.csv` injected data drops |
 | $D$ | Duration of the configured data-loss window | Unset unless a profile explicitly enables `network.data_loss` | `network.data_loss.start_ns`, `.duration_ns` | `manifest.json`, `network_config.txt` |
 | Packet trimming (UEC 1.0.3 section 4.1) | A switch that fails buffer admission truncates a DSCP_TRIMMABLE packet to `MIN_TRIM_SIZE`, remarks it DSCP_TRIMMED, and forwards it on TC_med; its payload is not delivered | Disabled unless a profile enables it | `network.packet_trimming.mode` | Trim conversions, recovery controls, and terminal flow telemetry |
 | FTD | Trim-and-forward-to-destination. This is the UEC 1.0.3 behavior: the trimmed packet reaches the destination, which returns a UET_TRIMMED NACK without accepting payload bytes | Disabled | `network.packet_trimming.mode: "ftd"` | `trim_ftd_*` event and flow counters |
@@ -24,7 +24,7 @@ paper term in a profile, report, or code symbol.
 | Egress drop threshold | Per-queue byte bound on an egress queue, the `queue_trimmable.drop_threshold` / `queue_trimmed.drop_threshold` of UEC 1.0.3 section 4.1 | Unbounded unless set | `network.fabric.data_queue_bytes`, `.trimmed_queue_bytes` | Admission drops and trim conversions |
 | TC_med | Egress tier for DSCP_TRIMMED, drained below TC_high control (queue 0) and ahead of the round-robin TC_low data queues, but capped at its configured bandwidth share | Queue 2 at 25% | `network.packet_trimming.trimmed_queue`, `.trimmed_queue_weight` | `switch_trimmed_queue_drop` |
 | `trimmed_queue_weight` | Percent of egress bandwidth TC_med may take while TC_low has traffic. UEC 1.0.3 section 4.1 recommends WDRR at 25% and caps fair-queueing at 50%, because an unrestricted trimmed class can cause congestion collapse. 100 restores strict priority | 25 | `network.packet_trimming.trimmed_queue_weight` | Trim conversions versus data goodput |
-| control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; generated profiles set strict ACK/NACK priority at hosts and switches | Control attempts/delivery plus queue/drop events in `transport_events.csv` |
+| control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; generated profiles set strict ACK/NACK priority at hosts and switches | Control attempts/delivery plus queue/drop totals in `transport_summary.csv` (per-packet rows in `transport_events.csv.zst`) |
 | data plane | RDMA UDP payload (`0x11`) subject to the explicit scoped impairment | No loss experiment is active | `network.data_loss` applies only after this wire classification | Data attempts, injected drops, retransmission bytes, and terminal flow telemetry |
 | `microburst_bytes` | Bytes required by one synthetic background RDMA flow | 128 MiB | Profile JSON | Background `flow_events.csv` row |
 | `microburst_flow_count` | Number of background flows | 7 | Profile JSON | Background flow rows |
@@ -124,7 +124,7 @@ a naturally emitted framework burst or as packet loss.
   data (UEC 1.0.3 section 3.6.4.7.1 marks that codepoint OPTIONAL).
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use
-  `transport_events.csv` to distinguish those cases.
+  `transport_summary.csv` to distinguish those cases.
 - A provenance replacement QP is UDP data on priority group 1, not an ACK,
   NACK, PFC, CNP, or a queue-0 wire-control packet.
 - Reserve **residual-loss tolerance** for a future DBLP-like stop condition.

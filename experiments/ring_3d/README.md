@@ -217,8 +217,9 @@ Priority group 0 remains reserved for wire control at the switch. Foreground
 vnet 0 maps to priority group 3, while provenance-replacement QPs use priority
 group 1. Generated network configurations enable strict ACK/NACK priority
 independently of whether configured data impairment is active. Queue 0 has
-strict scheduling but no capacity-reservation claim; its observed delay and
-drops remain part of `transport_events.csv`. Step 2 also triggers deterministic
+strict scheduling but no capacity-reservation claim; its observed drops are
+totaled in `transport_summary.csv`, with per-packet timing retained in the
+raw `transport_events.csv.zst`. Step 2 also triggers deterministic
 cross-rack RDMA microbursts on the same modeled host/RDMA path.
 
 ## Tests

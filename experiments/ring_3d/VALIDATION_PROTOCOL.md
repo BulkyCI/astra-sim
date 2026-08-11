@@ -38,15 +38,18 @@ A run is eligible for the primary analysis only if all checks pass:
 - selected traffic is exclusively DP CollectivePayload All-Reduce provenance control, with nonzero physical provenance bytes.
 
 An experiment that claims finite-buffer incast loss must additionally retain
-`transport_events.csv`, show zero configured data-injection drops, and show at
+the transport telemetry (`transport_summary.csv` totals plus the raw
+`transport_events.csv.zst` stream), show zero configured data-injection
+drops, and show at
 least one `data_natural_buffer_drop_count` event caused by switch admission or
 egress-queue rejection. PFC and a nonzero queue peak demonstrate pressure but
 do not, by themselves, demonstrate physical packet loss. Control queue or
 admission drops must remain separately reported; strict priority and zero
 configured impairment loss do not imply infinite control capacity.
 
-For a profile that enables `network.data_loss`, the run must additionally retain
-`transport_events.csv` and establish that at least one in-scope data event was
+For a profile that enables `network.data_loss`, the run must additionally
+retain the transport telemetry (`transport_summary.csv` plus
+`transport_events.csv.zst`) and establish that at least one in-scope data event was
 injected as loss while the configured control-injection-drop count is zero. Any
 control queue/admission drop must remain visible as a separate event; it is not
 evidence of configured impairment isolation. A run with any failed outcome is
@@ -54,7 +57,8 @@ not eligible for the policy primary estimands, but is a valid transport
 liveness observation when its raw telemetry is retained.
 
 For a profile that enables `network.packet_trimming`, the run must retain
-`transport_events.csv`, identify FTD or BTS mode, and show at least one trim
+the transport telemetry (`transport_summary.csv` plus
+`transport_events.csv.zst`), identify FTD or BTS mode, and show at least one trim
 conversion caused by switch admission or egress-queue rejection. Each trim
 conversion represents undelivered original payload bytes—not compact data
 delivery—and completed QPs must show repair traffic and ACK-backed completion.

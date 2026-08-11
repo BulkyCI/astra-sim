@@ -587,10 +587,10 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "trim_bts_lasthop_egress_queue",
     }
     trim_events = {event for event in valid_events if event.startswith("trim_")}
-    # A trimming or loss profile records one row per impaired packet, so this
-    # file is unbounded for the same reason `flow_events.csv` is.
+    # The simulator aggregates in memory and emits one row per (event, plane)
+    # pair at exit: a raw row per packet event grew past 100 GB per arm and
+    # its per-packet flushes exhausted shared CI storage.
     for row in iter_csv(path):
-        event_count += 1
         event = row.get("event")
         plane = row.get("plane")
         if event not in valid_events or plane not in {"data", "control"}:
@@ -601,16 +601,16 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             raise ValueError("invalid control transport event plane")
         if event.startswith("trim_") and plane != "data":
             raise ValueError("trim conversion must account for undelivered data")
-        packet_bytes = _as_int(row, "packet_bytes")
-        if packet_bytes < 0:
-            raise ValueError("transport event packet bytes must be nonnegative")
-        for field in ("time_ns", "protocol", "node", "node_type", "interface", "queue"):
-            _as_int(row, field)
-        events[event] += 1
-        bytes_by_event[event] += packet_bytes
-        plane_events[plane] += 1
-        plane_bytes[plane] += packet_bytes
-        event_plane_counts[event][plane] += 1
+        row_events = _as_int(row, "event_count")
+        row_bytes = _as_int(row, "total_bytes")
+        if row_events < 0 or row_bytes < 0:
+            raise ValueError("transport event totals must be nonnegative")
+        event_count += row_events
+        events[event] += row_events
+        bytes_by_event[event] += row_bytes
+        plane_events[plane] += row_events
+        plane_bytes[plane] += row_bytes
+        event_plane_counts[event][plane] += row_events
 
     return {
         "status": "available",

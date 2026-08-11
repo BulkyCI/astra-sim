@@ -234,12 +234,11 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ns3 = root / "ns3"
             ns3.mkdir()
             (ns3 / "transport_events.csv").write_text(
-                "time_ns,event,plane,protocol,node,node_type,interface,"
-                "source_host,destination_host,source_port,packet_bytes,queue\n"
-                "10,data_arrival,data,17,8,1,1,0,4,10000,1024,-1\n"
-                "10,data_injected_drop,data,17,8,1,1,0,4,10000,1024,-1\n"
-                "20,control_arrival,control,252,0,0,1,4,0,100,60,-1\n"
-                "20,control_deliver,control,252,0,0,1,4,0,100,60,-1\n",
+                "event,plane,event_count,total_bytes\n"
+                "data_arrival,data,1,1024\n"
+                "data_injected_drop,data,1,1024\n"
+                "control_arrival,control,1,60\n"
+                "control_deliver,control,1,60\n",
                 encoding="utf-8",
             )
 
@@ -259,11 +258,10 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ns3 = root / "ns3"
             ns3.mkdir()
             (ns3 / "transport_events.csv").write_text(
-                "time_ns,event,plane,protocol,node,node_type,interface,"
-                "source_host,destination_host,source_port,packet_bytes,queue\n"
-                "10,switch_admission_drop,data,17,8,1,-1,0,4,10000,1024,-1\n"
-                "11,switch_egress_queue_drop,data,17,8,1,-1,0,4,10000,1024,-1\n"
-                "12,switch_egress_queue_drop,control,252,8,1,-1,4,0,10000,60,-1\n",
+                "event,plane,event_count,total_bytes\n"
+                "switch_admission_drop,data,1,1024\n"
+                "switch_egress_queue_drop,data,1,1024\n"
+                "switch_egress_queue_drop,control,1,60\n",
                 encoding="utf-8",
             )
 
@@ -299,11 +297,10 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ns3 = root / "ns3"
             ns3.mkdir()
             (ns3 / "transport_events.csv").write_text(
-                "time_ns,event,plane,protocol,node,node_type,interface,"
-                "source_host,destination_host,source_port,packet_bytes,queue\n"
-                "10,trim_ftd_admission,data,17,8,1,-1,0,4,10000,1000,-1\n"
-                "11,control_arrival,control,251,4,0,1,0,4,10000,60,-1\n"
-                "12,control_deliver,control,250,0,0,1,4,0,10000,60,-1\n",
+                "event,plane,event_count,total_bytes\n"
+                "trim_ftd_admission,data,1,1000\n"
+                "control_arrival,control,1,60\n"
+                "control_deliver,control,1,60\n",
                 encoding="utf-8",
             )
 
@@ -343,10 +340,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ns3 = root / "ns3"
             ns3.mkdir()
             (ns3 / "transport_events.csv").write_text(
-                "time_ns,event,plane,protocol,node,node_type,interface,"
-                "source_host,destination_host,source_port,packet_bytes,queue\n"
-                "10,trim_ftd_lasthop_admission,data,17,8,1,-1,0,4,10000,1000,-1\n"
-                "11,switch_trimmed_queue_drop,data,17,8,1,-1,0,4,10000,60,-1\n",
+                "event,plane,event_count,total_bytes\n"
+                "trim_ftd_lasthop_admission,data,1,1000\n"
+                "switch_trimmed_queue_drop,data,1,60\n",
                 encoding="utf-8",
             )
 
@@ -409,9 +405,8 @@ class Ring3DAnalysisTests(unittest.TestCase):
             ns3 = root / "ns3"
             ns3.mkdir()
             (ns3 / "transport_events.csv").write_text(
-                "time_ns,event,plane,protocol,node,node_type,interface,"
-                "source_host,destination_host,source_port,packet_bytes,queue\n"
-                "10,data_injected_drop,control,252,0,0,1,4,0,100,60,-1\n",
+                "event,plane,event_count,total_bytes\n"
+                "data_injected_drop,control,1,60\n",
                 encoding="utf-8",
             )
 

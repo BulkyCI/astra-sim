@@ -26,6 +26,10 @@ export MAMBA_ROOT_PREFIX="$work/mamba-root"
 echo "toolchain: creating the build env (cold, expect 10-20 min on NFS)"
 grep -vE '^[[:space:]]*(#|$)' "$repo_root/ci/dcs/buildenv-packages.txt" \
     | xargs "$work/bin/micromamba" create -y -p "$ENV" -c conda-forge
+# The package cache (downloaded tarballs plus extracted copies) is dead
+# weight once the env is linked - reclaim ~2-3 GB of scratch per job for
+# the days the sims run.
+"$work/bin/micromamba" clean --all --yes
 echo "toolchain: env ready at $ENV"
 
 export PATH="$ENV/bin:$PATH"

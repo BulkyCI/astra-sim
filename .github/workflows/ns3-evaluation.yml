@@ -266,12 +266,32 @@ jobs:
         if-no-files-found: ignore
         overwrite: true
 
+    # The sweep aggregations fold exactly one file from this run - the
+    # comparison verdict - and must never pay for it by downloading the
+    # full multi-gigabyte bundle. Publish the verdict as its own
+    # kilobyte-sized artifact; the aggregate download patterns match only
+    # these `-summary-` names.
+    - name: Upload the comparison summary for aggregation
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact_name }}-summary-${{ github.run_id }}
+        path: ${{ inputs.run_directory }}/comparison.json
+        if-no-files-found: ignore
+        overwrite: true
+
   archive:
     name: Record the result
     needs: [ evaluate, evaluate_cluster ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # The hosted ceiling, because this job downloads the full
+    # reproducibility bundle - observed at 38.8 GB once the raw transport
+    # streams shipped - and re-uploads most of it as release assets. The
+    # previous 20-minute clock was sized for the report-only era and
+    # cancelled a healthy archive mid-download. Sitting at the end of the
+    # graph, this backstop blocks nothing by being slow.
+    timeout-minutes: 360
     # The only job here that holds write scopes. It runs `gh` and `tar` over a
     # downloaded bundle and never executes anything from it, so a malicious
     # artifact cannot reach the token.
@@ -312,3 +332,7 @@ jobs:
         tag: ${{ inputs.release_tag }}
         artifact: ${{ inputs.artifact_name }}-${{ github.run_id }}
         asset-name: ${{ inputs.artifact_name }}
+        # The report fetch above already landed the whole bundle on this
+        # runner; archiving it in place avoids a second ~39 GB download
+        # that would double both the wait and the disk footprint.
+        source-directory: ${{ inputs.run_directory }}

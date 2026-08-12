@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       download_pattern:
-        description: Artifact glob for the per-evaluation comparison bundles; the caller's run ID suffix must be included.
+        description: Artifact glob for the per-evaluation comparison summaries (the kilobyte `-summary-` artifacts, never the full bundles); the caller's run ID suffix must be included.
         required: true
         type: string
       download_directory:
@@ -63,7 +63,12 @@ jobs:
   aggregate:
     name: ${{ inputs.aggregate_name }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    # The download pattern matches only the per-evaluation comparison
+    # summaries - kilobytes each, by contract never the full bundles - so
+    # this job finishes in minutes. The generous clock stays anyway: a
+    # tight wall clock is a drifted invariant waiting to cancel a healthy
+    # job, and this graph has already paid that bill twice.
+    timeout-minutes: 360
     permissions:
       contents: read
 
@@ -109,7 +114,11 @@ jobs:
     needs: aggregate
     if: ${{ always() }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # The aggregate bundle is small (rendered reports and sweep tables), but
+    # sink jobs share one rule: artifact movement runs at the hosted ceiling
+    # and inner steps own the real deadlines. A tight wall clock here is a
+    # drifted invariant waiting to cancel a healthy job.
+    timeout-minutes: 360
     permissions:
       contents: write
       issues: write
@@ -146,3 +155,5 @@ jobs:
         tag: ${{ inputs.release_tag }}
         artifact: ${{ inputs.artifact_name }}-${{ github.run_id }}
         asset-name: ${{ inputs.artifact_name }}
+        # Already fetched above for the ledger; archive that copy in place.
+        source-directory: ${{ inputs.output_directory }}

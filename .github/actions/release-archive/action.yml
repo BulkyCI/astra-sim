@@ -14,6 +14,16 @@ inputs:
   artifact:
     description: Name of the Actions artifact to archive.
     required: true
+  source-directory:
+    description: >
+      Bundle directory already present on this runner. When set, the download
+      step is skipped and the bundle is archived from this path in place: the
+      caller fetched it earlier in the same job (typically for the ledger),
+      and downloading a multi-gigabyte bundle a second time wastes minutes
+      and doubles the disk footprint. The directory is consumed - large
+      files are moved out and oversized ones deleted.
+    required: false
+    default: ''
   asset-name:
     description: Asset filename within the release, without the .tar.gz suffix.
     required: true
@@ -26,7 +36,7 @@ runs:
   using: composite
   steps:
   - name: Download the bundle
-    if: ${{ inputs.tag != '' }}
+    if: ${{ inputs.tag != '' && inputs.source-directory == '' }}
     # A cancelled producer leaves no artifact; that is a missing record, not a
     # reason to fail the sink job that is trying to record what does exist.
     continue-on-error: true
@@ -44,11 +54,16 @@ runs:
       RELEASE_TAG: ${{ inputs.tag }}
       ASSET_NAME: ${{ inputs.asset-name }}
       ARCHIVE_ROOT: ${{ runner.temp }}/archive
+      SOURCE_DIRECTORY: ${{ inputs.source-directory }}
       REPOSITORY: ${{ github.repository }}
     run: |
       set -euo pipefail
 
-      source="${ARCHIVE_ROOT}/${ASSET_NAME}"
+      # Archive in place when the caller already holds the bundle; the
+      # staging root must exist either way because large files are renamed
+      # into it before upload.
+      source="${SOURCE_DIRECTORY:-${ARCHIVE_ROOT}/${ASSET_NAME}}"
+      mkdir -p "${ARCHIVE_ROOT}"
       if [[ ! -d "$source" ]] || [[ -z "$(ls -A "$source")" ]]; then
         echo "No bundle to archive for ${ASSET_NAME}; nothing was produced." \
           >> "$GITHUB_STEP_SUMMARY"

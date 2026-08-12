@@ -92,7 +92,11 @@ jobs:
     name: Build the native backends
     needs: python-quality
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    # A warm ccache build finishes in ~15 minutes, but the cache is evicted
+    # after quiet weeks and the cold rebuild is an LTO link of ns-3 on four
+    # hosted cores. 60 minutes sat close enough to a cold build to be a
+    # coin flip; double it and let the build's own progress be the signal.
+    timeout-minutes: 120
     outputs:
       # One definition site for the name, the same discipline the ledger issue
       # and release tag follow. Producer and consumer cannot drift apart.
@@ -219,7 +223,11 @@ jobs:
     needs: [ native-integration, ledger ]
     if: ${{ always() }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # Sink jobs run at the hosted ceiling: this one archives three bundles,
+    # and the smoke bundles now carry raw transport streams whose size
+    # scales with however long the smoke sims ran. Inner steps own the real
+    # deadlines; the wall clock only reaps a wedged runner.
+    timeout-minutes: 360
     # A sink job: the only place a write scope exists for this branch of the
     # graph. It runs `gh` and `tar` over downloaded bundles and executes
     # nothing from them.
@@ -355,7 +363,7 @@ jobs:
     uses: ./.github/workflows/evaluation-aggregate.yml
     with:
       aggregate_name: Aggregate five-seed Llama 3 70B congestion evaluation
-      download_pattern: ring-3d-llama3-70b-16-comparison-seed-*-${{ github.run_id }}
+      download_pattern: ring-3d-llama3-70b-16-comparison-seed-*-summary-${{ github.run_id }}
       download_directory: runs/ring_3d/llama3_70b_16_comparison/artifacts
       expected_count: 5
       command_prefix: uv run --locked python experiments/ring_3d/compare.py --clean --aggregate-inputs
@@ -376,7 +384,7 @@ jobs:
     uses: ./.github/workflows/evaluation-aggregate.yml
     with:
       aggregate_name: Aggregate the DP fan-in sweep
-      download_pattern: ring-3d-llama3-70b-64-fanin-*-comparison-${{ github.run_id }}
+      download_pattern: ring-3d-llama3-70b-64-fanin-*-comparison-summary-${{ github.run_id }}
       download_directory: runs/ring_3d/llama3_70b_64_fanin/artifacts
       expected_count: 4
       command_prefix: uv run --locked python experiments/ring_3d/fan_in_sweep.py --comparison
@@ -399,7 +407,7 @@ jobs:
       aggregate_name: Aggregate the microburst source-count sweep
       # The 32-direct arm is the 7-source point of the sweep; the brace set
       # keeps the sibling clrburst artifact out of the fold.
-      download_pattern: ring-3d-llama3-70b-32-{direct,burst0,burst2,burst4}-comparison-${{ github.run_id }}
+      download_pattern: ring-3d-llama3-70b-32-{direct,burst0,burst2,burst4}-comparison-summary-${{ github.run_id }}
       download_directory: runs/ring_3d/llama3_70b_32_burst/artifacts
       expected_count: 4
       command_prefix: uv run --locked python experiments/ring_3d/fan_in_sweep.py --swept-field microburst_source_count --comparison

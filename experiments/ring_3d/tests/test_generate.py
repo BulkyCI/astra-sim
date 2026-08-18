@@ -167,7 +167,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             / "experiments/ring_3d/profiles/llama3_70b_32_direct.json"
         )
         profile = load_profile(profile_path)
-        self.assertEqual(profile.dp_all_reduce_implementation, "direct")
+        self.assertEqual(profile.dp_all_reduce_implementation, "direct2")
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "experiment"
             manifest = materialize(profile_path, output)
@@ -179,7 +179,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             overrides = system["all-reduce-implementation-per-group"]
             # Global native algorithms are untouched; only DP groups differ.
             self.assertEqual(system["all-reduce-implementation"], ["ring"])
-            self.assertEqual(set(overrides.values()), {"direct"})
+            self.assertEqual(set(overrides.values()), {"direct2"})
             # Every overridden group is exactly one DP group: dp-many members,
             # one per tensor-parallel position, spanning distinct leaves.
             self.assertEqual(len(overrides), profile.tp * profile.pp)
@@ -193,8 +193,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 manifest["collective_implementations"],
                 {
                     "default_all_reduce": "ring",
-                    "dp_all_reduce": "direct",
-                    "dp_fan_in": profile.dp - 1,
+                    "dp_all_reduce": "direct2",
+                    "dp_fan_in": 2,
                 },
             )
 

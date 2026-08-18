@@ -12,6 +12,19 @@
   "pp_bytes": 0,
   "dp_all_reduce_bytes": 68359375,
   "seed": 314159265,
+  "clr_schedule": {
+    "kind": "explicit_critical_steps",
+    "critical_steps": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9
+    ]
+  },
   "selection_policy": {
     "p_low": 0.005,
     "p_high": 0.1

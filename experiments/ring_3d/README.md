@@ -81,18 +81,41 @@ reference uses one-based steps 1, 2, 153, and 166: this is the exact 186-step
 mapping produced by the old 1,860-round schedule's index-scaling rule.
 
 Every 20-step comparison profile pins the explicit schedule
-`critical_steps: [1, 2, 3, 4, 5, 6, 7, 9]` — the deterministic quantization
-of the default decay-and-spike curve at threshold $P \geq 0.5$. Sampling the
-mask was correct in expectation but wrong in any single 20-step draw: the
-Bernoulli sample has high variance at that length, and the seed-314159265
-draw marked *half* the run critical, including the final step — contradicting
-the converged-tail premise the policy's claim rests on and coupling the mask
-shape to the comparison seed. Pinning removes mask sampling from seed
-variance entirely: successive seeds now vary only the ns-3 random streams
-and the per-flow selection draws, and the policy is guaranteed permissive
-from step 10 onward, where the step-18 microburst fires. The sampled mode
-remains for exploration and for step counts long enough for the curve to
-express itself.
+`critical_steps: [1, 2, 3, 20]`, derived from the training-dynamics
+literature rather than from a sampled curve (the full evidence record with
+verbatim citations lives in
+[docs/agents/clr-schedule-evidence.md](../../docs/agents/clr-schedule-evidence.md)):
+
+- **Steps 1–3 (launch window, 15% of the run).** Bare LR warmup in modern
+  LLM runs is only 0.1–4% of steps (Llama 3, DeepSeek-V3, OLMo 2, GLM-130B),
+  but fragility to gradient-information loss lasts longer: DGC holds back
+  sparsification for ~2.4% of the run because early gradients are "diverse
+  and aggressive", 1-bit Adam runs full-precision for 15–20% of steps, and
+  the vision-era critical-period window spans 5–30%. Three of twenty steps
+  sits in the center of those independent bands. The DBLP paper's own
+  phase-tolerance findings are deliberately excluded from this derivation:
+  DBLP is the system under test, so its claims are the hypothesis here,
+  never the evidence.
+- **Step 20 (annealing hedge, moderate evidence).** The end-of-run
+  decay/annealing phase drives outsized quality gains at 7B–70B scale
+  (MiniCPM's WSD decay-phase loss dive; OLMo 2's midtraining, +10.6 points
+  at 7B) and a documented late-run gradient-norm blow-up gives a second
+  independent reason for caution; Llama 3 found annealing gains negligible
+  at 405B, so this step is a scale-dependent hedge, stated as such.
+- **No mid-run critical steps, no epoch spikes.** LLM pretraining is ~1
+  epoch (GPT-3, Chinchilla, LLaMA), so epoch boundaries — the sampled
+  model's spike term — name an event that does not exist in the modeled
+  workload. Mid-run loss spikes are real (PaLM, OLMo 2) but are
+  state-dependent events at irregular positions that a static mask cannot
+  encode, and no 2023–2026 source measures corruption damage as a function
+  of run position.
+
+Pinning also removes mask sampling from seed variance entirely: successive
+seeds vary only the ns-3 random streams and the per-flow selection draws,
+and the policy is guaranteed permissive across steps 4–19, where the
+step-18 microburst fires. The sampled decay-and-spike mode remains for
+exploration and for multi-epoch workloads where its spike term has a
+referent.
 
 Generate only the immutable schedule with:
 

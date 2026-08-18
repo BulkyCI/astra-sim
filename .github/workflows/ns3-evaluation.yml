@@ -327,6 +327,9 @@ jobs:
         status: ${{ inputs.comparison && needs.evaluate_cluster.result || needs.evaluate.result }}
 
     - name: Archive the reproducibility bundle permanently
+      # A ledger failure must not cost the archive: each recording channel
+      # is best-effort on its own. Cancellation still stops the job.
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
         tag: ${{ inputs.release_tag }}

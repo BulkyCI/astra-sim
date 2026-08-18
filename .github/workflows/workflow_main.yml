@@ -262,6 +262,9 @@ jobs:
         status: ${{ needs.native-integration.result }}
 
     - name: Archive the 3D Ring smoke bundle
+      # A ledger failure must not cost the archives, and an earlier archive's
+      # failure must not cost the later ones. Cancellation still stops the job.
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
         tag: ${{ needs.ledger.outputs.release_tag }}
@@ -269,6 +272,9 @@ jobs:
         asset-name: ring-3d-smoke-results
 
     - name: Archive the retry-exhaustion bundle
+      # A ledger failure must not cost the archives, and an earlier archive's
+      # failure must not cost the later ones. Cancellation still stops the job.
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
         tag: ${{ needs.ledger.outputs.release_tag }}
@@ -276,6 +282,9 @@ jobs:
         asset-name: ring-3d-retry-exhaustion
 
     - name: Archive the Llama 3 70B-class bucket trace
+      # A ledger failure must not cost the archives, and an earlier archive's
+      # failure must not cost the later ones. Cancellation still stops the job.
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
         tag: ${{ needs.ledger.outputs.release_tag }}

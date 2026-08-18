@@ -150,6 +150,9 @@ jobs:
         status: ${{ needs.aggregate.result }}
 
     - name: Archive the aggregate bundle
+      # A ledger failure must not cost the archive: each recording channel
+      # is best-effort on its own. Cancellation still stops the job.
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
         tag: ${{ inputs.release_tag }}

@@ -70,13 +70,42 @@ runs:
         exit 0
       fi
 
+      # Every asset is its own best-effort attempt: a multi-gigabyte upload
+      # can die mid-flight (token expiry, API timeout) and there is no
+      # workaround for that today, so one dead asset must never forfeit the
+      # rest of the record. Bounded retries per asset, then move on.
+      uploaded=0
+      failed=0
+      upload() {
+        local path=$1 label=$2 attempt
+        for attempt in 1 2 3; do
+          if gh release upload "$RELEASE_TAG" "$path" --clobber \
+              --repo "$REPOSITORY"; then
+            echo "Archived \`${label}\` ($(du -h "$path" | cut -f1)) to" \
+              "release \`${RELEASE_TAG}\`." >> "$GITHUB_STEP_SUMMARY"
+            uploaded=$(( uploaded + 1 ))
+            return 0
+          fi
+          echo "upload attempt ${attempt}/3 failed for ${label}" >&2
+          sleep "${RETRY_DELAY_SECONDS:-15}"
+        done
+        echo "::warning::${label} failed to upload after 3 attempts;" \
+          "it survives only in the run's Actions artifact"
+        echo "FAILED to archive \`${label}\`; it survives only in the run's" \
+          "Actions artifact." >> "$GITHUB_STEP_SUMMARY"
+        failed=$(( failed + 1 ))
+        return 0
+      }
+
       # Partition by size. Large files ship as their own assets, byte for
       # byte as the run produced them - the raw zstd stream must never be
       # compressed a second time - while small files travel together in one
       # tarball. GitHub hard-caps a single asset at 2 GiB: a larger file
       # cannot be carried at all, so it is warned about and left to the
-      # run's Actions artifact rather than failing the archive.
+      # run's Actions artifact rather than failing the archive. Staging is
+      # a rename, so the tarball below sees only the small remainder.
       asset_cap=2147483648
+      large_files=""
       while IFS= read -r -d '' file; do
         rel="${file#"$source"/}"
         size="$(stat -c %s "$file")"
@@ -91,21 +120,34 @@ runs:
         # Asset names are flat; encode the in-bundle path into the name.
         name="${ASSET_NAME}--${rel//\//__}"
         mv "$file" "${ARCHIVE_ROOT}/${name}"
-        echo "large asset: ${name} ($(( size / 2**20 )) MiB)"
-        gh release upload "$RELEASE_TAG" "${ARCHIVE_ROOT}/${name}" \
-          --clobber --repo "$REPOSITORY"
-        echo "Archived \`${name}\` ($(( size / 2**20 )) MiB) to release" \
-          "\`${RELEASE_TAG}\`." >> "$GITHUB_STEP_SUMMARY"
+        large_files+="${size} ${name}"$'\n'
       done < <(find "$source" -type f -size +100M -print0)
 
+      # Priority order: the small-file tarball first - reports and
+      # summaries are the record's irreplaceable core and must land before
+      # any risky multi-gigabyte transfer - then large assets smallest
+      # first, so a mid-run death forfeits the fewest bytes.
       asset="${ARCHIVE_ROOT}/${ASSET_NAME}.tar.gz"
       tar -czf "$asset" -C "$source" .
       du -h "$asset" | cut -f1 | xargs echo "bundle asset size:"
+      # `--clobber` inside upload() makes a re-run idempotent: assets are
+      # replaced in place rather than rejected as duplicate names.
+      upload "$asset" "${ASSET_NAME}.tar.gz"
 
-      # `--clobber` is what makes a re-run idempotent: the asset is replaced in
-      # place rather than rejected as a duplicate name.
-      gh release upload "$RELEASE_TAG" "$asset" --clobber --repo "$REPOSITORY"
+      while read -r size name; do
+        [[ -n "$name" ]] || continue
+        echo "large asset: ${name} ($(( size / 2**20 )) MiB)"
+        upload "${ARCHIVE_ROOT}/${name}" "${name}"
+      done < <(printf '%s' "$large_files" | sort -n)
 
-      size="$(du -h "$asset" | cut -f1)"
-      echo "Archived \`${ASSET_NAME}.tar.gz\` (${size}) to release \
-      \`${RELEASE_TAG}\`." >> "$GITHUB_STEP_SUMMARY"
+      echo "archive complete: ${uploaded} uploaded, ${failed} failed"
+      if (( failed > 0 && uploaded == 0 )); then
+        # Nothing landed at all: that is systemic, not a flaky asset, and
+        # deserves a red step so the run gets re-attempted.
+        echo "::error::no asset reached the release for ${ASSET_NAME}"
+        exit 1
+      fi
+      if (( failed > 0 )); then
+        echo "::warning::${failed} asset(s) missing from the release for" \
+          "${ASSET_NAME}; everything else was archived"
+      fi

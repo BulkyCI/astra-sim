@@ -104,6 +104,44 @@ BYTE_METRICS = {
     "total_physical_bytes",
 }
 
+# One terse sentence per metric codeword, rendered as a report appendix so a
+# reader can decode every table row without leaving the page.
+METRIC_GLOSSARY = {
+    "makespan_ns": (
+        "Latest rank-completion time across all ranks: simulated whole-"
+        "workload wall clock, not a measured application JCT."
+    ),
+    "dp_all_reduce_collective_per_rank_p99_ns": (
+        "p99 over per-rank DP All-Reduce latencies, native collective issue "
+        "to native completion, one sample per rank per collective."
+    ),
+    "dp_all_reduce_collective_operation_span_p99_ns": (
+        "p99 over whole-collective spans, max(end) - min(start) across all "
+        "ranks of one DP All-Reduce: how long the slowest collective held "
+        "the group."
+    ),
+    "all_qp_fct_p99_ns": (
+        "p99 flow-completion time over every simulated RDMA QP. Secondary "
+        "transport diagnostic: shed payloads re-enter as 64 B provenance "
+        "QPs, so shedding itself shifts this population."
+    ),
+    "foreground_logical_operation_physical_bytes": (
+        "Physical wire bytes of foreground logical operations (collectives "
+        "and PP transfers); excludes background microburst traffic."
+    ),
+    "dp_all_reduce_physical_bytes": (
+        "Physical wire bytes of DP All-Reduce traffic alone: the only "
+        "traffic shedding is allowed to touch."
+    ),
+    "total_physical_bytes": (
+        "Physical wire bytes of all offered traffic, foreground plus "
+        "background."
+    ),
+}
+assert METRIC_GLOSSARY.keys() == METRICS.keys(), (
+    "every comparison metric needs exactly one glossary sentence"
+)
+
 
 def compare_summaries(
     baseline: dict[str, Any], policy: dict[str, Any]
@@ -525,6 +563,15 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
             "secondary transport diagnostic. Physical-byte reductions are reported against foreground, DP, "
             "and total offered traffic. Do not interpret a single seed or a confidence interval spanning zero "
             "as evidence of a performance benefit.",
+            "",
+            "## Appendix: metric codewords",
+            "",
+            "| Codeword | Meaning |",
+            "| --- | --- |",
+            *(
+                f"| `{name}` | {meaning} |"
+                for name, meaning in METRIC_GLOSSARY.items()
+            ),
             "",
         ]
     )

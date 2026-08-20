@@ -239,12 +239,15 @@ jobs:
     - name: Start the mid-run segment uploader
       env:
         # On self-hosted runners the job token refreshes for at most 24
-        # hours, so a multi-day arm outlives it and mid-run uploads start
-        # failing with 401s on day two (the uploader degrades gracefully:
-        # segments accumulate and the archive job sweeps them). Providing
-        # the optional DCS_RELEASE_TOKEN secret - a fine-grained PAT with
-        # contents:write on this repository - removes that ceiling; when
-        # absent, the expression falls back to the job token.
+        # hours, so a multi-day arm outlives it. On the first credential
+        # failure the uploader exits gracefully - a dead token never
+        # comes back, so retrying is noise - and every remaining segment
+        # rides the bundle to the archive job, which runs with a fresh
+        # token and sweeps stragglers under identical asset names.
+        # Providing the optional DCS_RELEASE_TOKEN secret - a
+        # fine-grained PAT with contents:write on this repository -
+        # removes the 24 h ceiling; when absent, the expression falls
+        # back to the job token.
         GH_TOKEN: ${{ secrets.DCS_RELEASE_TOKEN || github.token }}
         RELEASE_TAG: ${{ inputs.release_tag }}
         ASSET_PREFIX: ${{ inputs.artifact_name }}

@@ -279,8 +279,23 @@ def main():
             try:
                 client.resolve_release()
                 resolved = True
+            except urllib.error.HTTPError as error:
+                kind, wait = classify_http_error(error.code, error.headers)
+                if kind == CREDENTIAL:
+                    log(
+                        "credential failure (HTTP {}) resolving the "
+                        "release: the job token has expired (24 h ceiling "
+                        "on self-hosted runners); exiting - the archive "
+                        "job collects everything with a fresh token".format(
+                            error.code
+                        )
+                    )
+                    return 0
+                extra_backoff = wait
+                log("release lookup failed (HTTP {}), will retry".format(
+                    error.code))
             except Exception as error:  # noqa: BLE001 - stay alive
-                extra_backoff = _log_api_failure("release lookup", error)
+                log("release lookup failed, will retry: {}".format(error))
         shippable = []
         if resolved:
             try:
@@ -317,19 +332,26 @@ def main():
                     log("release id stale (HTTP 404); re-resolving")
                     break
                 if kind == CREDENTIAL:
+                    # A dead credential never comes back: the self-hosted
+                    # job token refreshes for at most 24 h, so a multi-day
+                    # run simply outlives it. Retrying is noise - exit
+                    # gracefully and leave every remaining segment on disk
+                    # for the archive job, which runs with a fresh token
+                    # and sweeps stragglers under identical asset names.
                     log(
-                        "credential failure (HTTP {}) on {}: self-hosted "
-                        "GITHUB_TOKEN refreshes for at most 24 h, so "
-                        "multi-day runs outlive it unless given a PAT; "
-                        "segments will accumulate and the archive job "
-                        "sweeps them at run end".format(error.code, name)
-                    )
-                else:
-                    log(
-                        "{} failed (HTTP {}), will retry: {}".format(
-                            name, error.code, error.reason
+                        "credential failure (HTTP {}) on {}: the job token "
+                        "has expired (24 h ceiling on self-hosted runners); "
+                        "exiting and leaving {} pending file(s) for the "
+                        "archive job".format(
+                            error.code, name, len(shippable) - shipped
                         )
                     )
+                    return 0
+                log(
+                    "{} failed (HTTP {}), will retry: {}".format(
+                        name, error.code, error.reason
+                    )
+                )
             except Exception as error:  # noqa: BLE001 - stay alive
                 failed += 1
                 log("{} failed, will retry: {}".format(name, error))
@@ -340,16 +362,6 @@ def main():
             return 0
         time.sleep(arguments.poll_seconds + extra_backoff)
 
-
-def _log_api_failure(operation, error):
-    """Log one API failure and return the backoff its class asks for."""
-    if isinstance(error, urllib.error.HTTPError):
-        kind, wait = classify_http_error(error.code, error.headers)
-        log("{} failed (HTTP {}, {}), will retry".format(
-            operation, error.code, kind))
-        return wait
-    log("{} failed, will retry: {}".format(operation, error))
-    return 0
 
 
 if __name__ == "__main__":

@@ -84,13 +84,15 @@ tears itself down after the 30-minute idle guard.
 
 ## Scratch tenancy
 
-A completed experiment leaves nothing on the shared scratch volume. Three
-mechanisms compose: the mid-run segment uploader ships sealed raw-log
-segments to the release and deletes them as the sim runs; the job's EXIT
-trap removes its entire `astra-runner-<jobid>` tree when the job ends for
-any reason that lets bash run; and every new job reaps orphaned sibling
-trees whose SLURM job id no longer exists — the backstop for node crashes
-and kills that outrun the trap. Only the control-plane files under
+A completed experiment leaves nothing on the shared scratch volume. All
+jobs live under one `astra-sim/<slurm job id>` parent per scratch base, so
+a full wave presents as a single directory. Three mechanisms compose: the
+mid-run segment uploader ships sealed raw-log segments to the release and
+deletes them as the sim runs; the job's EXIT trap removes its own tree
+(and the shared parent, when it is the last job out) whenever the job ends
+for any reason that lets bash run; and every new job reaps orphaned
+sibling trees whose SLURM job id no longer exists — the backstop for node
+crashes and kills that outrun the trap. Only the control-plane files under
 `~/astra-ci` (job logs, jitconfig staging) live outside scratch, and
 teardown below removes those.
 

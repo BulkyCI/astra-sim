@@ -59,11 +59,14 @@ newest_scratch_space() {
 # ENOSPC); /tmp is tmpfs billed to the job's memory limit (observed: the
 # OOM killer taking the simulator). The 16G ask is sized to survive the
 # tmpfs last resort.
+# One tidy parent per scratch base - astra-sim/<slurm job id> - so a
+# 16-job wave presents the lab as a single directory, not sixteen
+# scattered astra-* entries.
 dir=""
 for base in "${SLURM_TMPDIR:-}" "$(newest_scratch_space)" /var/tmp /tmp; do
     [[ -n "$base" ]] || continue
-    if mkdir -p "$base/astra-runner-$SLURM_JOB_ID" 2>/dev/null; then
-        dir="$base/astra-runner-$SLURM_JOB_ID"
+    if mkdir -p "$base/astra-sim/$SLURM_JOB_ID" 2>/dev/null; then
+        dir="$base/astra-sim/$SLURM_JOB_ID"
         break
     fi
 done
@@ -76,18 +79,26 @@ fi
 # one spelling, not two.
 dir=$(cd "$dir" && pwd -P)
 echo "scratch: $dir"
-cleanup() { rm -rf "$dir"; }
+# The trap also removes the shared astra-sim parent when this is the last
+# job out - non-empty is expected while siblings run, hence the ignore.
+cleanup() {
+    rm -rf "$dir"
+    rmdir --ignore-fail-on-non-empty "$(dirname "$dir")" 2>/dev/null || true
+}
 trap cleanup EXIT
 # Responsible tenancy: the EXIT trap wipes this job's tree, but a job that
 # dies without running it (node crash, OOM-killed shell, SIGKILL landing
 # before a multi-gigabyte NFS rm finishes its KillWait grace) leaves an
 # orphan the lab admin should never have to clean. Each new job therefore
-# reaps dead siblings: ours by prefix, dead iff SLURM no longer knows the
+# reaps dead siblings - numeric-id dirs under the shared parent, plus any
+# legacy astra-runner-* dir beside it - dead iff SLURM no longer knows the
 # job id. A live job always answers squeue, so this cannot touch a running
 # sibling; any other squeue failure skips the sweep - the next job retries.
-for sibling in "$(dirname "$dir")"/astra-runner-*; do
+for sibling in "$(dirname "$dir")"/* \
+               "$(dirname "$(dirname "$dir")")"/astra-runner-*; do
     [[ -d "$sibling" ]] || continue
-    sibling_id="${sibling##*astra-runner-}"
+    sibling_id="${sibling##*/}"
+    sibling_id="${sibling_id#astra-runner-}"
     [[ "$sibling_id" == "$SLURM_JOB_ID" ]] && continue
     [[ "$sibling_id" =~ ^[0-9]+$ ]] || continue
     if sibling_state=$(squeue -h -j "$sibling_id" -o %A 2>&1); then

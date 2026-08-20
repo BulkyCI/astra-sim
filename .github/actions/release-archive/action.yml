@@ -130,9 +130,21 @@ runs:
       asset="${ARCHIVE_ROOT}/${ASSET_NAME}.tar.gz"
       tar -czf "$asset" -C "$source" .
       du -h "$asset" | cut -f1 | xargs echo "bundle asset size:"
-      # `--clobber` inside upload() makes a re-run idempotent: assets are
-      # replaced in place rather than rejected as duplicate names.
-      upload "$asset" "${ASSET_NAME}.tar.gz"
+      # The remainder can itself cross the cap when a bundle holds many
+      # sub-100 MiB files (64 per-rank traces, say); a doomed upload is
+      # skipped loudly rather than attempted.
+      tar_size="$(stat -c %s "$asset")"
+      if (( tar_size >= asset_cap )); then
+        echo "::warning::${ASSET_NAME}.tar.gz ($(( tar_size / 2**20 )) MiB)" \
+          "exceeds the 2 GiB release-asset cap; small files survive only" \
+          "in the Actions artifact"
+        echo "Skipped \`${ASSET_NAME}.tar.gz\` ($(( tar_size / 2**20 )) MiB):" \
+          "over the 2 GiB release-asset cap." >> "$GITHUB_STEP_SUMMARY"
+      else
+        # `--clobber` inside upload() makes a re-run idempotent: assets are
+        # replaced in place rather than rejected as duplicate names.
+        upload "$asset" "${ASSET_NAME}.tar.gz"
+      fi
 
       while read -r size name; do
         [[ -n "$name" ]] || continue

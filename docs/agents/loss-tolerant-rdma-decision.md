@@ -127,7 +127,7 @@ in this decision run successfully:
 - sender timeout recovery reuses the existing go-back-$N$ path. Retry-budget
   exhaustion creates a failed QP telemetry row and terminates the simulation
   instead of manufacturing logical completion; and
-- `flow_events.csv`, `transport_events.csv.zst`, `transport_summary.csv`,
+- `flow_events.csv`, the `transport_events.csv.zst.NNN` raw segments (rotated near 1.8 GB so each stays under the 2 GiB release-asset cap), `transport_summary.csv`,
   analyzer summaries, and reports
   retain recovery counters and terminal outcomes.
 

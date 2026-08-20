@@ -201,8 +201,15 @@ jobs:
     # next enough headroom to report and upload; wall clocks are backstops,
     # not budgets - wedges die via the sim's forward-progress deadline.
     timeout-minutes: 6900
+    # contents:write is a deliberate relaxation of "the simulator job holds
+    # no write scope": the mid-run segment uploader must publish sealed raw
+    # segments to the release while the sim runs, or multi-day arms outgrow
+    # scratch and the 2 GiB asset cap. Mitigation: the token is placed only
+    # in the uploader step's environment - the build and simulation steps
+    # never receive it - though a same-user process could still read it out
+    # of the uploader's environment. Accepted and recorded.
     permissions:
-      contents: read
+      contents: write
     env:
       EXPERIMENT_PROFILE: ${{ inputs.profile }}
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
@@ -223,6 +230,28 @@ jobs:
 
     - name: Build the ns-3 backend with the rootless toolchain
       run: bash ci/dcs/build.sh
+
+    # Ships sealed raw-log segments to the release while the sim runs, so
+    # per-arm scratch stays near two segments (~3.6 GB) instead of the full
+    # multi-gigabyte stream. No IPC with the simulator: a segment is sealed
+    # exactly when a higher-numbered sibling exists on disk. SIGTERM means
+    # "the sim is done - drain everything and exit".
+    - name: Start the mid-run segment uploader
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        ASSET_PREFIX: ${{ inputs.artifact_name }}
+        WATCH_DIR: ${{ inputs.run_directory }}
+        REPOSITORY: ${{ github.repository }}
+      run: |
+        mkdir -p "$WATCH_DIR"
+        nohup python3 .github/scripts/segment_uploader.py \
+          --repo "$REPOSITORY" \
+          --release-tag "$RELEASE_TAG" \
+          --asset-prefix "$ASSET_PREFIX" \
+          --watch-dir "$WATCH_DIR" \
+          > "$RUNNER_TEMP/segment-uploader.log" 2>&1 &
+        echo $! > "$RUNNER_TEMP/segment-uploader.pid"
 
     - name: Run the full paired comparison
       # Inputs cross into the shell as environment data, never as text
@@ -247,6 +276,22 @@ jobs:
           command+=(--seeds "$COMPARISON_SEED")
         fi
         timeout --foreground "${EXECUTION_TIMEOUT_MINUTES}m" "${command[@]}"
+
+    # The sim has exited, so every segment on disk is final. Drain before
+    # the bundle upload below walks the directory, or the uploader could
+    # delete files mid-scan. Bounded wait; job teardown reaps a straggler.
+    - name: Drain and stop the segment uploader
+      if: ${{ always() }}
+      run: |
+        pid="$(cat "$RUNNER_TEMP/segment-uploader.pid" 2>/dev/null)" || exit 0
+        if kill -TERM "$pid" 2>/dev/null; then
+          for _ in $(seq 1 120); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 5
+          done
+        fi
+        echo "--- segment uploader log ---"
+        cat "$RUNNER_TEMP/segment-uploader.log" 2>/dev/null || true
 
     - name: Publish paired comparison report
       if: ${{ always() }}

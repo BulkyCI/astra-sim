@@ -1591,8 +1591,15 @@ def materialize(
         "clr_mask": str(clr_mask.resolve()),
         "clr_schedule": schedule_metadata(clr_schedule),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
+        # The raw stream is written as numbered zstd segments rotated near
+        # 1.8 GB so each ships under the 2 GiB release-asset cap; segment
+        # .000 always exists, and `cat <base>.*  | zstd -d` reconstructs
+        # the exact single-file CSV. The recorded path is the family base.
         "transport_event_file": str(
             (output_dir / "ns3" / "transport_events.csv.zst").resolve()
+        ),
+        "transport_event_first_segment": str(
+            (output_dir / "ns3" / "transport_events.csv.zst.000").resolve()
         ),
         "transport_event_summary_file": str(
             (output_dir / "ns3" / "transport_summary.csv").resolve()

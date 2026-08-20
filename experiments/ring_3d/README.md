@@ -256,7 +256,7 @@ group 1. Generated network configurations enable strict ACK/NACK priority
 independently of whether configured data impairment is active. Queue 0 has
 strict scheduling but no capacity-reservation claim; its observed drops are
 totaled in `transport_summary.csv`, with per-packet timing retained in the
-raw `transport_events.csv.zst`. Step 2 also triggers deterministic
+raw `transport_events.csv.zst.NNN` segments (`cat`+`zstd -d` reconstructs the single stream). Step 2 also triggers deterministic
 cross-rack RDMA microbursts on the same modeled host/RDMA path.
 
 ## Tests

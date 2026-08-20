@@ -37,6 +37,47 @@ import urllib.request
 
 SEGMENT_PATTERN = re.compile(r"^(?P<base>.+\.zst)\.(?P<index>\d{3,})$")
 
+# GitHub's documented failure surface, mapped to what we do about it.
+# Duplicates are REJECTED, never overwritten ("you'll receive an error and
+# must delete the old file before you can re-upload"), an interrupted
+# upload "may leave an empty asset with a state of `starter`" that "can be
+# safely deleted", and on self-hosted runners the GITHUB_TOKEN "can only
+# be refreshed for up to 24 hours" - multi-day jobs outlive it unless
+# handed a longer-lived credential.
+RETRY_NOW = "retry_now"  # transient; retry on the normal poll cycle
+RATE_LIMITED = "rate_limited"  # back off as instructed, then retry
+CREDENTIAL = "credential"  # token dead or scope lost; long backoff, warn
+STALE_RELEASE = "stale_release"  # release id no longer valid; re-resolve
+DUPLICATE = "duplicate"  # name exists remotely; verify-or-replace
+
+
+def classify_http_error(status, headers):
+    """Map an HTTP status (+ response headers) to a recovery strategy.
+
+    Pure and total: every integer status maps to exactly one strategy.
+    Returns (kind, backoff_seconds); backoff 0 means the caller's normal
+    cadence applies.
+    """
+    retry_after = 0
+    if headers is not None:
+        try:
+            retry_after = int(headers.get("Retry-After", "0"))
+        except (TypeError, ValueError):
+            retry_after = 0
+    if status == 422:
+        return DUPLICATE, 0
+    if status == 404:
+        return STALE_RELEASE, 0
+    if status in (401,):
+        return CREDENTIAL, 900
+    if status in (403, 429):
+        # 403 is both "forbidden" and GitHub's secondary rate limit; a
+        # Retry-After header disambiguates toward the rate limiter.
+        if retry_after > 0:
+            return RATE_LIMITED, min(retry_after, 3600)
+        return (CREDENTIAL, 900) if status == 403 else (RATE_LIMITED, 60)
+    return RETRY_NOW, 0
+
 # ---------------------------------------------------------------------------
 # Pure core: the sealing algebra. No I/O below this line's functions.
 # ---------------------------------------------------------------------------
@@ -160,8 +201,15 @@ class ReleaseClient:
             )
 
     def upload_idempotent(self, path, name):
-        """Upload; on a name collision from an earlier partial attempt,
-        replace the remote asset unless it already matches our size."""
+        """Upload with the documented duplicate semantics handled.
+
+        GitHub rejects duplicate names outright, and an interrupted
+        upload can leave a broken remote asset in state ``starter`` or
+        ``open`` that must be deleted before retrying. On 422 we
+        therefore inspect the remote: a same-size asset in state
+        ``uploaded`` is the kill-before-confirmation case - the earlier
+        transfer actually completed - and counts as success; anything
+        else is a corpse to delete and replace."""
         try:
             self.upload(path, name)
             return True
@@ -224,29 +272,84 @@ def main():
     )
     while True:
         drain_now = draining["flag"]
-        try:
-            if not resolved:
+        # The extra backoff is the maximum the cycle's failures asked for;
+        # it stretches, never replaces, the normal poll cadence.
+        extra_backoff = 0
+        if not resolved:
+            try:
                 client.resolve_release()
                 resolved = True
-            shippable = sealed_segments(
-                walk_segments(arguments.watch_dir), drain=drain_now
-            )
-            for relative in shippable:
-                full = os.path.join(arguments.watch_dir, relative)
-                name = asset_name(arguments.asset_prefix, relative)
+            except Exception as error:  # noqa: BLE001 - stay alive
+                extra_backoff = _log_api_failure("release lookup", error)
+        shippable = []
+        if resolved:
+            try:
+                shippable = sealed_segments(
+                    walk_segments(arguments.watch_dir), drain=drain_now
+                )
+            except OSError as error:
+                log("directory walk failed, will retry: {}".format(error))
+        shipped = 0
+        failed = 0
+        for relative in shippable:
+            full = os.path.join(arguments.watch_dir, relative)
+            name = asset_name(arguments.asset_prefix, relative)
+            # Per-segment isolation: one poisoned segment must never
+            # starve its siblings. Files are removed only after a
+            # positively confirmed remote copy, so every failure path
+            # leaves the segment on disk for this or a later sweep (the
+            # archive job re-ships stragglers under identical names).
+            try:
                 size_mib = os.path.getsize(full) // 2**20
                 log("uploading {} ({} MiB)".format(name, size_mib))
                 client.upload_idempotent(full, name)
                 os.remove(full)
+                shipped += 1
                 log("shipped and removed {}".format(relative))
-        except Exception as error:  # noqa: BLE001 - stay alive on any failure
-            # Best effort by contract: a failed cycle leaves every file on
-            # disk untouched and the next cycle retries from scratch.
-            log("cycle failed, will retry: {}".format(error))
+            except urllib.error.HTTPError as error:
+                failed += 1
+                kind, wait = classify_http_error(error.code, error.headers)
+                extra_backoff = max(extra_backoff, wait)
+                if kind == STALE_RELEASE:
+                    # The release was recreated or deleted; the cached id
+                    # is dead. Stop the pass and re-resolve next cycle.
+                    resolved = False
+                    log("release id stale (HTTP 404); re-resolving")
+                    break
+                if kind == CREDENTIAL:
+                    log(
+                        "credential failure (HTTP {}) on {}: self-hosted "
+                        "GITHUB_TOKEN refreshes for at most 24 h, so "
+                        "multi-day runs outlive it unless given a PAT; "
+                        "segments will accumulate and the archive job "
+                        "sweeps them at run end".format(error.code, name)
+                    )
+                else:
+                    log(
+                        "{} failed (HTTP {}), will retry: {}".format(
+                            name, error.code, error.reason
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001 - stay alive
+                failed += 1
+                log("{} failed, will retry: {}".format(name, error))
+        if shipped or failed:
+            log("cycle: {} shipped, {} pending retry".format(shipped, failed))
         if drain_now:
-            log("drain complete; exiting")
+            log("drain complete ({} left for the bundle); exiting".format(failed))
             return 0
-        time.sleep(arguments.poll_seconds)
+        time.sleep(arguments.poll_seconds + extra_backoff)
+
+
+def _log_api_failure(operation, error):
+    """Log one API failure and return the backoff its class asks for."""
+    if isinstance(error, urllib.error.HTTPError):
+        kind, wait = classify_http_error(error.code, error.headers)
+        log("{} failed (HTTP {}, {}), will retry".format(
+            operation, error.code, kind))
+        return wait
+    log("{} failed, will retry: {}".format(operation, error))
+    return 0
 
 
 if __name__ == "__main__":

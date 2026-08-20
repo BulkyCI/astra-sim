@@ -65,5 +65,40 @@ class AssetNameTests(unittest.TestCase):
         )
 
 
+
+class ClassifyHttpErrorTests(unittest.TestCase):
+    def test_total_over_the_status_space(self) -> None:
+        from segment_uploader import classify_http_error
+        for status in (200, 301, 400, 401, 403, 404, 409, 422, 429, 500, 502, 599):
+            kind, wait = classify_http_error(status, None)
+            self.assertIsInstance(kind, str)
+            self.assertGreaterEqual(wait, 0)
+
+    def test_documented_semantics(self) -> None:
+        from segment_uploader import (
+            CREDENTIAL, DUPLICATE, RATE_LIMITED, RETRY_NOW, STALE_RELEASE,
+            classify_http_error,
+        )
+        self.assertEqual(classify_http_error(422, None)[0], DUPLICATE)
+        self.assertEqual(classify_http_error(404, None)[0], STALE_RELEASE)
+        self.assertEqual(classify_http_error(401, None), (CREDENTIAL, 900))
+        self.assertEqual(classify_http_error(403, None), (CREDENTIAL, 900))
+        self.assertEqual(
+            classify_http_error(403, {"Retry-After": "120"}),
+            (RATE_LIMITED, 120),
+        )
+        self.assertEqual(classify_http_error(429, None), (RATE_LIMITED, 60))
+        self.assertEqual(classify_http_error(502, None), (RETRY_NOW, 0))
+
+    def test_retry_after_is_capped_and_parsed_defensively(self) -> None:
+        from segment_uploader import RATE_LIMITED, classify_http_error
+        self.assertEqual(
+            classify_http_error(429, {"Retry-After": "999999"}),
+            (RATE_LIMITED, 3600),
+        )
+        # A malformed header never crashes classification.
+        kind, wait = classify_http_error(429, {"Retry-After": "soon"})
+        self.assertEqual((kind, wait), (RATE_LIMITED, 60))
+
 if __name__ == "__main__":
     unittest.main()

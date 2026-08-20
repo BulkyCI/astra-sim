@@ -56,6 +56,7 @@ runs:
       ARCHIVE_ROOT: ${{ runner.temp }}/archive
       SOURCE_DIRECTORY: ${{ inputs.source-directory }}
       REPOSITORY: ${{ github.repository }}
+      BATCH_PLANNER: ${{ github.action_path }}/../../scripts/batch_planner.py
     run: |
       set -euo pipefail
 
@@ -99,11 +100,12 @@ runs:
 
       # Partition by size. Large files ship as their own assets, byte for
       # byte as the run produced them - the raw zstd stream must never be
-      # compressed a second time - while small files travel together in one
-      # tarball. GitHub hard-caps a single asset at 2 GiB: a larger file
-      # cannot be carried at all, so it is warned about and left to the
-      # run's Actions artifact rather than failing the archive. Staging is
-      # a rename, so the tarball below sees only the small remainder.
+      # compressed a second time - while small files travel in bounded
+      # tar batches planned below. GitHub hard-caps a single asset at
+      # 2 GiB: a larger file cannot be carried at all, so it is warned
+      # about and left to the run's Actions artifact rather than failing
+      # the archive. Staging is a rename, so the batches see only the
+      # small remainder.
       asset_cap=2147483648
       large_files=""
       while IFS= read -r -d '' file; do
@@ -121,31 +123,66 @@ runs:
         name="${ASSET_NAME}--${rel//\//__}"
         mv "$file" "${ARCHIVE_ROOT}/${name}"
         large_files+="${size} ${name}"$'\n'
-      done < <(find "$source" -type f -size +100M -print0)
+      done < <(find "$source" -type f \
+        \( -size +100M -o -name '*.zst.[0-9][0-9][0-9]*' \) -print0)
+      # Raw-log segments are matched by name, not size: the mid-run
+      # uploader owns them and normally ships and deletes every one, but
+      # a straggler that survived a failed drain must still become an
+      # individual asset - under the exact name the uploader would have
+      # used - never a batch member, or a piece of the reconstructable
+      # stream would hide inside a part tarball. This keeps the two
+      # components' domains disjoint: segments are individual assets
+      # always; the batch planner sees only what is left.
 
       # Priority order: the small-file tarball first - reports and
       # summaries are the record's irreplaceable core and must land before
       # any risky multi-gigabyte transfer - then large assets smallest
       # first, so a mid-run death forfeits the fewest bytes.
-      asset="${ARCHIVE_ROOT}/${ASSET_NAME}.tar.gz"
-      tar -czf "$asset" -C "$source" .
-      du -h "$asset" | cut -f1 | xargs echo "bundle asset size:"
-      # The remainder can itself cross the cap when a bundle holds many
-      # sub-100 MiB files (64 per-rank traces, say); a doomed upload is
-      # skipped loudly rather than attempted.
-      tar_size="$(stat -c %s "$asset")"
-      if (( tar_size >= asset_cap )); then
-        echo "::warning::${ASSET_NAME}.tar.gz ($(( tar_size / 2**20 )) MiB)" \
-          "exceeds the 2 GiB release-asset cap; small files survive only" \
-          "in the Actions artifact"
-        echo "Skipped \`${ASSET_NAME}.tar.gz\` ($(( tar_size / 2**20 )) MiB):" \
-          "over the 2 GiB release-asset cap." >> "$GITHUB_STEP_SUMMARY"
-      else
-        # `--clobber` inside upload() makes a re-run idempotent: assets are
-        # replaced in place rather than rejected as duplicate names.
-        upload "$asset" "${ASSET_NAME}.tar.gz"
-      fi
+      # The small remainder ships in input-bounded batches: cost(file) =
+      # size + 2 KiB tar overhead, batches capped at 1.5e9 input bytes.
+      # gzip's stored-block worst case inflates under 0.04%, so every
+      # `partNNN.tar.gz` is provably under the 2 GiB asset cap - a bound
+      # by construction, not a runtime check. Batch composition follows
+      # lexicographic path order, so re-runs produce identical parts and
+      # a directory's files stay together. Paths live inside the tar in
+      # tar's own language; the `partNNN.contents.txt` beside each part
+      # is derived from the sealed archive (`tar -tzf`), never
+      # authoritative - regenerable by anyone, lost without loss.
+      batch_dir="${ARCHIVE_ROOT}/batches"
+      mkdir -p "$batch_dir"
+      part_count="$( (cd "$source" && find . -type f -printf '%s\t%P\0') \
+        | python3 "$BATCH_PLANNER" --cap 1500000000 --overhead 2048 \
+            --output-dir "$batch_dir" )"
+      echo "small files planned into ${part_count} batch(es)"
 
+      part_index=0
+      while (( part_index < part_count )); do
+        printf -v part 'part%03d' "$part_index"
+        part_asset="${ARCHIVE_ROOT}/${ASSET_NAME}.${part}.tar.gz"
+        tar -czf "$part_asset" -C "$source" --null \
+          --files-from "${batch_dir}/${part}.files"
+        tar -tzf "$part_asset" > "${ARCHIVE_ROOT}/${ASSET_NAME}.${part}.contents.txt"
+        part_index=$(( part_index + 1 ))
+      done
+
+      # Upload order forfeits the least on a mid-flight death: the
+      # kilobyte listings first (the index of everything), then the
+      # batches smallest-first, then the large raw assets smallest-first.
+      part_index=0
+      while (( part_index < part_count )); do
+        printf -v part 'part%03d' "$part_index"
+        upload "${ARCHIVE_ROOT}/${ASSET_NAME}.${part}.contents.txt" \
+          "${ASSET_NAME}.${part}.contents.txt"
+        part_index=$(( part_index + 1 ))
+      done
+      while read -r size path; do
+        [[ -n "$path" ]] || continue
+        echo "batch asset: ${path##*/} ($(( size / 2**20 )) MiB)"
+        upload "$path" "${path##*/}"
+      done < <(
+        find "$ARCHIVE_ROOT" -maxdepth 1 -name "${ASSET_NAME}.part*.tar.gz" \
+          -printf '%s %p\n' | sort -n
+      )
       while read -r size name; do
         [[ -n "$name" ]] || continue
         echo "large asset: ${name} ($(( size / 2**20 )) MiB)"

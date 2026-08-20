@@ -78,6 +78,27 @@ dir=$(cd "$dir" && pwd -P)
 echo "scratch: $dir"
 cleanup() { rm -rf "$dir"; }
 trap cleanup EXIT
+# Responsible tenancy: the EXIT trap wipes this job's tree, but a job that
+# dies without running it (node crash, OOM-killed shell, SIGKILL landing
+# before a multi-gigabyte NFS rm finishes its KillWait grace) leaves an
+# orphan the lab admin should never have to clean. Each new job therefore
+# reaps dead siblings: ours by prefix, dead iff SLURM no longer knows the
+# job id. A live job always answers squeue, so this cannot touch a running
+# sibling; any other squeue failure skips the sweep - the next job retries.
+for sibling in "$(dirname "$dir")"/astra-runner-*; do
+    [[ -d "$sibling" ]] || continue
+    sibling_id="${sibling##*astra-runner-}"
+    [[ "$sibling_id" == "$SLURM_JOB_ID" ]] && continue
+    [[ "$sibling_id" =~ ^[0-9]+$ ]] || continue
+    if sibling_state=$(squeue -h -j "$sibling_id" -o %A 2>&1); then
+        [[ -n "$sibling_state" ]] && continue
+        echo "reaping orphaned scratch: $sibling"
+        rm -rf "$sibling" || true
+    elif [[ "$sibling_state" == *"Invalid job id"* ]]; then
+        echo "reaping orphaned scratch: $sibling"
+        rm -rf "$sibling" || true
+    fi
+done
 # SLURM propagates the submitter's entire login environment into this job
 # (sbatch --export defaults to ALL), and every convention-following tool
 # derives its write paths from HOME and the XDG base dirs. Re-root both

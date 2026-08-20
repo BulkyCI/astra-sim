@@ -82,6 +82,18 @@ Cancelling an Actions job mid-run must end its SLURM job within a minute —
 that is the lifecycle contract working; a runner whose job never arrives
 tears itself down after the 30-minute idle guard.
 
+## Scratch tenancy
+
+A completed experiment leaves nothing on the shared scratch volume. Three
+mechanisms compose: the mid-run segment uploader ships sealed raw-log
+segments to the release and deletes them as the sim runs; the job's EXIT
+trap removes its entire `astra-runner-<jobid>` tree when the job ends for
+any reason that lets bash run; and every new job reaps orphaned sibling
+trees whose SLURM job id no longer exists — the backstop for node crashes
+and kills that outrun the trap. Only the control-plane files under
+`~/astra-ci` (job logs, jitconfig staging) live outside scratch, and
+teardown below removes those.
+
 ## Teardown
 
 Remove the `authorized_keys` line, delete the two GitHub secrets, and

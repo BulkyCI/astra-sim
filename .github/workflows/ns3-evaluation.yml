@@ -290,6 +290,11 @@ jobs:
             sleep 5
           done
         fi
+        # Past the bounded wait the uploader must be dead, not merely
+        # asked: a survivor deleting files while the bundle upload walks
+        # the directory would corrupt the artifact scan. Whatever it had
+        # not shipped rides the bundle and the archive job sweeps it.
+        kill -9 "$pid" 2>/dev/null || true
         echo "--- segment uploader log ---"
         cat "$RUNNER_TEMP/segment-uploader.log" 2>/dev/null || true
 

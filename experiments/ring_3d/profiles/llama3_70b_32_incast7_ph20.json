@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-llama3-70b-32-clos-incast7-ph20",
+  "parallelism": {
+    "tp": 8,
+    "pp": 1,
+    "dp": 4
+  },
+  "steps": 20,
+  "compute_duration_us": 5376,
+  "tp_all_reduce_bytes": 67108864,
+  "pp_bytes": 0,
+  "dp_all_reduce_bytes": 68359375,
+  "seed": 314159265,
+  "clr_schedule": {
+    "kind": "explicit_critical_steps",
+    "critical_steps": [
+      1,
+      2,
+      3,
+      20
+    ]
+  },
+  "dp_all_reduce_implementation": "direct2",
+  "selection_policy": {
+    "p_low": 0.005,
+    "p_high": 0.2
+  },
+  "network": {
+    "topology": "clos",
+    "hosts_per_leaf": 8,
+    "spine_count": 8,
+    "failed_spine_count": 0,
+    "link_rate": "400Gbps",
+    "packet_payload_bytes": 4096,
+    "queue_monitor_start_ns": 0,
+    "queue_monitor_interval_ns": 10000,
+    "fabric": {
+      "buffer_size_mb": 32,
+      "pfc_enabled": false,
+      "headroom_factor": 0,
+      "data_queue_bytes": 4194304,
+      "trimmed_queue_bytes": 1048576
+    },
+    "packet_trimming": {
+      "mode": "ftd"
+    },
+    "transport_recovery": {
+      "retransmission_timeout_ns": 1000000,
+      "max_retransmission_retries": 1024
+    }
+  },
+  "microburst_enabled": true,
+  "microburst_bytes": 134217728,
+  "microburst_flow_count": 7,
+  "microburst_destination_rank": 8,
+  "microburst_trigger_step": 18,
+  "microburst_offset_spacing_ns": 0,
+  "model": {
+    "parameter_count": 70000000000,
+    "parameter_dtype_bytes": 2,
+    "gradient_bucket_count": 256,
+    "transformer_layers": 80,
+    "hidden_size": 8192,
+    "sequence_length": 4096,
+    "microbatch_size": 1,
+    "activation_dtype_bytes": 2,
+    "tensor_parallel_all_reduces_per_layer": 2,
+    "gradient_accumulation_steps": 2
+  }
+}

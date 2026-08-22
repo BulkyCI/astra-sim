@@ -11,7 +11,7 @@
   "tp_all_reduce_bytes": 67108864,
   "pp_bytes": 0,
   "dp_all_reduce_bytes": 68359375,
-  "seed": 314159265,
+  "seed": 31415926,
   "clr_schedule": {
     "kind": "explicit_critical_steps",
     "critical_steps": [

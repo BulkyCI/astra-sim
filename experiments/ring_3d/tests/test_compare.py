@@ -86,7 +86,11 @@ class Ring3DComparisonTests(unittest.TestCase):
     def test_default_seeds_are_consecutive_pi_chunks(self) -> None:
         self.assertEqual(
             DEFAULT_SEEDS,
-            (314159265, 358979323, 846264338, 327950288, 419716939),
+            (
+                31415926, 53589793, 23846264, 33832795, 2884197, 16939937,
+                51058209, 74944592, 30781640, 62862089, 98628034, 82534211,
+                70679821, 48086513, 28230664, 70938446,
+            ),
         )
         profile = json.loads(
             (

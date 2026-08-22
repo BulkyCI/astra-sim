@@ -21,7 +21,7 @@ residual-loss tolerance comparison.
 
 The comparison also records all-QP FCT only as a transport diagnostic and physical-byte reduction relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It must not use a P99 of only admitted foreground QPs: selection changes that population and makes it a treatment-conditioned estimand.
 
-Positive paired reductions favor the policy. The report must include the mean, all five paired values, and a two-sided 95% t confidence interval. A confidence interval containing zero is inconclusive, not evidence of a benefit or a regression.
+Positive paired reductions favor the policy. The report must include the mean, all sixteen paired values, and a two-sided 95% t confidence interval. A confidence interval containing zero is inconclusive, not evidence of a benefit or a regression.
 
 ## Required raw-signal validity checks
 
@@ -71,13 +71,13 @@ Failures are reported as invalid or unavailable data; they are never silently re
 
 ## Conditions
 
-Run every primary condition with the five fixed paired seeds currently used by `compare.py`.
+Run every primary condition with the sixteen fixed paired seeds currently used by `compare.py`: consecutive 8-digit chunks of pi (31415926, 53589793, ...), taken in order with none screened or discarded, so the seed set is pre-registered rather than picked. Sixteen paired seeds shrink the paired-delta standard error to ~sigma/4 against the +/-3-4% ECMP path-collision noise floor that dominates p99 metrics.
 The historical Phase-1 native reference is the declared exception: it is one
 fixed-seed structural transport-scaling/reproducibility run, not a multi-seed
 primary policy result — its role is zero-recovery verification at scale, which
 any single arm provides, and its measured 2.75-hour arm makes a three-arm
 comparison arithmetically impossible inside the six-hour job ceiling. The
-always-on CI Llama condition schedules the five matched comparisons
+always-on CI Llama condition schedules the sixteen matched comparisons
 independently, then validates and aggregates their retained artifacts. Each
 comparison uses GitHub Actions' six-hour job limit, a 330-minute command guard,
 and a 14,400-second cap on each of its three ns-3 simulator arms; the guard
@@ -99,7 +99,7 @@ six-hour job for setup, reporting, and artifacts.
 | --- | --- | --- | --- |
 | Negative control | `profiles/no_incast_8.json`, fixed 0.5% versus phase-aware 0.5%/10% selection | Detect policy overhead in the absence of synthetic incast | Primary reductions should be near zero; a material benefit here indicates a confound or implementation error. |
 | Congested baseline | `profiles/llama3_70b_16.json`, fixed 0.5% selection | Establish congestion in the CI-scale Llama 3 70B-class condition | Require background traffic, a nonzero queue peak, and the fabric's buffer-pressure signature: completed PFC pause intervals on a lossless fabric, trimmed or naturally dropped packets on the profile's best-effort UEC-trimming fabric. |
-| Congested policy | `profiles/llama3_70b_16.json`, 0.5% CLR and 10% stable-convergence selection under the pinned explicit critical-step mask | Measure the phase-aware selection proxy under identical congestion input | Run five matched seeds and retain every primary estimand and physical-byte reduction; the mask is identical across seeds, so seed variance measures only the ns-3 streams and per-flow selection draws. |
+| Congested policy | `profiles/llama3_70b_16.json`, 0.5% CLR and 10% stable-convergence selection under the pinned explicit critical-step mask | Measure the phase-aware selection proxy under identical congestion input | Run sixteen matched seeds and retain every primary estimand and physical-byte reduction; the mask is identical across seeds, so seed variance measures only the ns-3 streams and per-flow selection draws. |
 | Fixed-high headroom arm | Every matched comparison, both phases at the permissive 10% bound including critical steps | Bound the relief an unbounded policy would take, so the phase-aware result reads as captured headroom rather than an unanchored gain | Runs inside every comparison seed; its CLR exposure is deliberate and never a policy configuration. Report relief and headroom side by side. |
 | Healthy-fabric episodic condition | `profiles/llama3_70b_32_direct.json`, $DP=4$ `direct2` (two-flow window) on a healthy 1:1 rail fabric | Bound the achievable benefit when steady-state load fits the fabric and congestion is purely episodic (microburst incast plus ECMP collisions) | One fixed-seed pair with the best-effort congestion gate; a near-zero relief here is expected and calibrates the degraded conditions rather than refuting the thesis. Run #110 showed the unwindowed `direct` form collapses this fabric organically ($\sim 1.2\times10^8$ trims with the burst disabled), which is why the window is part of the condition's definition. |
 | Degraded-fabric concurrency sweep | `profiles/llama3_70b_64_direct{1,2,4,}.json`, $DP=8$ with windows $\{1,2,4,7\}$ on a 1:1 fabric degraded by two failed spines (4:3 live) | Measure congestion and policy relief against DP transfer concurrency with the fabric held at the knee that spine failure produces | One fixed-seed pair per point under the best-effort congestion gate; treat the first `direct2` arm as the completion canary before trusting the matrix. In symmetric all-to-all a sender's NIC divides across its window, so the swept count changes flow structure and collision statistics rather than aggregate receiver load; the pure receiver-overload axis remains the microburst source count below. `fan_in_sweep.py` renders pressure and relief against the swept concurrency. |

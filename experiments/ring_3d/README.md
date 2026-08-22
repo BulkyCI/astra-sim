@@ -145,7 +145,7 @@ The claim under test is captured headroom: the policy's relief over the
 fixed-low control should approach the fixed-high ceiling while critical steps
 stay at the strict bound, which the fixed-high arm abandons. The report
 records the policy relief, the headroom, the experiment coordinates, and the
-raw per-arm congestion evidence. The default is five fixed seeds and it
+raw per-arm congestion evidence. The default is the sixteen pre-registered seeds - consecutive 8-digit chunks of pi taken in order, none screened - and it
 writes the individual run bundles, `comparison.json`, and
 `comparison_report.md`.
 
@@ -158,7 +158,7 @@ uv run --locked python experiments/ring_3d/compare.py \
 
 The comparison reports paired deltas for simulated makespan, native DP All-Reduce per-rank and all-rank-span P99 completion latency, all-QP P99 FCT as a transport diagnostic, and physical-byte reductions relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It deliberately does not compare the conditional admitted-foreground QP population because provenance-controlled selections would change that population. Positive reductions favor the current policy, but a confidence interval spanning zero is not evidence of benefit. `--require-congestion` makes the command fail unless every baseline and policy run records background traffic, a nonzero queue peak, at least one completed PFC pause interval, and an eligible native collective/FCT/terminal ledger. After calibration demonstrates actual packet loss, add `--require-finite-buffer-data-drop`; it additionally requires at least one data-plane switch admission or egress-queue rejection and does not treat PFC alone as loss evidence.
 
-The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the five comparisons independently and then validates and aggregates their artifacts. Each comparison runs three matched arms sequentially, every arm capped at 240 minutes, inside a 330-minute command guard; the hosted-job limit is 360 minutes, leaving 30 minutes for setup, build, reports, and artifacts. The guard bounds the arms' sum, so the budget assumes at most one arm runs near its cap — a livelocked arm instead fails within seconds through the transport forward-progress deadline. The separate historical Phase-1 reference runs concurrently as one structural arm; together with native integration and the two manually dispatched structural jobs, the workflow stays below the account-level concurrency limit of ten.
+The paired runner assigns every pair the same ns-3 random-stream seed and run number; each successive pair uses a different ns-3 run number. It records these values in `execution.json`. This makes paired baseline/policy comparisons reproducible while allowing independent ns-3 stochastic streams across seed runs. CI schedules the sixteen comparisons independently and then validates and aggregates their artifacts. Each comparison runs three matched arms sequentially, every arm capped at 240 minutes, inside a 330-minute command guard; the hosted-job limit is 360 minutes, leaving 30 minutes for setup, build, reports, and artifacts. The guard bounds the arms' sum, so the budget assumes at most one arm runs near its cap — a livelocked arm instead fails within seconds through the transport forward-progress deadline. The separate historical Phase-1 reference runs concurrently as one structural arm; together with native integration and the two manually dispatched structural jobs, the workflow stays below the account-level concurrency limit of ten.
 
 ## Historical Phase-1 64-rank native reference
 
@@ -180,7 +180,7 @@ phase-mask mapping. It does not recreate the original server's gradient-norm
 detector, packet-loss burst, bitmap recovery, or Stop/Probe control protocol.
 
 CI runs one fixed-seed structural run for this expensive native reference
-concurrently with the five Llama incast comparisons. Its scientific role —
+concurrently with the sixteen Llama incast comparisons. Its scientific role —
 zero-recovery transport verification at 5.999M queue pairs and reproduction of
 the historical trace shape — needs only a single arm, and its measured
 2.75-hour arm makes a three-arm matched comparison arithmetically impossible

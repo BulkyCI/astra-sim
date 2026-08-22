@@ -18,9 +18,17 @@ except ImportError:
     from run import fixed_p_low_baseline, run_experiment
 
 
-# Consecutive nine-digit chunks of π's decimal expansion. Keeping the CLI and
-# CI defaults identical makes local reruns exactly reproduce CI's seed sweep.
-DEFAULT_SEEDS = (314159265, 358979323, 846264338, 327950288, 419716939)
+# Consecutive 8-digit chunks of π's decimal expansion ("31415926",
+# "53589793", ...), taken in order with none screened or discarded — the
+# leading-zero chunk "02884197" simply parses to 2884197. Sixteen paired
+# seeds shrink the standard error of paired deltas to ~σ/4, which resolves
+# the ±3–4% ECMP path-collision noise floor on p99 metrics. Keeping the CLI
+# and CI defaults identical makes local reruns exactly reproduce CI's sweep.
+DEFAULT_SEEDS = (
+    31415926, 53589793, 23846264, 33832795, 2884197, 16939937,
+    51058209, 74944592, 30781640, 62862089, 98628034, 82534211,
+    70679821, 48086513, 28230664, 70938446,
+)
 T_CRITICAL_95 = {
     1: 12.706,
     2: 4.303,
@@ -895,7 +903,8 @@ def main() -> int:
         type=int,
         nargs="+",
         default=list(DEFAULT_SEEDS),
-        help="unique matched seeds; defaults to five fixed research seeds",
+        help="unique matched seeds; defaults to the sixteen 8-digit pi-chunk "
+        "research seeds",
     )
     parser.add_argument(
         "--require-congestion",

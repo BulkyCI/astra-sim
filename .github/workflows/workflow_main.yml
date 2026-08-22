@@ -361,7 +361,7 @@ jobs:
     secrets: inherit
 
   aggregate-llama3-evaluation:
-    name: Aggregate five-seed Llama 3 70B congestion evaluation
+    name: Aggregate sixteen-seed Llama 3 70B congestion evaluation
     needs: [ evaluations, ledger ]
     # `always()` so an unrelated arm's failure cannot skip this aggregation;
     # the exact artifact count inside the reusable workflow is the real gate.
@@ -371,10 +371,10 @@ jobs:
       issues: write
     uses: ./.github/workflows/evaluation-aggregate.yml
     with:
-      aggregate_name: Aggregate five-seed Llama 3 70B congestion evaluation
+      aggregate_name: Aggregate sixteen-seed Llama 3 70B congestion evaluation
       download_pattern: ring-3d-llama3-70b-16-comparison-seed-*-summary-${{ github.run_id }}
       download_directory: runs/ring_3d/llama3_70b_16_comparison/artifacts
-      expected_count: 5
+      expected_count: 16
       command_prefix: uv run --locked python experiments/ring_3d/compare.py --clean --aggregate-inputs
       output_directory: runs/ring_3d/llama3_70b_16_comparison/aggregate
       report_file: comparison_report.md

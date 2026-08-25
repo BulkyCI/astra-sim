@@ -62,7 +62,7 @@ permissions:
 jobs:
   aggregate:
     name: ${{ inputs.aggregate_name }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # The download pattern matches only the per-evaluation comparison
     # summaries - kilobytes each, by contract never the full bundles - so
     # this job finishes in minutes. The generous clock stays anyway: a
@@ -116,7 +116,7 @@ jobs:
     name: Record ${{ inputs.aggregate_name }}
     needs: aggregate
     if: ${{ always() }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # The aggregate bundle is small (rendered reports and sweep tables), but
     # sink jobs share one rule: artifact movement runs at the hosted ceiling
     # and inner steps own the real deadlines. A tight wall clock here is a

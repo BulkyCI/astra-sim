@@ -27,7 +27,7 @@ concurrency:
 jobs:
   ledger:
     name: Open the experiment ledger
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # Opens the run's release as well as its issue, so it needs contents:write.
     # It runs only `gh` and finishes in under a minute.
@@ -63,7 +63,7 @@ jobs:
 
   python-quality:
     name: Python tooling and experiment tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -91,7 +91,7 @@ jobs:
   native-build:
     name: Build the native backends
     needs: python-quality
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # A warm ccache build finishes in ~15 minutes, but the cache is evicted
     # after quiet weeks and the cold rebuild is an LTO link of ns-3 on four
     # hosted cores. 60 minutes sat close enough to a cold build to be a
@@ -135,7 +135,7 @@ jobs:
   native-integration:
     name: Analytical regression and ns-3 smoke
     needs: native-build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     # Runs compiled simulator code, so it holds no write scope. Recording
     # happens in archive-native-integration.
@@ -222,7 +222,7 @@ jobs:
     name: Record the analytical regression and ns-3 smoke
     needs: [ native-integration, ledger ]
     if: ${{ always() }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # Sink jobs run at the hosted ceiling: this one archives three bundles,
     # and the smoke bundles now carry raw transport streams whose size
     # scales with however long the smoke sims ran. Inner steps own the real
@@ -296,7 +296,7 @@ jobs:
     # Deliberately no upstream needs: every cluster arm waits on this job,
     # so it starts the moment the run does and the wave provisions as soon
     # as the bundles exist.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # One cold LTO build of ns-3 per cell on four hosted cores - the same
     # rationale as native-build's budget: double the coin-flip 60, and let
     # the build's own progress be the signal. The compiler cache brings
@@ -401,7 +401,7 @@ jobs:
     # A sink job off the critical path: blocks nothing, and skipping on
     # cancellation is the only way it does not run.
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: write
@@ -433,7 +433,7 @@ jobs:
 
   evaluation-plan:
     name: Plan the evaluation matrix
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -586,7 +586,7 @@ jobs:
     - aggregate-llama3-evaluation
     - aggregate-fanin-sweep
     - aggregate-burst-sweep
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

@@ -78,7 +78,7 @@ jobs:
   evaluate:
     name: Structural experiment
     if: ${{ !inputs.comparison }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # The reusable workflow owns a complete hosted job. Callers reserve their
     # simulator and wrapper budgets below the six-hour GitHub Actions limit.
     timeout-minutes: 360
@@ -143,7 +143,7 @@ jobs:
     # Every paired comparison runs on the cluster: heavy pairs cannot finish
     # under the 6-hour hosted ceiling, and self-hosted jobs may run 5 days.
     if: ${{ inputs.comparison }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Authenticates with repository secrets, not the workflow token.
     permissions: {}
@@ -379,7 +379,7 @@ jobs:
     name: Record the result
     needs: [ evaluate, evaluate_cluster ]
     if: ${{ always() }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # The hosted ceiling, because this job downloads the full
     # reproducibility bundle - observed at 38.8 GB once the raw transport
     # streams shipped - and re-uploads most of it as release assets. The

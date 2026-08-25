@@ -147,6 +147,11 @@ class ReleaseClient:
         return json.loads(body) if body else {}
 
     def resolve_release(self):
+        # Resolve only, never create: the ledger job pre-opens the run
+        # release and every archive bucket before any evaluation starts
+        # (see ci_ledger and release_bucket.py), so a missing tag is a
+        # broken invariant to keep retrying against, not a cue to mint
+        # releases from a simulator job.
         payload = self._request(
             "https://api.github.com/repos/{}/releases/tags/{}".format(
                 self.repo, self.tag

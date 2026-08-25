@@ -1,8 +1,12 @@
-name: Archive a bundle to the run's permanent release
+name: Archive a bundle to a permanent release
 description: >
-  Download one of the run's Actions artifacts and publish it as an asset on the
-  release opened by the `ledger` job. Actions artifacts expire; release assets
-  do not, and they cost nothing against the storage quota.
+  Download one of the run's Actions artifacts and publish it as assets on the
+  given release - the run-level release or one of the archive buckets
+  (`<run tag>-<bucket>`, assignment computed by
+  .github/scripts/release_bucket.py), all of which the `ledger` job pre-opens
+  before any evaluation starts, so this action only ever uploads. Actions
+  artifacts expire; release assets do not, and they cost nothing against the
+  storage quota.
 
 inputs:
   tag:

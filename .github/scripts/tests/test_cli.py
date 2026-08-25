@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from ci_ledger import cli
 from ci_ledger.model import RemoteComment, issue_matches_run
+from release_bucket import BUCKETS
 
 ENVIRONMENT = {
     "GITHUB_REPOSITORY": "BulkyCI/astra-sim",
@@ -157,17 +158,26 @@ class LedgerLifecycle(unittest.TestCase):
         cli.main(["open"])
         self.assertEqual(len(self.gh.issues), 1)
         # FakeGh raises if a release is created twice, so this also asserts the
-        # archive is adopted rather than re-created.
-        self.assertEqual(len(self.gh.releases), 1)
+        # archive and every bucket are adopted rather than re-created.
+        self.assertEqual(len(self.gh.releases), 1 + BUCKETS)
 
     def test_open_creates_the_archive_at_the_commit_under_test(self) -> None:
         cli.main(["open"])
-        ((tag, release),) = self.gh.releases.items()
-        self.assertEqual(len(tag), 32)
+        (tag,) = [t for t in self.gh.releases if len(t) == 32]
+        release = self.gh.releases[tag]
         self.assertEqual(release["target"], ENVIRONMENT["GITHUB_SHA"])
         # The release body must point back at the run and the ledger issue.
         self.assertIn(ENVIRONMENT["GITHUB_SHA"], release["notes"])
         self.assertIn("/issues/1", release["notes"])
+        # Every archive bucket opens with the run, at the same commit, so
+        # downstream writers resolve and never create.
+        buckets = sorted(t for t in self.gh.releases if t != tag)
+        self.assertEqual(buckets, [f"{tag}-b{i}" for i in range(BUCKETS)])
+        for bucket_tag in buckets:
+            bucket = self.gh.releases[bucket_tag]
+            self.assertEqual(bucket["target"], ENVIRONMENT["GITHUB_SHA"])
+            self.assertIn(tag, bucket["notes"])
+            self.assertIn("/issues/1", bucket["notes"])
 
     def test_missing_report_records_an_explicit_absence(self) -> None:
         cli.main(["open"])

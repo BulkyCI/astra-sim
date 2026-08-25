@@ -100,5 +100,27 @@ class ClassifyHttpErrorTests(unittest.TestCase):
         kind, wait = classify_http_error(429, {"Retry-After": "soon"})
         self.assertEqual((kind, wait), (RATE_LIMITED, 60))
 
+class ResolveReleaseTests(unittest.TestCase):
+    """The uploader resolves, never creates: the ledger pre-opens the run
+    release and every archive bucket before evaluations start, so this
+    client holds no creation path at all."""
+
+    def test_resolve_adopts_the_release_and_never_posts(self) -> None:
+        from segment_uploader import ReleaseClient
+
+        calls = []
+
+        def request(url, method="GET", data=None, headers=None):
+            calls.append(method)
+            return {"id": 7}
+
+        client = ReleaseClient("owner/repo", "tag-b3", "token")
+        client._request = request
+        client.resolve_release()
+        self.assertEqual(calls, ["GET"])
+        self.assertEqual(client.release_id, 7)
+        self.assertFalse(hasattr(client, "create_release"))
+
+
 if __name__ == "__main__":
     unittest.main()

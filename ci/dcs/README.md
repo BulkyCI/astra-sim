@@ -95,8 +95,11 @@ tears itself down after the 30-minute idle guard.
 A completed experiment leaves nothing on the shared scratch volume. All
 jobs live under one `astra-sim/<slurm job id>` parent per scratch base, so
 a full wave presents as a single directory. Three mechanisms compose: the
-mid-run segment uploader ships sealed raw-log segments to the release and
-deletes them as the sim runs; the job's EXIT trap removes its own tree
+mid-run segment uploader ships sealed raw-log segments to the arm's
+archive bucket — the release `<run tag>-<bucket>`, where the bucket is a
+pure function of the ledger key (`.github/scripts/release_bucket.py`;
+one release caps at 1000 assets, and a wave's segments pooled on the run
+release approached it) — and deletes them as the sim runs; the job's EXIT trap removes its own tree
 (and the shared parent, when it is the last job out) whenever the job ends
 for any reason that lets bash run; and every new job reaps orphaned
 sibling trees whose SLURM job id no longer exists — the backstop for node

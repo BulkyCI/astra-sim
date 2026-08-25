@@ -29,8 +29,10 @@ jobs:
     name: Open the experiment ledger
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Opens the run's release as well as its issue, so it needs contents:write.
-    # It runs only `gh` and finishes in under a minute.
+    # Opens the run's release, its archive bucket releases, and its issue,
+    # so it needs contents:write. It runs only `gh` and finishes in under a
+    # minute. Because every evaluation gates on this job, downstream
+    # writers may assume all six releases exist and never create any.
     permissions:
       contents: write
       issues: write
@@ -328,45 +330,21 @@ jobs:
         submodules: recursive
         persist-credentials: false
 
-    - name: Derive the compiler-cache identity
-      id: identity
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-        REF: ${{ github.ref }}
-        MARCH: ${{ matrix.march }}
-      run: |
-        set -euo pipefail
-        # Content-addressed like the native-build cache: identical native
-        # sources and cluster scripts share one entry. The conda toolchain
-        # floats per solve, so ccache's compiler_check=content (configured
-        # in ci/dcs/build.sh) is what keeps a foreign entry harmless - a
-        # miss, never a wrong object file. The ISA level lives in the
-        # prefix: the cells' object sets are disjoint, and one shared
-        # entry would leave the second cell's save colliding with the
-        # first's.
-        sources="$(git rev-parse HEAD:astra-sim HEAD:build HEAD:extern HEAD:ci/dcs)"
-        digest="$(printf '%s\n' "$sources" | sha256sum | cut -d' ' -f1)"
-        prefix="astra-sim-ccache-dcs-v1-${RUNNER_OS}-${RUNNER_ARCH}-${MARCH}"
-        # Same trust boundary as .github/actions/native-build: only a push
-        # to main publishes an entry other refs can restore. Change the
-        # two predicates together.
-        trusted=false
-        if [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" ]]; then
-          trusted=true
-        fi
-        {
-          echo "key=${prefix}-${digest}"
-          echo "prefix=${prefix}-"
-          echo "trusted=${trusted}"
-        } >> "$GITHUB_OUTPUT"
-
+    # Content-addressed like the native-build cache: identical native
+    # sources and cluster scripts share one entry, and a near miss still
+    # warms through the prefix fallback. The conda toolchain floats per
+    # solve, so ccache's compiler_check=content (configured in
+    # ci/dcs/build.sh) is what keeps a foreign entry harmless - a miss,
+    # never a wrong object file. The ISA level lives in the prefix: the
+    # cells' object sets are disjoint, and one shared key would leave the
+    # second cell's save colliding with the first's.
     - name: Restore trusted compiler cache
       id: restore
       uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache-dcs
-        key: ${{ steps.identity.outputs.key }}
-        restore-keys: ${{ steps.identity.outputs.prefix }}
+        key: astra-sim-ccache-dcs-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.march }}-${{ hashFiles('astra-sim/**', 'build/**', 'extern/**', 'ci/dcs/**') }}
+        restore-keys: astra-sim-ccache-dcs-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.march }}-
 
     - name: Build the ${{ matrix.march }} cluster runtime bundle
       env:
@@ -389,11 +367,15 @@ jobs:
         if-no-files-found: error
 
     - name: Publish compiler cache from a trusted ref
-      if: ${{ steps.identity.outputs.trusted == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+      # Same trust boundary as .github/actions/native-build: only a push to
+      # main publishes an entry other refs can restore, and only on an
+      # exact-key miss so one entry exists per distinct build input. Change
+      # the two predicates together.
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: ${{ runner.temp }}/astra-sim-ccache-dcs
-        key: ${{ steps.identity.outputs.key }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}
 
   archive-cluster-runtime:
     name: Record the cluster runtime

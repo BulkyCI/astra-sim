@@ -44,8 +44,11 @@ ATTACHMENT_NOTE = (
     "GitHub has no API for issue file attachments, so this issue holds the "
     "permanent textual record — each comment capped at 65,536 characters and "
     "paginated — while the binary reproducibility bundles are published as "
-    "assets on the release linked above, which does not expire the way an "
-    "Actions artifact does."
+    "release assets, which do not expire the way an Actions artifact does: "
+    "run-level records on the release linked above, and each evaluation "
+    "arm's bundle on the bucket release `<run tag>-b<sha256(ledger key) "
+    "mod 5>`, because a single release holds at most 1000 assets and one "
+    "wave's raw segments alone approach that."
 )
 
 _KEY_PATTERN = re.compile(r"\A[A-Za-z0-9._:\-]{1,96}\Z")

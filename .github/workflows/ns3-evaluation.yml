@@ -35,8 +35,19 @@ on:
       release_tag:
         description: >
           Release tag from the calling run's `ledger` job; empty disables
-          archiving. Never derived here — deriving it per job would split a
-          partial re-run across two releases.
+          archiving. Never derived from run state here — that would split a
+          partial re-run across two releases. This workflow's own uploads go
+          to the bucket release `<release_tag>-<bucket>`: a single release
+          holds at most 1000 assets and one wave's ~1.8 GB raw segments
+          alone approach that (927 observed), so per-run archives shard
+          into a handful of buckets. Nothing declares or stores the
+          assignment: the bucket is a pure function of the arm's stable
+          ledger key (.github/scripts/release_bucket.py), so both writers
+          here compute it, any consumer can re-derive where an arm's
+          assets live, and re-runs land in their original buckets. The
+          ledger pre-opens every bucket with the run release, so a
+          non-empty tag here implies all of them exist — writers resolve,
+          never create.
         required: false
         default: ''
         type: string
@@ -284,15 +295,24 @@ jobs:
         # removes the 24 h ceiling; when absent, the expression falls
         # back to the job token.
         GH_TOKEN: ${{ secrets.DCS_RELEASE_TOKEN || github.token }}
-        RELEASE_TAG: ${{ inputs.release_tag }}
+        # The arm's bucket release tag is computed below, not declared: a
+        # pure function of the stable ledger key (see the release_tag
+        # input and release_bucket.py). The ledger job pre-opened every
+        # bucket before evaluations started; the uploader only resolves.
+        RUN_RELEASE_TAG: ${{ inputs.release_tag }}
+        LEDGER_KEY: ${{ inputs.ledger_key }}
         ASSET_PREFIX: ${{ inputs.artifact_name }}
         WATCH_DIR: ${{ inputs.run_directory }}
         REPOSITORY: ${{ github.repository }}
       run: |
+        release_tag=""
+        if [[ -n "$RUN_RELEASE_TAG" ]]; then
+          release_tag="${RUN_RELEASE_TAG}-$(python3 .github/scripts/release_bucket.py "$LEDGER_KEY")"
+        fi
         mkdir -p "$WATCH_DIR"
         nohup python3 .github/scripts/segment_uploader.py \
           --repo "$REPOSITORY" \
-          --release-tag "$RELEASE_TAG" \
+          --release-tag "$release_tag" \
           --asset-prefix "$ASSET_PREFIX" \
           --watch-dir "$WATCH_DIR" \
           > "$RUNNER_TEMP/segment-uploader.log" 2>&1 &
@@ -404,6 +424,22 @@ jobs:
           .github/scripts
         sparse-checkout-cone-mode: false
 
+    # Recomputes, never receives, the arm's bucket: the same pure
+    # function of the ledger key the mid-run uploader evaluated, so both
+    # writers reach one release without coordinating.
+    - name: Compute the arm's archive bucket
+      id: bucket
+      env:
+        RUN_RELEASE_TAG: ${{ inputs.release_tag }}
+        LEDGER_KEY: ${{ inputs.ledger_key }}
+      run: |
+        set -euo pipefail
+        tag=""
+        if [[ -n "$RUN_RELEASE_TAG" ]]; then
+          tag="${RUN_RELEASE_TAG}-$(python3 .github/scripts/release_bucket.py "$LEDGER_KEY")"
+        fi
+        echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
     - name: Fetch the evaluation report
       continue-on-error: true
       uses: actions/download-artifact@v8
@@ -427,7 +463,8 @@ jobs:
       if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
-        tag: ${{ inputs.release_tag }}
+        # The arm's bucket release, pre-opened by the ledger job.
+        tag: ${{ steps.bucket.outputs.tag }}
         artifact: ${{ inputs.artifact_name }}-${{ github.run_id }}
         asset-name: ${{ inputs.artifact_name }}
         # The report fetch above already landed the whole bundle on this

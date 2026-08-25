@@ -61,6 +61,15 @@ on:
         description: Fail a paired evaluation without raw queue, PFC, and background-traffic evidence.
         required: true
         type: boolean
+      cluster_runtime_artifact:
+        description: >
+          Artifact-name prefix of the prebuilt cluster runtime bundles from
+          the calling run's `cluster-build` job. Each cluster node appends
+          the instruction-set level it selects for itself
+          (`-x86-64-v3`/`-x86-64-v4`). Unused by the hosted structural path,
+          which builds through the shared compiler cache.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -215,12 +224,12 @@ jobs:
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
 
     steps:
-    - name: Check out source and submodules
+    - name: Check out source
       uses: actions/checkout@v7
       with:
-        # The cluster builds its own binary against the rootless toolchain,
-        # so it needs the full native tree.
-        submodules: recursive
+        # The prebuilt runtime bundle replaces the native tree, so the
+        # expensive recursive ns-3 clone never lands on cluster scratch.
+        submodules: false
         persist-credentials: false
 
     - name: Set up the locked Python environment
@@ -228,8 +237,34 @@ jobs:
       with:
         cache: 'false'
 
-    - name: Build the ns-3 backend with the rootless toolchain
-      run: bash ci/dcs/build.sh
+    # The compile node is no longer the run node: cluster-build compiled
+    # one bundle per fleet ISA level, and this node picks the highest one
+    # its CPU carries. x86-64-v4 is exactly AVX-512 F/BW/CD/DQ/VL; the
+    # fallback, x86-64-v3, runs on every node the sbatch constraint
+    # admits (AMD_Epyc7453 is the Zen 3 floor).
+    - name: Select the instruction-set level this node supports
+      id: isa
+      run: |
+        set -euo pipefail
+        march=x86-64-v4
+        for flag in avx512f avx512bw avx512cd avx512dq avx512vl; do
+          grep -qw "$flag" /proc/cpuinfo || { march=x86-64-v3; break; }
+        done
+        echo "march=${march}" >> "$GITHUB_OUTPUT"
+        echo "selected ${march}"
+
+    - name: Fetch the prebuilt cluster runtime
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.cluster_runtime_artifact }}-${{ steps.isa.outputs.march }}
+
+    # Unpacks the bundle, proves the binary's library closure resolves on
+    # this node, and exports LD_LIBRARY_PATH plus the Open MPI relocation
+    # variables for every later step.
+    - name: Install and verify the cluster runtime
+      env:
+        MARCH: ${{ steps.isa.outputs.march }}
+      run: bash ci/dcs/install-runtime.sh "cluster-runtime-${MARCH}.tar.gz"
 
     # Ships sealed raw-log segments to the release while the sim runs, so
     # per-arm scratch stays near two segments (~3.6 GB) instead of the full

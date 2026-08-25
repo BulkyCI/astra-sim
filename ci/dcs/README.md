@@ -16,10 +16,14 @@ jobs per comparison:
    (`accept-runner.sh`) that can only submit one SLURM runner job — a
    leaked key gets no shell. The runner is labeled with the run id, so
    concurrent experiments can never swap runners.
-2. `Cluster comparison` waits for that runner, builds the ns-3 binary with
-   the rootless conda toolchain (`-march=native`: compile node is run
-   node), and runs the whole three-arm comparison as one job (self-hosted
-   jobs may run 5 days).
+2. `Cluster comparison` waits for that runner, downloads the run's
+   prebuilt runtime bundle, and runs the whole three-arm comparison as
+   one job (self-hosted jobs may run 5 days). The fleet never compiles:
+   the `cluster-build` job in the main workflow builds ns-3 once per run
+   with the rootless conda toolchain - one bundle per instruction-set
+   level (`x86-64-v3` fleet floor, `x86-64-v4` for the AVX-512 nodes) -
+   and each node selects its level from `/proc/cpuinfo`. Bundles travel
+   as run artifacts and are archived permanently on the run's release.
 
 Job scratch lives in the cluster's sanctioned network scratch — the newest
 `/scratch/scratch-space/expires-<date>` directory, whose expiry always
@@ -37,10 +41,14 @@ cluster only ever holds a `contents: read` token.
 `accept-runner.sh` fast-forwards the repository clone and submits the
 repo's own `runner-job.sbatch`, so a push deploys cluster-side changes on
 the next provision. Jobs are self-contained: each downloads its pinned
-runner and creates its conda toolchain from `buildenv-packages.txt` on
-job-local scratch, so no shared environment or lock exists and the home
-directory stays control-plane only (checkout, forced-command script,
-jitconfigs, logs - under 1 GB). Only `accept-runner.sh` itself still
+runner and the run's prebuilt runtime bundle onto job-local scratch, so
+no shared environment or lock exists and the home directory stays
+control-plane only (checkout, forced-command script, jitconfigs, logs -
+under 1 GB). No toolchain ever lands on scratch: `buildenv-packages.txt`
+and `runtime-packages.txt` are consumed by the hosted `cluster-build`
+job (`ci/dcs/build.sh`), whose bundle ships the declared runtime env the
+binary resolves against (`ci/dcs/install-runtime.sh` verifies this on
+the node before the sims start). Only `accept-runner.sh` itself still
 deploys through `setup.sh`.
 
 ## Cluster setup (once)

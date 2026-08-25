@@ -1,7 +1,9 @@
 # Conda-forge packages for the DCS build environment. Single source of
-# truth: ci/dcs/build.sh creates a fresh env from this list on every
-# job's own scratch, so adding a package here deploys with a push like
-# any other change and no shared environment exists.
+# truth: ci/dcs/build.sh creates a fresh env from this list on the hosted
+# builder's own temp dir, so adding a package here deploys with a push
+# like any other change and no shared environment exists. Runtime
+# libraries that must ship with the produced bundle live in
+# runtime-packages.txt; ABI-relevant pins must match across both lists.
 #
 # libprotobuf pinned pre-abseil so ns-3's module-mode find_package works;
 # python 3.11 because the ns3 CLI breaks under newer argparse. The conda
@@ -17,3 +19,6 @@ openmpi
 zlib
 zstd
 python=3.11
+# Backs the hosted builder's compiler cache; inert when no CCACHE_DIR is
+# mounted.
+ccache

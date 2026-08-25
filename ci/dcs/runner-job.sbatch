@@ -1,14 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=astra-gh-runner
-# Two, not one: the simulator is single-threaded, but the uncached LTO
-# link runs on every job and parallelizes with the core count, and the
-# runner's own streaming threads would otherwise steal cycles from the
-# sim for days. Two, not four: everything past the link uses one core,
-# and allocation - not load - is what blocks other cluster users.
+# Two, not one: the simulator is single-threaded, but the runner's own
+# streaming threads would otherwise steal cycles from the sim for days.
+# (The per-job LTO link that once wanted more cores is gone: jobs
+# download the prebuilt runtime bundle instead of compiling.) Two, not
+# four: allocation - not load - is what blocks other cluster users.
 #SBATCH --cpus-per-task=2
-# The simulator needs <1 GB; the rest is headroom for the build phase and
-# for the last-resort case where scratch selection below lands on tmpfs
-# /tmp, whose bytes are RAM charged to this limit.
+# The simulator needs <1 GB; the rest is headroom for the last-resort
+# case where scratch selection below lands on tmpfs /tmp, whose bytes
+# (unpacked runtime bundle, sealed raw-log segments awaiting upload) are
+# RAM charged to this limit.
 #SBATCH --mem=16G
 # Root of the timeout chain: 4 h under SLURM's 5-day cap, and 60 min above
 # the Actions job ceiling (6900 min in ns3-evaluation.yml), which in turn

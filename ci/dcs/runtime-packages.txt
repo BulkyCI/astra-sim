@@ -1,0 +1,17 @@
+# Conda-forge packages for the runtime env that ships inside every
+# cluster-runtime bundle (see ci/dcs/build.sh). Only what the linked ns-3
+# binary needs at run time - no compilers, no cmake, no python. The
+# builder proves the binary's ldd closure resolves against this env alone
+# before publishing; if a build-side package ever leaks into the closure,
+# add it here (pinned to the same version as buildenv-packages.txt).
+#
+# libprotobuf pinned identically to buildenv-packages.txt: the build
+# links it by exact ABI.
+libprotobuf=3.21.12
+boost
+openmpi
+zlib
+zstd
+# GCC runtime libraries (libstdc++, libgcc_s) the conda compilers link.
+libstdcxx-ng
+libgcc-ng

@@ -41,8 +41,9 @@ function compile {
     # x86-64-v3 (AVX2/FMA/BMI2) is the highest ISA level every amd64 VM
     # GitHub has fielded supports; AVX-512 is not fleet-wide, and the
     # build VM and evaluation VMs differ, so -march=native is unsafe
-    # there. Environments where the compile node IS the run node (the DCS
-    # runners) override with NS3_MARCH=native.
+    # there. The DCS bundle builder (ci/dcs/build.sh) overrides with each
+    # explicit fleet level (x86-64-v3, x86-64-v4) in turn; nothing sets
+    # native in CI any more.
     if [[ "$(uname -m)" == "x86_64" ]]; then
         local march="${NS3_MARCH:-x86-64-v3}"
         cmake_args+=("-DCMAKE_C_FLAGS=-march=${march}"

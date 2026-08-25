@@ -85,7 +85,7 @@ jobs:
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
         uv run --locked python -m unittest discover -s experiments/dblp/tests -v
         uv run --locked python -m unittest discover -s .github/scripts/tests -t .github/scripts -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh
         git diff --check
 
   native-build:
@@ -291,6 +291,146 @@ jobs:
         artifact: ring-3d-llama3-70b-16-trace-${{ github.run_id }}
         asset-name: ring-3d-llama3-70b-16-trace
 
+  cluster-build:
+    name: Build the cluster runtime
+    # Deliberately no upstream needs: every cluster arm waits on this job,
+    # so it starts the moment the run does and the wave provisions as soon
+    # as the bundles exist.
+    runs-on: ubuntu-22.04
+    # One cold LTO build of ns-3 per cell on four hosted cores - the same
+    # rationale as native-build's budget: double the coin-flip 60, and let
+    # the build's own progress be the signal. The compiler cache brings
+    # the warm path far under this.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      # The two ISA levels are independent builds of the same sources:
+      # mapping them over two runners halves the wave's gate instead of
+      # paying them in sequence on one, at the cost of one duplicated
+      # ~10-minute env solve. Default fail-fast is correct here - the
+      # wave needs both bundles, so a surviving sibling's work is dead
+      # the moment either build fails.
+      matrix:
+        march: [ x86-64-v3, x86-64-v4 ]
+    outputs:
+      # One definition site for the artifact prefix, the same discipline
+      # the native-runtime artifact follows; each cluster node appends the
+      # ISA level it selects for itself. Every cell writes the identical
+      # value (a pure function of the run id), so last-writer-wins across
+      # the matrix is deterministic.
+      runtime_artifact_prefix: cluster-runtime-${{ github.run_id }}
+
+    steps:
+    - name: Check out source and submodules
+      uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        persist-credentials: false
+
+    - name: Derive the compiler-cache identity
+      id: identity
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        MARCH: ${{ matrix.march }}
+      run: |
+        set -euo pipefail
+        # Content-addressed like the native-build cache: identical native
+        # sources and cluster scripts share one entry. The conda toolchain
+        # floats per solve, so ccache's compiler_check=content (configured
+        # in ci/dcs/build.sh) is what keeps a foreign entry harmless - a
+        # miss, never a wrong object file. The ISA level lives in the
+        # prefix: the cells' object sets are disjoint, and one shared
+        # entry would leave the second cell's save colliding with the
+        # first's.
+        sources="$(git rev-parse HEAD:astra-sim HEAD:build HEAD:extern HEAD:ci/dcs)"
+        digest="$(printf '%s\n' "$sources" | sha256sum | cut -d' ' -f1)"
+        prefix="astra-sim-ccache-dcs-v1-${RUNNER_OS}-${RUNNER_ARCH}-${MARCH}"
+        # Same trust boundary as .github/actions/native-build: only a push
+        # to main publishes an entry other refs can restore. Change the
+        # two predicates together.
+        trusted=false
+        if [[ "$EVENT_NAME" == "push" && "$REF" == "refs/heads/main" ]]; then
+          trusted=true
+        fi
+        {
+          echo "key=${prefix}-${digest}"
+          echo "prefix=${prefix}-"
+          echo "trusted=${trusted}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore trusted compiler cache
+      id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache-dcs
+        key: ${{ steps.identity.outputs.key }}
+        restore-keys: ${{ steps.identity.outputs.prefix }}
+
+    - name: Build the ${{ matrix.march }} cluster runtime bundle
+      env:
+        CCACHE_DIR: ${{ runner.temp }}/astra-sim-ccache-dcs
+        MARCH: ${{ matrix.march }}
+      run: bash ci/dcs/build.sh "$MARCH"
+
+    - name: Upload the ${{ matrix.march }} runtime
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ format('cluster-runtime-{0}-{1}', github.run_id, matrix.march) }}
+        path: ${{ runner.temp }}/cluster-runtime-${{ matrix.march }}.tar.gz
+        # Already gzipped; re-compressing costs minutes and saves nothing.
+        compression-level: 0
+        # A wave's runners fetch this only after an unbounded SLURM queue
+        # wait; a week outlives the 4d20h walltime plus realistic queueing,
+        # and the release asset in archive-cluster-runtime is the
+        # permanent copy.
+        retention-days: 7
+        if-no-files-found: error
+
+    - name: Publish compiler cache from a trusted ref
+      if: ${{ steps.identity.outputs.trusted == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/astra-sim-ccache-dcs
+        key: ${{ steps.identity.outputs.key }}
+
+  archive-cluster-runtime:
+    name: Record the cluster runtime
+    needs: [ cluster-build, ledger ]
+    # A sink job off the critical path: blocks nothing, and skipping on
+    # cancellation is the only way it does not run.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+    - name: Check out the publishing tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: |
+          .github/actions
+          .github/scripts
+        sparse-checkout-cone-mode: false
+
+    - name: Archive the x86-64-v3 runtime
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ${{ format('cluster-runtime-{0}-x86-64-v3', github.run_id) }}
+        asset-name: cluster-runtime-x86-64-v3
+
+    - name: Archive the x86-64-v4 runtime
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/release-archive
+      with:
+        tag: ${{ needs.ledger.outputs.release_tag }}
+        artifact: ${{ format('cluster-runtime-{0}-x86-64-v4', github.run_id) }}
+        asset-name: cluster-runtime-x86-64-v4
+
   evaluation-plan:
     name: Plan the evaluation matrix
     runs-on: ubuntu-22.04
@@ -324,12 +464,15 @@ jobs:
 
   evaluations:
     name: ${{ matrix.name }}
-    # Deliberately independent of native-build: cluster evaluations compile
-    # with their own rootless toolchain and structural ones build for
-    # themselves through the shared compiler cache, so a hosted build
-    # failure cannot strand 16 SLURM runners and provisioning starts the
-    # moment the plan exists.
-    needs: [ ledger, evaluation-plan ]
+    # Still independent of native-build (the apt-toolchain build feeding
+    # the hosted smoke path). Cluster arms consume the runtime bundles the
+    # cluster-build matrix compiled once, so the wave gates on both cells:
+    # a broken build now costs zero SLURM allocations - nothing is
+    # provisioned - instead of sixteen runners discovering it
+    # independently. Structural arms build for themselves through the
+    # shared compiler cache and merely inherit this wait, which is
+    # acceptable for a dispatch-only family.
+    needs: [ ledger, evaluation-plan, cluster-build ]
     # Ceiling for the called workflow, not a grant to the simulator. Its
     # `evaluate` job declares `contents: read`; only `archive` takes the write.
     permissions:
@@ -356,6 +499,7 @@ jobs:
       execution_timeout_minutes: ${{ matrix.execution_timeout_minutes }}
       simulation_timeout_seconds: ${{ matrix.simulation_timeout_seconds }}
       require_congestion: ${{ matrix.require_congestion }}
+      cluster_runtime_artifact: ${{ needs.cluster-build.outputs.runtime_artifact_prefix }}
     # For the DCS provision job only: the app key and deploy key live in
     # repository secrets, which a called workflow cannot see unless inherited.
     secrets: inherit
@@ -436,6 +580,8 @@ jobs:
     - native-build
     - native-integration
     - archive-native-integration
+    - cluster-build
+    - archive-cluster-runtime
     - evaluations
     - aggregate-llama3-evaluation
     - aggregate-fanin-sweep

@@ -89,13 +89,16 @@ jobs:
         path: ${{ inputs.download_directory }}
 
     - name: Validate and aggregate the evaluation results
+      env:
+        # Crosses into the shell as data, not spliced script text.
+        EXPECTED_COUNT: ${{ inputs.expected_count }}
       run: |
         set -euo pipefail
         mapfile -t comparisons < <(
           find '${{ inputs.download_directory }}' \
             -name comparison.json -type f -print | sort
         )
-        [[ "${#comparisons[@]}" -eq '${{ inputs.expected_count }}' ]]
+        [[ "${#comparisons[@]}" -eq "$EXPECTED_COUNT" ]]
         ${{ inputs.command_prefix }} "${comparisons[@]}" \
           --output '${{ inputs.output_directory }}'
         cat '${{ inputs.output_directory }}/${{ inputs.report_file }}' \

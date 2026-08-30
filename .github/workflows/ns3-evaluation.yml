@@ -160,50 +160,28 @@ jobs:
     permissions: {}
 
     steps:
-    # An app installation token instead of a PAT: owned by the org rather
-    # than a person, scoped to this one repository's Administration
-    # permission, and valid for one hour - no standing credential exists.
-    - name: Mint an installation token
-      id: app
-      uses: actions/create-github-app-token@v2
+    - name: Check out the provisioning action
+      uses: actions/checkout@v7
       with:
-        app-id: ${{ vars.DCS_APP_ID }}
-        private-key: ${{ secrets.DCS_APP_PRIVATE_KEY }}
+        persist-credentials: false
+        sparse-checkout: .github/actions/dcs-provision
+        sparse-checkout-cone-mode: false
 
     - name: Mint a just-in-time runner and hand it to SLURM
-      env:
-        GH_TOKEN: ${{ steps.app.outputs.token }}
-        SSH_KEY: ${{ secrets.DCS_SSH_KEY }}
-        SSH_DEST: ${{ vars.DCS_SSH_DEST }}
-        SSH_HOST_KEY: ${{ vars.DCS_SSH_HOST_KEY }}
-        RUNNER_NAME: dcs-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.ledger_key }}
+      uses: ./.github/actions/dcs-provision
+      with:
+        runner-name: dcs-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.ledger_key }}
         # Also the exact label the companion evaluate_cluster job requires.
         # Pinning each runner to its own experiment keeps the assignment
         # 1:1 by construction - a runner can never pick up a concurrent
         # experiment's job - so a SLURM job id always maps to one known
         # Actions run, and per-experiment resource shapes stay possible.
-        RUN_LABEL: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}
-      run: |
-        set -euo pipefail
-        # A JIT config registers a runner that executes exactly one job and
-        # then deregisters itself: runner lifetime equals experiment lifetime.
-        jit="$(gh api -X POST \
-          "repos/${GITHUB_REPOSITORY}/actions/runners/generate-jitconfig" \
-          -f name="$RUNNER_NAME" -F runner_group_id=1 -f work_folder=_work \
-          -f 'labels[]=dcs' -f "labels[]=${RUN_LABEL}" \
-          --jq .encoded_jit_config)"
-        install -d -m 700 ~/.ssh
-        printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ci
-        chmod 600 ~/.ssh/id_ci
-        # Pinned host key: a man in the middle could otherwise capture the
-        # JIT config and impersonate the runner for this one job.
-        printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
-        # The key is bound to a forced command on the cluster that reads a
-        # jitconfig from stdin and submits one SLURM runner job. The command
-        # word is never executed; the forced command sanitizes it and uses
-        # it as the SLURM job name so squeue identifies the experiment.
-        printf '%s' "$jit" | ssh -i ~/.ssh/id_ci -o BatchMode=yes \
-          "$SSH_DEST" "$RUNNER_NAME"
+        run-label: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}
+        app-id: ${{ vars.DCS_APP_ID }}
+        app-private-key: ${{ secrets.DCS_APP_PRIVATE_KEY }}
+        ssh-key: ${{ secrets.DCS_SSH_KEY }}
+        ssh-dest: ${{ vars.DCS_SSH_DEST }}
+        ssh-host-key: ${{ vars.DCS_SSH_HOST_KEY }}
 
   evaluate_cluster:
     name: Cluster comparison
@@ -264,17 +242,39 @@ jobs:
         echo "march=${march}" >> "$GITHUB_OUTPUT"
         echo "selected ${march}"
 
+    # Pure lookup against the shared store the run's seed job published
+    # before this wave provisioned. A miss is survivable: the job falls
+    # back to a private download and extraction - exactly the pre-store
+    # behavior - so sharing stays an optimization layer that correctness
+    # never depends on.
+    - name: Resolve the shared runtime store
+      id: store
+      env:
+        RUNTIME_KEY: ${{ inputs.cluster_runtime_artifact }}-${{ steps.isa.outputs.march }}
+      run: |
+        set -euo pipefail
+        if entry="$(bash ci/dcs/resolve-runtime.sh "$RUNTIME_KEY")"; then
+          echo "shared runtime: ${entry}"
+          { echo "hit=true"; echo "entry=${entry}"; } >> "$GITHUB_OUTPUT"
+        else
+          echo "no shared runtime for ${RUNTIME_KEY}; falling back to a private extraction"
+          { echo "hit=false"; echo "entry="; } >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Fetch the prebuilt cluster runtime
+      if: ${{ steps.store.outputs.hit != 'true' }}
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.cluster_runtime_artifact }}-${{ steps.isa.outputs.march }}
 
-    # Unpacks the bundle, proves the binary's library closure resolves on
-    # this node, and exports LD_LIBRARY_PATH plus the Open MPI relocation
-    # variables for every later step.
+    # Links against the sealed store entry (or unpacks the private
+    # bundle), proves the binary's library closure resolves on this node,
+    # and exports LD_LIBRARY_PATH plus the Open MPI relocation variables
+    # for every later step.
     - name: Install and verify the cluster runtime
       env:
         MARCH: ${{ steps.isa.outputs.march }}
+        STORE_ENTRY: ${{ steps.store.outputs.entry }}
       run: bash ci/dcs/install-runtime.sh "cluster-runtime-${MARCH}.tar.gz"
 
     # Ships sealed raw-log segments to the release while the sim runs, so

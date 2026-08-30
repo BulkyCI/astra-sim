@@ -63,8 +63,16 @@ newest_scratch_space() {
 # One tidy parent per scratch base - astra-sim/<slurm job id> - so a
 # 16-job wave presents the lab as a single directory, not sixteen
 # scattered astra-* entries.
+network_scratch="$(newest_scratch_space || true)"
+# Single definition site for the shared runtime store's location: the
+# run's seed job publishes sealed bundle extractions under it, and every
+# evaluation job resolves against it (ci/dcs/seed-store.sh and
+# resolve-runtime.sh). Only the network scratch base is shareable, so the
+# variable is empty - store disabled, jobs extract privately - whenever
+# the node has none; job-local fallback bases below are never shared.
+export ASTRA_STORE_ROOT="${network_scratch:+${network_scratch}/astra-sim/store}"
 dir=""
-for base in "${SLURM_TMPDIR:-}" "$(newest_scratch_space)" /var/tmp /tmp; do
+for base in "${SLURM_TMPDIR:-}" "$network_scratch" /var/tmp /tmp; do
     [[ -n "$base" ]] || continue
     if mkdir -p "$base/astra-sim/$SLURM_JOB_ID" 2>/dev/null; then
         dir="$base/astra-sim/$SLURM_JOB_ID"
@@ -93,7 +101,9 @@ trap cleanup EXIT
 # orphan the lab admin should never have to clean. Each new job therefore
 # reaps dead siblings - numeric-id dirs under the shared parent, plus any
 # legacy astra-runner-* dir beside it - dead iff SLURM no longer knows the
-# job id. A live job always answers squeue, so this cannot touch a running
+# job id. The shared `store` directory is untouched by construction: its
+# name never parses as a numeric job id, and its reaping (a pure age
+# sweep) belongs to the single-writer seed job in seed-store.sh. A live job always answers squeue, so this cannot touch a running
 # sibling; any other squeue failure skips the sweep - the next job retries.
 for sibling in "$(dirname "$dir")"/* \
                "$(dirname "$(dirname "$dir")")"/astra-runner-*; do

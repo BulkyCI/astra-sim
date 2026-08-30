@@ -41,10 +41,23 @@ cluster only ever holds a `contents: read` token.
 `accept-runner.sh` fast-forwards the repository clone and submits the
 repo's own `runner-job.sbatch`, so a push deploys cluster-side changes on
 the next provision. Jobs are self-contained: each downloads its pinned
-runner and the run's prebuilt runtime bundle onto job-local scratch, so
-no shared environment or lock exists and the home directory stays
-control-plane only (checkout, forced-command script, jitconfigs, logs -
-under 1 GB). No toolchain ever lands on scratch: `buildenv-packages.txt`
+runner onto job-local scratch, and the home directory stays control-plane
+only (checkout, forced-command script, jitconfigs, logs - under 1 GB).
+
+The multi-gigabyte runtime extraction is shared, not duplicated: before
+the wave provisions, a single seed job (`cluster-seed` in the main
+workflow) publishes both ISA bundles as sealed read-only entries under
+`<scratch base>/astra-sim/store/<artifact name>/` (`ci/dcs/seed-store.sh`),
+and every evaluation job links against the entry its CPU supports
+(`resolve-runtime.sh` + `install-runtime.sh`), cutting a wave's
+environment footprint from ~33 private copies to one per ISA level. The
+store is lockless by construction: the DAG runs the only writer before
+any reader exists, an entry is published by one atomic rename (its
+existence is the proof of completeness), entries are immutable
+afterwards, and reaping is a pure age sweep (> walltime + slack) in the
+next run's seed. Sharing is an optimization layer only - on any miss
+(no network scratch, expired base, failed seed) a job downloads its own
+bundle and extracts privately, exactly the pre-store behavior. No toolchain ever lands on scratch: `buildenv-packages.txt`
 and `runtime-packages.txt` are consumed by the hosted `cluster-build`
 job (`ci/dcs/build.sh`), whose bundle ships the declared runtime env the
 binary resolves against (`ci/dcs/install-runtime.sh` verifies this on

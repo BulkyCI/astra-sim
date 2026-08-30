@@ -87,7 +87,7 @@ jobs:
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
         uv run --locked python -m unittest discover -s experiments/dblp/tests -v
         uv run --locked python -m unittest discover -s .github/scripts/tests -t .github/scripts -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh ci/dcs/seed-store.sh ci/dcs/resolve-runtime.sh
         git diff --check
 
   native-build:
@@ -413,6 +413,67 @@ jobs:
         artifact: ${{ format('cluster-runtime-{0}-x86-64-v4', github.run_id) }}
         asset-name: cluster-runtime-x86-64-v4
 
+  cluster-seed-provision:
+    name: Provision the store seed runner
+    needs: cluster-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Authenticates with repository secrets, not the workflow token.
+    permissions: {}
+    steps:
+    - name: Check out the provisioning action
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: .github/actions/dcs-provision
+        sparse-checkout-cone-mode: false
+
+    - name: Mint a just-in-time runner and hand it to SLURM
+      uses: ./.github/actions/dcs-provision
+      with:
+        runner-name: dcs-${{ github.run_id }}-${{ github.run_attempt }}-store-seed
+        run-label: dcs-r${{ github.run_id }}-store-seed
+        app-id: ${{ vars.DCS_APP_ID }}
+        app-private-key: ${{ secrets.DCS_APP_PRIVATE_KEY }}
+        ssh-key: ${{ secrets.DCS_SSH_KEY }}
+        ssh-dest: ${{ vars.DCS_SSH_DEST }}
+        ssh-host-key: ${{ vars.DCS_SSH_HOST_KEY }}
+
+  cluster-seed:
+    name: Seed the shared runtime store
+    needs: [ cluster-build, cluster-seed-provision ]
+    runs-on: dcs-r${{ github.run_id }}-store-seed
+    # Two artifact downloads and a ~6 GB extraction onto network scratch;
+    # generous against NFS, tiny against the wave it unblocks.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+    - name: Check out the store tools
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: ci/dcs
+        sparse-checkout-cone-mode: false
+
+    - name: Fetch both prebuilt cluster runtimes
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ needs.cluster-build.outputs.runtime_artifact_prefix }}-*
+        merge-multiple: true
+
+    # Single writer, before any reader exists: the wave provisions only
+    # after this job ends, so the store needs no locks - the DAG is the
+    # mutual exclusion. Publishes one sealed entry per ISA level; each
+    # evaluation node later resolves the one its CPU supports.
+    - name: Publish the sealed store entries
+      env:
+        PREFIX: ${{ needs.cluster-build.outputs.runtime_artifact_prefix }}
+      run: |
+        bash ci/dcs/seed-store.sh \
+          "${PREFIX}-x86-64-v3=cluster-runtime-x86-64-v3.tar.gz" \
+          "${PREFIX}-x86-64-v4=cluster-runtime-x86-64-v4.tar.gz"
+
   evaluation-plan:
     name: Plan the evaluation matrix
     runs-on: ubuntu-24.04
@@ -454,7 +515,17 @@ jobs:
     # independently. Structural arms build for themselves through the
     # shared compiler cache and merely inherit this wait, which is
     # acceptable for a dispatch-only family.
-    needs: [ ledger, evaluation-plan, cluster-build ]
+    #
+    # The store seed is sequenced before the wave but is only an
+    # optimization layer: every arm falls back to a private extraction,
+    # so the explicit condition tolerates a failed or skipped seed while
+    # still hard-gating on the ledger, the plan, and the build (a plain
+    # `needs` would skip the wave whenever the seed failed).
+    needs: [ ledger, evaluation-plan, cluster-build, cluster-seed ]
+    if: ${{ !cancelled()
+            && needs.ledger.result == 'success'
+            && needs.evaluation-plan.result == 'success'
+            && needs.cluster-build.result == 'success' }}
     # Ceiling for the called workflow, not a grant to the simulator. Its
     # `evaluate` job declares `contents: read`; only `archive` takes the write.
     permissions:

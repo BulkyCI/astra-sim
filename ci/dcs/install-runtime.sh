@@ -75,8 +75,17 @@ printf '%s\n' "${binaries[@]}"
 # prefix baked at build time - also dead here - unless these variables
 # repoint them at the shipped env. ldd cannot see dlopen'd components,
 # so these exports are load-bearing, not cosmetic.
+#
+# ASTRA_SIM_LD_LIBRARY_PATH, deliberately NOT LD_LIBRARY_PATH: exactly
+# one consumer - the simulation step - maps it onto LD_LIBRARY_PATH for
+# the ns-3 processes. Exporting the real variable job-wide shadowed the
+# system OpenSSL for every later step: the runtime env carries conda's
+# libssl/libcrypto (through Open MPI's dependency chain) whose baked CA
+# directory is the builder's dead path, and the segment uploader's TLS
+# failed for hours (CERTIFICATE_VERIFY_FAILED, 2026-08-30). The OPAL
+# family stays global: inert strings only the simulator reads.
 {
-    echo "LD_LIBRARY_PATH=${lib}:${runtime}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    echo "ASTRA_SIM_LD_LIBRARY_PATH=${lib}:${runtime}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
     echo "OPAL_PREFIX=${runtime}"
     echo "PMIX_INSTALL_PREFIX=${runtime}"
     echo "PRTE_PREFIX=${runtime}"

@@ -29,11 +29,29 @@ import json
 import os
 import re
 import signal
+import ssl
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+
+def https_context():
+    """One CA-trust definition for every request this process makes.
+
+    certifi's bundle when the environment provides it - CI runs this
+    script under the project venv, which carries certifi - because
+    trusting ambient state failed in production: a job-global
+    LD_LIBRARY_PATH once swapped conda's libssl (dead baked CA path)
+    underneath the system interpreter, and heterogeneous cluster nodes
+    cannot be assumed to ship a working default store. Falls back to
+    the interpreter's defaults so the script still runs bare."""
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
 
 SEGMENT_PATTERN = re.compile(r"^(?P<base>.+\.zst)\.(?P<index>\d{3,})$")
 
@@ -135,6 +153,9 @@ class ReleaseClient:
         self.token = token
         self.release_id = None
         self.upload_url_base = None
+        # Built once: every request shares one context instead of
+        # re-reading the CA bundle per poll cycle.
+        self.context = https_context()
 
     def _request(self, url, method="GET", data=None, headers=None):
         request = urllib.request.Request(url, data=data, method=method)
@@ -142,7 +163,9 @@ class ReleaseClient:
         request.add_header("Accept", "application/vnd.github+json")
         for key, value in (headers or {}).items():
             request.add_header(key, value)
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(
+            request, timeout=120, context=self.context
+        ) as response:
             body = response.read()
         return json.loads(body) if body else {}
 

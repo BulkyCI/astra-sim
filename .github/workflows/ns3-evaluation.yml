@@ -310,7 +310,14 @@ jobs:
           release_tag="${RUN_RELEASE_TAG}-$(python3 .github/scripts/release_bucket.py "$LEDGER_KEY")"
         fi
         mkdir -p "$WATCH_DIR"
-        nohup python3 .github/scripts/segment_uploader.py \
+        # The project venv's interpreter, not the node's python3: uv's
+        # CPython links OpenSSL statically (immune to library-path
+        # shadowing) and the synced env provides certifi, so CA trust
+        # never depends on a heterogeneous node's system store. Direct
+        # venv path rather than `uv run` so $! is the uploader itself
+        # and the drain step's SIGTERM reaches it. -u because a
+        # block-buffered log once hid a dead uploader for hours.
+        nohup .venv/bin/python -u .github/scripts/segment_uploader.py \
           --repo "$REPOSITORY" \
           --release-tag "$release_tag" \
           --asset-prefix "$ASSET_PREFIX" \
@@ -326,6 +333,11 @@ jobs:
         SIMULATION_TIMEOUT_SECONDS: ${{ inputs.simulation_timeout_seconds }}
         REQUIRE_CONGESTION: ${{ inputs.require_congestion }}
         COMPARISON_SEED: ${{ inputs.comparison_seed }}
+        # Scoped to this one step, never job-global: the runtime env's
+        # conda libssl would shadow the system OpenSSL for every later
+        # step's tooling (it silenced the segment uploader's TLS for
+        # hours on 2026-08-30). See install-runtime.sh.
+        LD_LIBRARY_PATH: ${{ env.ASTRA_SIM_LD_LIBRARY_PATH }}
       run: |
         command=(
           uv run --locked python experiments/ring_3d/compare.py

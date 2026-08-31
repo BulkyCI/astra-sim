@@ -11,6 +11,12 @@ dependencies = [
     "numpy==2.4.6",
     # Keep the Python runtime aligned with the Protobuf 29.0 C++ toolchain.
     "protobuf==5.29.6",
+    # The segment uploader's CA trust (it was previously only transitive
+    # via chakra's HTTP stack, and the uploader must not lose its bundle
+    # to an upstream cleanup): cluster nodes cannot be trusted to ship a
+    # working system store, and a poisoned LD_LIBRARY_PATH once swapped
+    # libssl underneath the system interpreter (2026-08-30).
+    "certifi==2026.6.17",
 ]
 
 [tool.uv]

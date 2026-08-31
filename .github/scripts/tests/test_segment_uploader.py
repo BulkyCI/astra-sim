@@ -100,6 +100,30 @@ class ClassifyHttpErrorTests(unittest.TestCase):
         kind, wait = classify_http_error(429, {"Retry-After": "soon"})
         self.assertEqual((kind, wait), (RATE_LIMITED, 60))
 
+class HttpsContextTests(unittest.TestCase):
+    """CA trust is total: certifi's bundle when available, the
+    interpreter's defaults otherwise - never a crash, never None."""
+
+    def test_context_with_certifi_available(self) -> None:
+        import ssl
+
+        from segment_uploader import https_context
+
+        self.assertIsInstance(https_context(), ssl.SSLContext)
+
+    def test_context_survives_missing_certifi(self) -> None:
+        import ssl
+        import sys
+        from unittest import mock
+
+        from segment_uploader import https_context
+
+        # A None entry makes `import certifi` raise ImportError, which is
+        # exactly the bare-interpreter environment.
+        with mock.patch.dict(sys.modules, {"certifi": None}):
+            self.assertIsInstance(https_context(), ssl.SSLContext)
+
+
 class ResolveReleaseTests(unittest.TestCase):
     """The uploader resolves, never creates: the ledger pre-opens the run
     release and every archive bucket before evaluations start, so this

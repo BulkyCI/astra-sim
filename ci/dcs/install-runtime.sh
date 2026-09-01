@@ -89,4 +89,7 @@ printf '%s\n' "${binaries[@]}"
     echo "OPAL_PREFIX=${runtime}"
     echo "PMIX_INSTALL_PREFIX=${runtime}"
     echo "PRTE_PREFIX=${runtime}"
+    # The attest step hashes the exact binary that ran: this path is the
+    # code half of the arm's reproducibility identity.
+    echo "ASTRA_SIM_BINARY=${root}/${binaries[0]}"
 } >> "$GITHUB_ENV"

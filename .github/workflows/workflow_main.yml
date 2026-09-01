@@ -29,10 +29,10 @@ jobs:
     name: Open the experiment ledger
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Opens the run's release, its archive bucket releases, and its issue,
-    # so it needs contents:write. It runs only `gh` and finishes in under a
-    # minute. Because every evaluation gates on this job, downstream
-    # writers may assume all six releases exist and never create any.
+    # Opens the run's release and its issue, so it needs contents:write.
+    # It runs only `gh` and finishes in under a minute. Because every
+    # evaluation gates on this job, downstream writers may assume the
+    # release exists and never create one.
     permissions:
       contents: write
       issues: write
@@ -87,7 +87,7 @@ jobs:
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
         uv run --locked python -m unittest discover -s experiments/dblp/tests -v
         uv run --locked python -m unittest discover -s .github/scripts/tests -t .github/scripts -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh ci/dcs/seed-store.sh ci/dcs/resolve-runtime.sh
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh ci/dcs/seed-store.sh ci/dcs/resolve-runtime.sh ci/dcs/outbox.sh
         git diff --check
 
   native-build:

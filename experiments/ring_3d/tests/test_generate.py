@@ -380,6 +380,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 f"{output / 'ns3' / 'transport_summary.csv'}",
                 network_config,
             )
+            # Rotation is sized for storage (segments are hashed and
+            # deleted in flight), not for the release-asset cap.
+            self.assertIn("TRANSPORT_EVENT_SEGMENT_BYTES 268435456", network_config)
             self.assertIn("ACK_HIGH_PRIO 1", network_config)
             self.assertEqual(
                 Path(manifest["transport_event_file"]),

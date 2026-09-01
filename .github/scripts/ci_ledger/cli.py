@@ -19,8 +19,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from release_bucket import BUCKETS
-
 from .gh import Gh, GhError
 from .model import (
     Create,
@@ -134,45 +132,13 @@ def command_open(arguments: argparse.Namespace) -> int:
         )
         release_action = "created"
 
-    # The archive buckets open here too, and nowhere else: every bucket tag
-    # is a pure function of the run tag (release_bucket.py assigns arms to
-    # buckets), and every evaluation gates on this job, so a downstream
-    # writer holding a non-empty release tag may assume all buckets exist -
-    # writers resolve, only the ledger creates, and no creation race can
-    # exist. Adoption keeps re-runs idempotent, mirroring the run release.
-    for bucket_index in range(BUCKETS):
-        bucket_tag = f"{tag}-b{bucket_index}"
-        if not gh.release_exists(bucket_tag):
-            gh.create_release(
-                bucket_tag,
-                context.sha,
-                f"{context.title} · bucket b{bucket_index}",
-                _bucket_notes(context, number, tag),
-            )
-
     _emit("issue", str(number))
     _emit("release_tag", tag)
     _summarize(
         f"Experiment ledger {action}: [#{number}]({context.issue_url(number)}) · "
-        f"archive {release_action}: [`{tag}`]({context.release_url(tag)}) "
-        f"with {BUCKETS} buckets"
+        f"archive {release_action}: [`{tag}`]({context.release_url(tag)})"
     )
     return 0
-
-
-def _bucket_notes(context: RunContext, issue: int, run_tag: str) -> str:
-    """Bucket release body: where this bucket fits and how arms map to it."""
-    return "\n".join(
-        (
-            (
-                f"Archive bucket of [`{run_tag}`]({context.release_url(run_tag)}), "
-                f"holding the evaluation arms whose ledger key hashes here "
-                f"(sha256 mod {BUCKETS}; see `.github/scripts/release_bucket.py`)."
-            ),
-            "",
-            f"- Ledger: [#{issue}]({context.issue_url(issue)})",
-        )
-    )
 
 
 def _release_notes(context: RunContext, issue: int) -> str:

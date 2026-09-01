@@ -36,18 +36,12 @@ on:
         description: >
           Release tag from the calling run's `ledger` job; empty disables
           archiving. Never derived from run state here — that would split a
-          partial re-run across two releases. This workflow's own uploads go
-          to the bucket release `<release_tag>-<bucket>`: a single release
-          holds at most 1000 assets and one wave's ~1.8 GB raw segments
-          alone approach that (927 observed), so per-run archives shard
-          into a handful of buckets. Nothing declares or stores the
-          assignment: the bucket is a pure function of the arm's stable
-          ledger key (.github/scripts/release_bucket.py), so both writers
-          here compute it, any consumer can re-derive where an arm's
-          assets live, and re-runs land in their original buckets. The
-          ledger pre-opens every bucket with the run release, so a
-          non-empty tag here implies all of them exist — writers resolve,
-          never create.
+          partial re-run across two releases. One release per run suffices:
+          raw transport streams are hashed and discarded on the runner
+          (segment_hasher.py) rather than shipped, so an arm's archive is
+          reports, summaries, and the attestation — a handful of assets,
+          nowhere near the 1000-asset release cap that once forced
+          sharding.
         required: false
         default: ''
         type: string
@@ -199,15 +193,14 @@ jobs:
     # next enough headroom to report and upload; wall clocks are backstops,
     # not budgets - wedges die via the sim's forward-progress deadline.
     timeout-minutes: 6900
-    # contents:write is a deliberate relaxation of "the simulator job holds
-    # no write scope": the mid-run segment uploader must publish sealed raw
-    # segments to the release while the sim runs, or multi-day arms outgrow
-    # scratch and the 2 GiB asset cap. Mitigation: the token is placed only
-    # in the uploader step's environment - the build and simulation steps
-    # never receive it - though a same-user process could still read it out
-    # of the uploader's environment. Accepted and recorded.
+    # No write scope, and no GitHub-bound effect at all: raw segments are
+    # hashed and discarded on the node (segment_hasher.py), results leave
+    # through the scratch outbox, and the freshly tokened courier job
+    # below performs the uploads. Nothing in a multi-day arm depends on a
+    # credential, so nothing can outlive one - the runner's tokens stop
+    # refreshing at 24 hours, which killed the old mid-run uploader.
     permissions:
-      contents: write
+      contents: read
     env:
       EXPERIMENT_PROFILE: ${{ inputs.profile }}
       EXPERIMENT_RUN_DIRECTORY: ${{ inputs.run_directory }}
@@ -269,61 +262,38 @@ jobs:
 
     # Links against the sealed store entry (or unpacks the private
     # bundle), proves the binary's library closure resolves on this node,
-    # and exports LD_LIBRARY_PATH plus the Open MPI relocation variables
-    # for every later step.
+    # and exports the runtime environment (ASTRA_SIM_LD_LIBRARY_PATH, the
+    # Open MPI relocation variables, and the binary path the attest step
+    # hashes) for the later steps.
     - name: Install and verify the cluster runtime
       env:
         MARCH: ${{ steps.isa.outputs.march }}
         STORE_ENTRY: ${{ steps.store.outputs.entry }}
       run: bash ci/dcs/install-runtime.sh "cluster-runtime-${MARCH}.tar.gz"
 
-    # Ships sealed raw-log segments to the release while the sim runs, so
-    # per-arm scratch stays near two segments (~3.6 GB) instead of the full
-    # multi-gigabyte stream. No IPC with the simulator: a segment is sealed
-    # exactly when a higher-numbered sibling exists on disk. SIGTERM means
-    # "the sim is done - drain everything and exit".
-    - name: Start the mid-run segment uploader
+    # Folds sealed raw-log segments into the arm's stream digest and
+    # deletes them, so per-arm scratch stays near two segments instead of
+    # the full multi-gigabyte stream. No IPC with the simulator: a segment
+    # is sealed exactly when a higher-numbered sibling exists on disk.
+    # SIGTERM means "the sim is done - drain everything and exit". No
+    # token, no network: its predecessor uploaded segments to the release
+    # and died when the runner's token stopped refreshing at 24 hours,
+    # after which segments piled up to the scratch quota. A hasher cannot
+    # outlive a credential it never holds.
+    - name: Start the mid-run segment hasher
       env:
-        # On self-hosted runners the job token refreshes for at most 24
-        # hours, so a multi-day arm outlives it. On the first credential
-        # failure the uploader exits gracefully - a dead token never
-        # comes back, so retrying is noise - and every remaining segment
-        # rides the bundle to the archive job, which runs with a fresh
-        # token and sweeps stragglers under identical asset names.
-        # Providing the optional DCS_RELEASE_TOKEN secret - a
-        # fine-grained PAT with contents:write on this repository -
-        # removes the 24 h ceiling; when absent, the expression falls
-        # back to the job token.
-        GH_TOKEN: ${{ secrets.DCS_RELEASE_TOKEN || github.token }}
-        # The arm's bucket release tag is computed below, not declared: a
-        # pure function of the stable ledger key (see the release_tag
-        # input and release_bucket.py). The ledger job pre-opened every
-        # bucket before evaluations started; the uploader only resolves.
-        RUN_RELEASE_TAG: ${{ inputs.release_tag }}
-        LEDGER_KEY: ${{ inputs.ledger_key }}
-        ASSET_PREFIX: ${{ inputs.artifact_name }}
         WATCH_DIR: ${{ inputs.run_directory }}
-        REPOSITORY: ${{ github.repository }}
       run: |
-        release_tag=""
-        if [[ -n "$RUN_RELEASE_TAG" ]]; then
-          release_tag="${RUN_RELEASE_TAG}-$(python3 .github/scripts/release_bucket.py "$LEDGER_KEY")"
-        fi
         mkdir -p "$WATCH_DIR"
-        # The project venv's interpreter, not the node's python3: uv's
-        # CPython links OpenSSL statically (immune to library-path
-        # shadowing) and the synced env provides certifi, so CA trust
-        # never depends on a heterogeneous node's system store. Direct
-        # venv path rather than `uv run` so $! is the uploader itself
-        # and the drain step's SIGTERM reaches it. -u because a
-        # block-buffered log once hid a dead uploader for hours.
-        nohup .venv/bin/python -u .github/scripts/segment_uploader.py \
-          --repo "$REPOSITORY" \
-          --release-tag "$release_tag" \
-          --asset-prefix "$ASSET_PREFIX" \
+        # The project venv's interpreter: the synced env provides
+        # zstandard for streaming decompression. Direct venv path rather
+        # than `uv run` so $! is the hasher itself and the drain step's
+        # SIGTERM reaches it. -u because a block-buffered log once hid a
+        # dead sidecar for hours.
+        nohup .venv/bin/python -u .github/scripts/segment_hasher.py \
           --watch-dir "$WATCH_DIR" \
-          > "$RUNNER_TEMP/segment-uploader.log" 2>&1 &
-        echo $! > "$RUNNER_TEMP/segment-uploader.pid"
+          > "$RUNNER_TEMP/segment-hasher.log" 2>&1 &
+        echo $! > "$RUNNER_TEMP/segment-hasher.pid"
 
     - name: Run the full paired comparison
       # Inputs cross into the shell as environment data, never as text
@@ -355,25 +325,43 @@ jobs:
         timeout --foreground "${EXECUTION_TIMEOUT_MINUTES}m" "${command[@]}"
 
     # The sim has exited, so every segment on disk is final. Drain before
-    # the bundle upload below walks the directory, or the uploader could
-    # delete files mid-scan. Bounded wait; job teardown reaps a straggler.
-    - name: Drain and stop the segment uploader
+    # the attest step reads the digest, or the stream record would be a
+    # mid-run snapshot. Bounded wait; job teardown reaps a straggler.
+    - name: Drain and stop the segment hasher
       if: ${{ always() }}
       run: |
-        pid="$(cat "$RUNNER_TEMP/segment-uploader.pid" 2>/dev/null)" || exit 0
+        pid="$(cat "$RUNNER_TEMP/segment-hasher.pid" 2>/dev/null)" || exit 0
         if kill -TERM "$pid" 2>/dev/null; then
           for _ in $(seq 1 120); do
             kill -0 "$pid" 2>/dev/null || break
             sleep 5
           done
         fi
-        # Past the bounded wait the uploader must be dead, not merely
-        # asked: a survivor deleting files while the bundle upload walks
-        # the directory would corrupt the artifact scan. Whatever it had
-        # not shipped rides the bundle and the archive job sweeps it.
+        # Past the bounded wait the hasher must be dead, not merely asked:
+        # a survivor deleting files while the outbox placement below walks
+        # the directory would corrupt the copy. Whatever it had not folded
+        # is recorded by the attestation as a partial stream.
         kill -9 "$pid" 2>/dev/null || true
-        echo "--- segment uploader log ---"
-        cat "$RUNNER_TEMP/segment-uploader.log" 2>/dev/null || true
+        echo "--- segment hasher log ---"
+        cat "$RUNNER_TEMP/segment-hasher.log" 2>/dev/null || true
+
+    # The arm's commitment: binary identity, machine facts, the stream
+    # digest the hasher folded, and a sha256 for every retained output.
+    # Runs after the drain (the digest is final) and before the report
+    # publication and outbox placement (both must carry the amended
+    # report). MARCH and RUNTIME_KEY mirror the install step's inputs;
+    # ASTRA_SIM_BINARY was exported by install-runtime.sh.
+    - name: Attest the arm's provenance
+      if: ${{ always() }}
+      env:
+        MARCH: ${{ steps.isa.outputs.march }}
+        RUNTIME_KEY: ${{ inputs.cluster_runtime_artifact }}-${{ steps.isa.outputs.march }}
+        LEDGER_KEY: ${{ inputs.ledger_key }}
+        COMPARISON_SEED: ${{ inputs.comparison_seed }}
+      run: |
+        .venv/bin/python .github/scripts/attest.py \
+          --run-dir "$EXPERIMENT_RUN_DIRECTORY" \
+          --report "$EXPERIMENT_RUN_DIRECTORY/comparison_report.md"
 
     - name: Publish paired comparison report
       if: ${{ always() }}
@@ -384,41 +372,140 @@ jobs:
           echo "Paired evaluation did not produce a comparison report; inspect the retained diagnostics." >> "$GITHUB_STEP_SUMMARY"
         fi
 
-    - name: Upload reproducibility bundle
-      if: always()
+    # The arm's only delivery: rename the results onto shared scratch for
+    # the courier job. Uploading from here is not an option - by the time
+    # a multi-day arm finishes, every token this job ever held has been
+    # dead for days (the runner refreshes them for at most 24 hours), so
+    # anything GitHub-bound must happen in a job that starts after this
+    # one ends. The outbox excludes raw segments by construction; the
+    # attestation carries their hashes instead.
+    - name: Place the results in the courier outbox
+      if: ${{ always() }}
+      env:
+        LEDGER_KEY: ${{ inputs.ledger_key }}
+      run: |
+        bash ci/dcs/outbox.sh place \
+          "$GITHUB_RUN_ID" "$LEDGER_KEY" "$EXPERIMENT_RUN_DIRECTORY"
+
+  provision_courier:
+    name: Provision the courier runner
+    # The collection/cleanup half of the arm: runners refresh their tokens
+    # for at most 24 hours, so a multi-day arm cannot upload anything -
+    # its results wait in the scratch outbox, and this freshly minted
+    # runner (whose job starts now, so its tokens are minutes old) is the
+    # only path they take to GitHub. Runs on failure too: a failed arm's
+    # partial outbox is exactly the forensic record worth collecting.
+    needs: evaluate_cluster
+    if: ${{ !cancelled() && inputs.comparison }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Authenticates with repository secrets, not the workflow token.
+    permissions: {}
+
+    steps:
+    - name: Check out the provisioning action
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: .github/actions/dcs-provision
+        sparse-checkout-cone-mode: false
+
+    - name: Mint a just-in-time runner and hand it to SLURM
+      uses: ./.github/actions/dcs-provision
+      with:
+        runner-name: dcs-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.ledger_key }}-courier
+        run-label: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}-courier
+        app-id: ${{ vars.DCS_APP_ID }}
+        app-private-key: ${{ secrets.DCS_APP_PRIVATE_KEY }}
+        ssh-key: ${{ secrets.DCS_SSH_KEY }}
+        ssh-dest: ${{ vars.DCS_SSH_DEST }}
+        ssh-host-key: ${{ vars.DCS_SSH_HOST_KEY }}
+
+  courier:
+    name: Collect the results from the cluster
+    needs: provision_courier
+    if: ${{ !cancelled() && needs.provision_courier.result == 'success' }}
+    # A queued self-hosted job is cancelled by GitHub after 24 hours, so a
+    # pathological SLURM queue can strand this collection. That is a
+    # recoverable state, not a loss: the outbox waits on scratch for at
+    # least five days (outbox.sh places into the freshest generation), the
+    # missing report keeps the ledger issue open and fails the aggregate's
+    # exact-count gate, and "re-run failed jobs" provisions a new courier
+    # that finds the outbox where the arm left it.
+    runs-on: dcs-r${{ github.run_id }}-${{ inputs.ledger_key }}-courier
+    # Minutes of work (locate, artifact upload of a report-sized bundle,
+    # discard) on a full-shape SLURM allocation: the sbatch script has one
+    # resource shape, and a second shape is not worth a second cluster
+    # deployment path for a job this short.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+    - name: Check out the outbox tool
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        sparse-checkout: ci/dcs
+        sparse-checkout-cone-mode: false
+
+    - name: Locate the arm's outbox
+      id: outbox
+      env:
+        LEDGER_KEY: ${{ inputs.ledger_key }}
+      run: |
+        set -euo pipefail
+        if path="$(bash ci/dcs/outbox.sh locate "$GITHUB_RUN_ID" "$LEDGER_KEY")"; then
+          { echo "hit=true"; echo "path=${path}"; } >> "$GITHUB_OUTPUT"
+        else
+          # A missing outbox means the arm died before placing results;
+          # the arm's own red status already tells that story, and the
+          # ledger will record the absent report.
+          echo "hit=false" >> "$GITHUB_OUTPUT"
+          echo "No outbox was placed for this arm; nothing to collect." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload the reproducibility bundle
+      if: ${{ steps.outbox.outputs.hit == 'true' }}
       uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact_name }}-${{ github.run_id }}
-        path: ${{ inputs.run_directory }}
+        path: ${{ steps.outbox.outputs.path }}
         if-no-files-found: ignore
         overwrite: true
 
     # The sweep aggregations fold exactly one file from this run - the
     # comparison verdict - and must never pay for it by downloading the
-    # full multi-gigabyte bundle. Publish the verdict as its own
-    # kilobyte-sized artifact; the aggregate download patterns match only
-    # these `-summary-` names.
+    # full bundle. Publish the verdict as its own kilobyte-sized artifact;
+    # the aggregate download patterns match only these `-summary-` names.
     - name: Upload the comparison summary for aggregation
-      if: always()
+      if: ${{ steps.outbox.outputs.hit == 'true' }}
       uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact_name }}-summary-${{ github.run_id }}
-        path: ${{ inputs.run_directory }}/comparison.json
+        path: ${{ steps.outbox.outputs.path }}/comparison.json
         if-no-files-found: ignore
         overwrite: true
 
+    # Only after both uploads succeeded: a failed courier re-run must
+    # still find the outbox where the arm left it.
+    - name: Discard the collected outbox
+      env:
+        LEDGER_KEY: ${{ inputs.ledger_key }}
+      run: bash ci/dcs/outbox.sh discard "$GITHUB_RUN_ID" "$LEDGER_KEY"
+
   archive:
     name: Record the result
-    needs: [ evaluate, evaluate_cluster ]
+    # The courier edge orders this job after the artifacts exist on the
+    # cluster path; the hosted structural path uploads its own.
+    needs: [ evaluate, evaluate_cluster, courier ]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
-    # The hosted ceiling, because this job downloads the full
-    # reproducibility bundle - observed at 38.8 GB once the raw transport
-    # streams shipped - and re-uploads most of it as release assets. The
-    # previous 20-minute clock was sized for the report-only era and
-    # cancelled a healthy archive mid-download. Sitting at the end of the
-    # graph, this backstop blocks nothing by being slow.
-    timeout-minutes: 360
+    # Sized for a report-scale bundle: raw transport streams are hashed
+    # and discarded on the runner, never shipped, so the 38.8 GB bundles
+    # that once forced a 360-minute ceiling here cannot recur. Hosted
+    # structural bundles (dispatch-only) may still carry some raw stream.
+    timeout-minutes: 120
     # The only job here that holds write scopes. It runs `gh` and `tar` over a
     # downloaded bundle and never executes anything from it, so a malicious
     # artifact cannot reach the token.
@@ -435,22 +522,6 @@ jobs:
           .github/actions
           .github/scripts
         sparse-checkout-cone-mode: false
-
-    # Recomputes, never receives, the arm's bucket: the same pure
-    # function of the ledger key the mid-run uploader evaluated, so both
-    # writers reach one release without coordinating.
-    - name: Compute the arm's archive bucket
-      id: bucket
-      env:
-        RUN_RELEASE_TAG: ${{ inputs.release_tag }}
-        LEDGER_KEY: ${{ inputs.ledger_key }}
-      run: |
-        set -euo pipefail
-        tag=""
-        if [[ -n "$RUN_RELEASE_TAG" ]]; then
-          tag="${RUN_RELEASE_TAG}-$(python3 .github/scripts/release_bucket.py "$LEDGER_KEY")"
-        fi
-        echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
     - name: Fetch the evaluation report
       continue-on-error: true
@@ -475,8 +546,8 @@ jobs:
       if: ${{ !cancelled() }}
       uses: ./.github/actions/release-archive
       with:
-        # The arm's bucket release, pre-opened by the ledger job.
-        tag: ${{ steps.bucket.outputs.tag }}
+        # The run release, opened by the ledger job before any arm ran.
+        tag: ${{ inputs.release_tag }}
         artifact: ${{ inputs.artifact_name }}-${{ github.run_id }}
         asset-name: ${{ inputs.artifact_name }}
         # The report fetch above already landed the whole bundle on this

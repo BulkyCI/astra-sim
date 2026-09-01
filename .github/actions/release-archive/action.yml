@@ -1,12 +1,9 @@
 name: Archive a bundle to a permanent release
 description: >
   Download one of the run's Actions artifacts and publish it as assets on the
-  given release - the run-level release or one of the archive buckets
-  (`<run tag>-<bucket>`, assignment computed by
-  .github/scripts/release_bucket.py), all of which the `ledger` job pre-opens
-  before any evaluation starts, so this action only ever uploads. Actions
-  artifacts expire; release assets do not, and they cost nothing against the
-  storage quota.
+  run's release, which the `ledger` job opens before any evaluation starts,
+  so this action only ever uploads. Actions artifacts expire; release assets
+  do not, and they cost nothing against the storage quota.
 
 inputs:
   tag:
@@ -129,14 +126,13 @@ runs:
         large_files+="${size} ${name}"$'\n'
       done < <(find "$source" -type f \
         \( -size +100M -o -name '*.zst.[0-9][0-9][0-9]*' \) -print0)
-      # Raw-log segments are matched by name, not size: the mid-run
-      # uploader owns them and normally ships and deletes every one, but
-      # a straggler that survived a failed drain must still become an
-      # individual asset - under the exact name the uploader would have
-      # used - never a batch member, or a piece of the reconstructable
-      # stream would hide inside a part tarball. This keeps the two
-      # components' domains disjoint: segments are individual assets
-      # always; the batch planner sees only what is left.
+      # Raw-log segments are matched by name, not size: cluster arms hash
+      # and delete them (segment_hasher.py) and their outbox excludes any
+      # residue, but hosted structural bundles still carry theirs, and a
+      # segment must always be an individual asset - never a batch member,
+      # or a piece of the reconstructable stream would hide inside a part
+      # tarball. This keeps the two components' domains disjoint: segments
+      # are individual assets always; the batch planner sees what is left.
 
       # Priority order: the small-file tarball first - reports and
       # summaries are the record's irreplaceable core and must land before

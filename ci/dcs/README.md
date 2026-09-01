@@ -108,15 +108,19 @@ tears itself down after the 30-minute idle guard.
 A completed experiment leaves nothing on the shared scratch volume. All
 jobs live under one `astra-sim/<slurm job id>` parent per scratch base, so
 a full wave presents as a single directory. Three mechanisms compose: the
-mid-run segment uploader ships sealed raw-log segments to the arm's
-archive bucket — the release `<run tag>-<bucket>`, where the bucket is a
-pure function of the ledger key (`.github/scripts/release_bucket.py`;
-one release caps at 1000 assets, and a wave's segments pooled on the run
-release approached it) — and deletes them as the sim runs; the job's EXIT trap removes its own tree
+mid-run segment hasher (`.github/scripts/segment_hasher.py`) folds each
+sealed raw-log segment's uncompressed content into the arm's stream
+digest and deletes it as the sim runs — nothing raw is ever uploaded; the
+attestation carries the hashes, and results reach GitHub through the
+scratch outbox (`ci/dcs/outbox.sh`) collected by a freshly tokened
+courier job, because runner tokens stop refreshing after 24 hours; the
+job's EXIT trap removes its own tree
 (and the shared parent, when it is the last job out) whenever the job ends
 for any reason that lets bash run; and every new job reaps orphaned
 sibling trees whose SLURM job id no longer exists — the backstop for node
-crashes and kills that outrun the trap. Only the control-plane files under
+crashes and kills that outrun the trap. The non-numeric `store` and
+`outbox` siblings are exempt from the reaper by construction; orphaned
+outboxes die with their scratch generation. Only the control-plane files under
 `~/astra-ci` (job logs, jitconfig staging) live outside scratch, and
 teardown below removes those.
 

@@ -71,6 +71,15 @@ network_scratch="$(newest_scratch_space || true)"
 # variable is empty - store disabled, jobs extract privately - whenever
 # the node has none; job-local fallback bases below are never shared.
 export ASTRA_STORE_ROOT="${network_scratch:+${network_scratch}/astra-sim/store}"
+# The outbox is the store's outbound twin: an arm places its results here
+# (ci/dcs/outbox.sh) and a freshly tokened courier job collects them,
+# because no GitHub upload survives a job's 24-hour token ceiling. This
+# export is only the placement fallback: outbox.sh re-resolves the
+# freshest generation at placement time, since a 4d20h arm outlives most
+# of the margin this job-start resolution carries. Like `store`, the name
+# never parses as a numeric job id, so the sibling reaper below cannot
+# touch it; orphans die with the scratch generation.
+export ASTRA_OUTBOX_ROOT="${network_scratch:+${network_scratch}/astra-sim/outbox}"
 dir=""
 for base in "${SLURM_TMPDIR:-}" "$network_scratch" /var/tmp /tmp; do
     [[ -n "$base" ]] || continue

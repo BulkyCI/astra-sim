@@ -1122,6 +1122,12 @@ def write_network_config(
         # The raw per-packet research artifact, in its historic ns-3 CSV
         # syntax, zstd-compressed by the simulator on a worker thread.
         "TRANSPORT_EVENT_OUTPUT_FILE": output_dir / "transport_events.csv.zst",
+        # Rotation size for the raw stream's segments. Sized for storage,
+        # not shipping: segments are hashed and deleted in flight by the
+        # CI sidecar (segment_hasher.py), never uploaded, so the old
+        # 1.8 GB asset-cap sizing would only raise the in-flight disk
+        # bound (two segments) on shared cluster scratch.
+        "TRANSPORT_EVENT_SEGMENT_BYTES": 268435456,
         # Aggregated per-(event, plane) totals; what analysis consumes.
         "TRANSPORT_EVENT_SUMMARY_OUTPUT_FILE": output_dir
         / "transport_summary.csv",
@@ -1591,10 +1597,12 @@ def materialize(
         "clr_mask": str(clr_mask.resolve()),
         "clr_schedule": schedule_metadata(clr_schedule),
         "telemetry_dir": str((output_dir / "telemetry").resolve()),
-        # The raw stream is written as numbered zstd segments rotated near
-        # 1.8 GB so each ships under the 2 GiB release-asset cap; segment
-        # .000 always exists, and `cat <base>.*  | zstd -d` reconstructs
-        # the exact single-file CSV. The recorded path is the family base.
+        # The raw stream is written as numbered zstd segments, rotated at
+        # TRANSPORT_EVENT_SEGMENT_BYTES above; segment .000 always exists,
+        # and `cat <base>.* | zstd -d` reconstructs the exact single-file
+        # CSV while segments last. In CI they do not last: the sidecar
+        # hasher records each segment's uncompressed sha256 and the whole
+        # stream's, then deletes it. The recorded path is the family base.
         "transport_event_file": str(
             (output_dir / "ns3" / "transport_events.csv.zst").resolve()
         ),

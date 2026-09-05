@@ -1,6 +1,13 @@
 # Review: CI run #117 wave readout
 
 Version reviewed: 2026-09-05 (the readout as it stood before this pass).
+The readout has since been reframed around network health as the outcome
+variable, with DBLP read as Accordion's phase-adaptive tolerance plus a
+lossy transport; under that framing O1 is resolved rather than open: the
+operation-span p99 already reported is the episode's worst collective
+(the maximum span is at step 18 or 19 in every seed) and it improves
+153 ms, CI [5.0, 301.7], while the episode's total duration does not.
+O2 to O11 carry over unchanged.
 Level: lite (desk check). Reading: 8 sections of the readout as extracted
 text; corpus: none. The DBLP paper (arXiv:2605.01989) was read as the
 idea's origin only; the simulated transport is the programme's own by

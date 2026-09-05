@@ -2,8 +2,10 @@
 
 Version reviewed: 2026-09-05 (the readout as it stood before this pass).
 Level: lite (desk check). Reading: 8 sections of the readout as extracted
-text; corpus: none. The DBLP paper (arXiv:2605.01989) was read for
-background; no novelty bank was walked.
+text; corpus: none. The DBLP paper (arXiv:2605.01989) was read as the
+idea's origin only; the simulated transport is the programme's own by
+decision, so no transport-fidelity objection is raised. No novelty bank was
+walked.
 
 ## Summary
 The document reads one CI wave of a matched three-arm simulation study
@@ -69,10 +71,9 @@ recovery and a pending control, in the verdict sentence itself.
 [O6] (limitations/unstated, Where we are) "every offered byte is trimmed
 and re-sent between nine and ten times." The Storm regime that produces
 the anchor's confidence interval is largely produced by go-back-N recovery:
-the same fabric family under selective repair shows W of 0.02, and UEC
-pairs trimming with selective retransmission. Name go-back-N as the
-condition of the result and add a selective-repair baseline to the anchor
-family.
+the same fabric family under the programme's own selective-repair mode
+shows W of 0.02. Name go-back-N as the condition of the result in the
+verdict sentence and add a selective-repair baseline to the anchor family.
 
 ## Minor
 [O7] (claims/rhetoric) "The bound is doing work." Fixed-high wins Storm

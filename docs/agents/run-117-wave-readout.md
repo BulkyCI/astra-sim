@@ -17,7 +17,16 @@ This is not a data readout. The numbers are here, but the questions I am
 answering are the ones a reviewer will ask: does this approach offer
 relief, how much, under what condition, and what is the contribution.
 
-## What the paper claims and what we actually built
+One framing decision up front. The DBLP paper is the origin of the idea,
+not the target. It predates the fabrics that AI clusters now run, and the
+programme pivoted in July: the UEC-shaped trimming transport we simulate is
+the transport of our paper, by decision, and the paper's UDP-with-TCP-control
+prototype is background. Nothing below treats the distance between the two
+transports as a weakness. What I do hold onto from the paper is its claim
+shape, because that is what the phase-aware idea promises and what a reader
+will expect us to test.
+
+## What the paper claimed and what we built
 
 DBLP's claim is about the burst. A fixed small loss tolerance forces many
 retransmission rounds during a loss burst; a receiver that knows the step
@@ -26,19 +35,16 @@ iteration finishes 4 to 6 times sooner (Tables II to VI in the paper), with
 17 to 34 % less training time overall because 40 % of every non-critical
 gradient never has to arrive at all. The evidence is three workers and one
 server over UDP with TCP control, loss injected at 60 to 90 % on chosen
-iterations, CIFAR-scale CNNs and GPT-2-S. The paper was conceived for a
-commodity fabric where loss is silent and recovery is expensive.
-
-The fabric we simulate is neither. UEC trimming signals every loss with a
-64-byte header and the transport repairs it; there is no silent loss and no
-unacknowledged byte. And the policy we built is not the paper's: it
-substitutes a 64-byte provenance flow for a random 0.5 % or 10 % of DP
-All-Reduce payloads at admission, before the network has seen them. It
-never declines a repair. So the experiment tests the paper's *phase signal*
-(protect critical steps, relax elsewhere) attached to the paper's *bandwidth
-half* (never send some of the gradient), on a fabric where the paper's
-*recovery half* (stop retransmitting early) has no analogue yet. That
-distinction is the whole reading of this wave.
+iterations, CIFAR-scale CNNs and GPT-2-S. On our transport, loss is a trimmed 64-byte header and every trimmed byte is
+repaired; there is no silent loss and no unacknowledged byte. The policy we
+built is the phase signal attached to admission: it substitutes a 64-byte
+provenance flow for a random 0.5 % or 10 % of DP All-Reduce payloads before
+the network has seen them, and it never declines a repair. So the wave tests
+the *phase signal* (protect critical steps, relax elsewhere) attached to the
+*bandwidth half* of the idea (never send some of the gradient), while the
+*recovery half* (stop repairing early, at the moment the burst is forming)
+does not exist yet in our transport. That distinction is the whole reading
+of this wave.
 
 The matched design is as tight as claimed. Every arm of a seed shares
 traces, topology, burst, CLR mask and RNG stream; within one profile the
@@ -133,7 +139,7 @@ algorithm has manufactured a retransmission storm, and no demonstrated
 relief of the burst tail anywhere. That is the honest number, and it is
 smaller than the paper's for a reason I can now name.
 
-## Why: the mechanism gap and the fabric gap
+## Why: the mechanism, and the recovery algorithm it depends on
 
 The relief we do measure has a mechanism I can point at, and it is not the
 paper's. Shedding 1.98 GiB of the anchor's 166 GiB offered load took 156 GiB
@@ -154,17 +160,19 @@ before the burst, uniformly over the step, so it cannot concentrate its
 relief where the tail is. The per-step table is what that looks like:
 relief everywhere except the one step that matters.
 
-The fabric gap is worse for us than the mechanism gap. The Storm regime
-that gives the anchor its confidence interval is produced by go-back-N: the
-same 2:1 fabric family under selective repair shows W of 0.02, seventy
-times fewer trims, and the policy relieves nothing [O6]. UEC pairs trimming
-with selective retransmission; go-back-N on a trimming fabric is a
-recovery algorithm the specification does not intend. Every number in this
-programme's anchor family is therefore conditional on a baseline transport a
-modern fabric does not run, and a reviewer who knows the fabric will say so
-first. What survives under selective repair is only the burst episode
-itself: a queue that overflows, trims, and repairs once. That is the paper's
-regime, and it is the one regime our mechanism cannot reach.
+The second dependence is on our own recovery algorithm, and it matters
+more than the first. The Storm regime that gives the anchor its confidence
+interval is produced by go-back-N: the same 2:1 fabric family under
+selective repair shows W of 0.02, seventy times fewer trims, and the policy
+relieves nothing [O6]. Both recovery modes are ours; the transport ships
+selective repair as a profile option, and the roadmap already treats it as
+the mode under which sustained oversubscription becomes a sweepable axis.
+So every number in the anchor family is conditional on go-back-N, and that
+condition has to be stated in the same sentence as the result, because the
+programme's own next transport removes it. What survives under selective
+repair is only the burst episode itself: a queue that overflows, trims, and
+repairs once. That is the regime the idea was conceived for, and it is the
+one regime the admission mechanism cannot reach.
 
 The dose grid says the same thing from the other side, with the caveat that
 its four points share a seed but not a selection stream (the profile name is
@@ -218,9 +226,9 @@ interval.
    timing at this scale and the design cannot resolve it [O8]. The burst-step
    and aftermath-step span are the estimands the paper's claim needs and the
    protocol does not name.
-2. The anchor's baseline transport is not the fabric's transport. Go-back-N
-   makes the Storm; selective repair removes it [O6]. There is no
-   selective-repair arm in any family with a burst.
+2. The anchor's result is conditional on go-back-N recovery. Go-back-N
+   makes the Storm; our own selective-repair mode removes it [O6]. There is
+   no selective-repair arm in any family with a burst.
 3. The wave has no negative control. burst0, which the matrix calls one, is
    a Knee-regime fabric that congests itself (W 2.23 with no burst); the
    protocol's `no_incast_8.json` did not run [O9]. The "supported policy
@@ -243,12 +251,12 @@ interval.
 The referee pass returned major revision: no fatal objection, six major.
 Read as a whole they say one thing. The document, and the programme behind
 it, claims tail relief and measures steady-state relief; the mechanism is
-argued from correlation; the strongest result is conditional on a recovery
-algorithm the fabric does not use; and the claims that generalise (no
-channel under selective repair, dose is not the amplifier) rest on one seed
-each. None of these is a flaw in the harness or the statistics. They are
-all the same gap: the experiment has not yet put the paper's mechanism on
-the modern wire.
+argued from correlation; the strongest result is conditional on the
+recovery mode the programme itself intends to replace; and the claims that
+generalise (no channel under selective repair, dose is not the amplifier)
+rest on one seed each. None of these is a flaw in the harness or the
+statistics. They are all the same gap: the experiment has not yet put the
+recovery half of the idea on our transport.
 
 Two objections go to the premise rather than the data. The phase-tolerance
 premise (40 % additional loss outside the critical regime is harmless)
@@ -266,8 +274,8 @@ Three framings are on the table.
 
 The one the programme has been carrying, "phase-aware admission shedding
 relieves congestion by 4 to 11 % on a UEC fabric", does not survive O1, O5
-and O6. It measures the wrong step, on the wrong recovery algorithm, and
-its best number is a bandwidth effect.
+and O6. It measures the wrong step, under the recovery mode we intend to
+retire, and its best number is a bandwidth effect.
 
 The one the data supports today is a regime paper: where can a bounded-loss
 transport help on a modern lossy-Ethernet fabric, and where can it not. Its
@@ -277,20 +285,20 @@ training phase, and it vanishes when repair is selective. Admission-time
 shedding cannot reach the burst episode, because it acts before the
 network has said anything. The waste ratio W places any fabric in one of
 three regimes and predicts whether there is anything to relieve. And the
-paper's own headline, relief at the burst iteration, is the one estimand
-the mechanism leaves untouched. This reframes DBLP for the fabric it was
-not designed for: the phase signal is still the interesting idea, but on a
+idea's own headline, relief at the burst iteration, is the one estimand
+the mechanism leaves untouched. This is the phase-aware idea restated for
+our transport: the phase signal is still the interesting part, but on a
 wire that signals and repairs every loss the only decision left for it to
-inform is whether to repair, so bounded loss on a modern fabric must be a
-recovery-time decision or it is a bandwidth trick.
+inform is whether to repair, so bounded loss must be a recovery-time
+decision or it is a bandwidth trick.
 
 The one worth the next six months is the protocol paper that follows from
 that: recovery-domain bounded loss on UEC, where the trim notification
 itself is the trigger and the receiver, which owns the phase signal,
 declines the repair of trimmed DP ranges outside the critical regime under
-the same byte budget the admission policy had. Its claim is the paper's
-claim, tail relief at the burst, tested on the paper's own estimand with a
-selective-repair baseline. Whether it holds is an open empirical question,
+the same byte budget the admission policy had. Its claim is the idea's
+original claim, tail relief at the burst, tested on the burst-step estimand
+with a selective-repair baseline. Whether it holds is an open empirical question,
 and the anchor's counters bound the prize: the burst step and its aftermath
 are 1.5 s of a 7.1 s run, three times the span of any other step.
 
@@ -320,11 +328,11 @@ One wave, designed around the objections rather than around more seeds.
   to the trim counts in every report.
 
 If forgiveness relieves the burst step under selective repair with a CI
-that clears zero, the programme has the paper's result on the modern wire
+that clears zero, the programme has the idea's result on its own transport
 and the protocol paper writes itself. If it does not, the regime paper's
 conclusion stands as the finding: bounded loss has no purchase on a fabric
 that repairs cheaply, and the phase signal belongs in scheduling rather
-than in transport, which is where the source paper's own future-work
+than in transport, which is where the origin paper's own future-work
 section already points.
 
 ## Integrity of the record

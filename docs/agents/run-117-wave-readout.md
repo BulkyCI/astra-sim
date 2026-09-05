@@ -1,172 +1,294 @@
 # CI run #117 wave readout
 
-Record of the state of CI run #117 (commit `414dc70c51ff`, workflow run
-33526691181, ledger issue #64, release tag `zuihrl5stp6ulacoogghyp4loy7xsjpj`)
-as read on 2026-09-04 23:23 UTC, before the run finished. It exists because
-this is the first wave in which every cluster arm outlived the 24-hour
-runner-token ceiling, so it is the first with a complete sixteen-seed anchor
-family and complete fan-in and burst sweeps - and because the run's own
-aggregate job will not be able to say so (see "What will happen when pp2
-finishes").
+Run #117 (commit `414dc70c51ff`, workflow run 33526691181, ledger issue #64,
+release `zuihrl5stp6ulacoogghyp4loy7xsjpj`) is the wave that the run #112
+analysis designed: the anchor family scaled from five to sixteen pre-registered
+pi-chunk seeds, a four-point p_high dose grid at the 7-source incast endpoint,
+and the first wave running under hashed provenance instead of raw-log escrow.
+This document reads the wave against what it was built to test. State as of
+2026-09-05 01:30 UTC, before the run finished; 30 of 31 comparisons collected,
+the 64-rank pp2 control still simulating (83 h elapsed, guard expires
+2026-09-06 07:59 UTC), so the three aggregate jobs and the ledger close have
+not run.
 
-Sources: GitHub REST (run, 194 jobs, release, issues #57-#64), the 31 ledger
-comments on issue #64, 16 + 8 `comparison.json` files streamed from the
-release, and local re-execution of `compare.py --aggregate-inputs` and
-`fan_in_sweep.py` from this tree. All wall-hour figures are the "Run the full
-paired comparison" step only.
+Sources: `gh api` over the run, its 194 jobs, the release, and issues #57-#64;
+the 31 ledger comments on #64; `comparison.json` and every arm's
+`ns3/transport_summary.csv` streamed from the 30 release bundles; local
+re-execution of `compare.py --aggregate-inputs` and `fan_in_sweep.py` from
+this tree. The programme context is the run #112 analysis
+(`experiments/ring_3d/VALIDATION_PROTOCOL.md` for estimands and decision
+rules; the regime taxonomy and ceiling algebra are restated below).
 
-## Where the run stands
+## What the wave was built to test
 
-| Field | Value |
-| --- | --- |
-| Run state | in progress; 193 of 194 jobs completed, 0 failed, 31 skipped (hosted-path steps) |
-| Comparisons collected | 30 of 31; every courier and archive job succeeded |
-| Open job | `Llama 3 70B 64-rank pp2 non-sheddable control pair / Cluster comparison` |
-| pp2 simulator step | started 2026-09-01 15:58:58 UTC; 79.4 h elapsed; 6720-min guard expires 2026-09-06 07:59 UTC |
-| Release | 70 assets, 1.17 GB: 30 comparison bundles (16-56 MB each, with `.contents.txt` manifests), smoke/retry/trace bundles, two runtime tarballs (215 MB each); no aggregate bundles yet |
-| Blocked on pp2 | the three aggregate jobs and `ledger-close` |
+The run #112 analysis reduced the programme to a cost model and a set of
+predictions. Communication-bound makespan is offered load plus a waste term
+W(offered/capacity) - retransmission volume that is convex in load and explodes
+past a knee. Admission shedding, the mechanism under test, removes
+dose x dp_share of *offered* load (at p_high = 0.1 about 1.7 %), while the
+measured pathology is the waste term at 5-19x the offered term. Regimes are
+classified by amplification (wire volume / offered payload): Light below 1.2x
+has nothing to relieve, the Knee at 1.5-3x has the steepest slope of W, and the
+Storm above 5x is timing chaos with seed sd near 7 %. From that came the
+predictions this wave tests:
 
-Simulator wall hours per completed arm: 64-rank fan-in direct4 56.0, direct
-55.5, direct2 49.7, direct1 45.2; the sixteen seed arms 37.1-49.1; the 32-rank
-arms 23.3-37.8; the sr2x canary 11.0. pp2 is 23 h past the longest completed
-sibling. It carries pipeline activations on top of the same degraded fabric,
-so a longer arm is expected, but no completed pp2 exists to calibrate against
-(#115 and #116 both cancelled it early, #116 at 26.5 h with every other
-64-rank arm - the token-death failure). GitHub does not serve an in-progress
-job's log, so the liveness checkpoints (`wall_ms_delta`, `events_delta`)
-cannot be read until it ends; classify before touching any budget, per
-[simulation-liveness-and-performance.md](simulation-liveness-and-performance.md).
+1. The sixteen-seed anchor (Storm) buys a no-harm bound only: at sd 7.2 %
+   the CI half-width is +/-3.8 %, and a ~1 % effect needs ~200 seeds.
+2. Any relief above the ~1.7 % byte ceiling is the nonlinear channel: the
+   mechanism relieves congestion (W), not bandwidth. Relief should track trim
+   reduction, not byte reduction.
+3. Dose (p_high 0.1 to 0.6) is not the amplifier: even dose 1.0 caps at
+   dp_share of offered. Each grid point carried one falsifiable question.
+4. The burst-count axis has weak leverage: burst0 already self-congests.
+5. Restraint is functional: fixed-high, which sheds strictly more, loses in
+   several conditions, so a dose-monotone story is false.
+6. Critical steps are bit-identical across arms (clrburst 0.00 %).
+7. The sr2x canary, if it completes, sits in the Light regime and reopens
+   sustained oversubscription as an axis.
+8. Determinism holds inside an envelope (source, toolchain, CPU family), so
+   stream hashes can replace raw-log escrow.
 
-## Anchor family: sixteen paired seeds
+## Regime placement of every arm
 
-Profile `llama3_70b_16.json`, ring all-reduce, 7-source step-18 microburst,
-best-effort UEC-trimming fabric, three arms per seed (fixed-low 0.5 %,
-phase-aware 0.5 %/10 %, fixed-high 10 %). Reproduced locally from the sixteen
-archived `comparison.json` files with the `profile` field normalized (see
-below); the numbers are what the CI job would compute.
+W is trimmed-payload bytes per offered byte (`trim_ftd_admission` plus
+last-hop trims over `total_physical_bytes`), the hop-independent measure of
+the waste term; wire/offered is `data_arrival` bytes over offered and counts
+every hop. Fixed-low arms; 32- and 64-rank values are one seed each, the anchor
+is the sixteen-seed range.
 
-Policy relief over fixed-low (positive favors the policy; 95 % two-sided t CI):
+| Family | Regime | W (trim/offered) | wire/offered | Control packets | Policy makespan relief |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 64-rank sr2x (selective repair, 2:1) | Light | 0.02 | 2.5x | 0.49 B | 0.78 % |
+| 64-rank fan-in direct1 / 2 / 4 / 7 (degraded 1:1) | Knee | 1.34 / 2.22 / 2.53 / 2.58 | 5.1-7.7x | 2.4-4.1 B | 0.10 / 4.25 / 1.48 / 11.11 % |
+| 32-rank burst 0 / 2 / 4 / 7 (healthy 1:1) | Knee | 2.23 / 2.07 / 2.28 / 3.02 | 6.4-9.1x | 1.7-2.2 B | 8.87 / 4.05 / 2.85 / 0.75 % |
+| 32-rank 7-incast dose grid 0.2 / 0.4 / 0.6 | Knee | 2.79 / 2.94 / 2.80 | 8.5-8.8x | 2.1-2.2 B | -24.89 / 8.40 / 12.11 % |
+| 16-rank anchor, 16 seeds (Clos, 7-source burst) | Storm | 8.68-10.37 | 18.6-21.6x | 3.0-3.5 B | +3.91 % mean |
 
-| Estimand | Fixed-low mean | Policy mean | Mean reduction | 95 % CI | % | Reading |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| makespan | 7145.1 ms | 6853.5 ms | 291.6 ms | [91.0, 492.3] | 3.91 | excludes zero |
-| DP all-reduce operation-span p99 | 1026.0 ms | 872.7 ms | 153.4 ms | [5.0, 301.7] | 10.80 | excludes zero |
-| DP all-reduce per-rank p99 | 755.6 ms | 760.1 ms | -4.5 ms | [-90.1, 81.0] | -4.90 | inconclusive |
-| all-QP FCT p99 (diagnostic) | 11.25 ms | 11.19 ms | 0.06 ms | [-2.79, 2.92] | - | spans zero |
-| DP all-reduce physical bytes | 25.34 GiB | 23.36 GiB | 1.98 GiB | [1.92, 2.05] | 7.82 | causal-load ratio 2.27 against the 0.875 GiB background burst |
+Every offered byte in the anchor is trimmed and re-sent between nine and ten
+times; the 32- and 64-rank families sit two to three times over, and sr2x
+does not trim at all. The wave's own placement is therefore exactly the
+taxonomy's: one Storm family, two Knee families, one Light canary.
 
-Per-seed paired reductions (ms), policy versus fixed-low:
+## Scorecard
 
-| Seed | ISA | Makespan | Span p99 | Per-rank p99 |
-| --- | --- | ---: | ---: | ---: |
-| 2884197 | v4 | 262.3 | 434.2 | -394.7 |
-| 16939937 | v4 | 751.5 | 716.3 | 146.2 |
-| 23846264 | v4 | 284.7 | 496.7 | -102.4 |
-| 28230664 | v3 | 232.7 | -43.5 | -86.8 |
-| 30781640 | v4 | 284.8 | 160.3 | 154.0 |
-| 31415926 | v4 | -369.7 | 143.4 | -123.1 |
-| 33832795 | v4 | -97.6 | 205.3 | -12.5 |
-| 48086513 | v4 | 376.5 | -140.0 | 137.8 |
-| 51058209 | v4 | 165.1 | -56.1 | -93.9 |
-| 53589793 | v4 | 880.1 | 16.0 | 59.9 |
-| 62862089 | v3 | 575.6 | -101.1 | -143.3 |
-| 70679821 | v4 | -494.5 | 16.8 | 61.8 |
-| 70938446 | v4 | 288.8 | 158.1 | -5.4 |
-| 74944592 | v4 | 719.2 | -103.6 | 121.8 |
-| 82534211 | v4 | 251.0 | -98.3 | -70.3 |
-| 98628034 | v4 | 555.9 | 649.1 | 278.4 |
+### 1. The anchor did better than the no-harm bound
 
-Headroom (fixed-high over fixed-low): makespan 681.8 ms [500.4, 863.2]
-(9.42 %), span p99 108.8 ms [-46.3, 263.9] (6.06 %), per-rank p99 -12.9 ms
-[-88.9, 63.0]. The phase-aware policy captured about 43 % of the unbounded
-makespan headroom without shedding inside CLR, and beats fixed-high on span
-p99. Mean trims per arm: fixed-low 304.8 M, policy 287.9 M, fixed-high
-262.1 M.
+Sixteen paired seeds, ring all-reduce, three arms per seed. Aggregated with
+the same `compare.py` code the CI job runs:
 
-Protocol reading (`experiments/ring_3d/VALIDATION_PROTOCOL.md`): raw gates
-pass in every arm; two of three primary estimands improve with a CI excluding
-zero; the causal-load ratio makes the effect plausible. The remaining
-condition - the no-incast control near zero - is not clean (next section).
-Read this as supported at the anchor point pending the control, not as a
-settled benefit.
+| Estimand | Fixed-low | Policy | Reduction | 95 % CI | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| makespan | 7145.1 ms | 6853.5 ms | 291.6 ms | [91.0, 492.3] | 3.91 |
+| DP all-reduce operation-span p99 | 1026.0 ms | 872.7 ms | 153.4 ms | [5.0, 301.7] | 10.80 |
+| DP all-reduce per-rank p99 | 755.6 ms | 760.1 ms | -4.5 ms | [-90.1, 81.0] | -4.90 |
+| DP physical bytes | 25.34 GiB | 23.36 GiB | 1.98 GiB | [1.92, 2.05] | 7.82 |
 
-## The two sweeps, complete for the first time
+The paired makespan deltas in percent have sd 5.21, not the 7.19 the design
+was sized on, so the half-width came in at +/-2.78 % instead of +/-3.83 %, and
+the mean of +3.91 % clears it: CI [1.13, 6.68] %. Three of sixteen seeds are
+negative (31415926, 33832795, 70679821). Per-rank p99 is where the Storm
+regime's chaos lives: its per-seed deltas run from -395 ms to +278 ms and the
+CI spans zero. Headroom: fixed-high makespan -9.42 % [500, 863 ms], span p99
+6.06 % (CI spans zero), per-rank p99 negative. The policy captured 43 % of the
+unbounded makespan headroom without shedding inside CLR and beats fixed-high
+on span p99.
 
-Both are single-seed (314159265): read direction and trim counters only.
+Per-seed table (ms, positive is relief; ISA marks the two seeds that ran on
+the x86-64-v3 binary on cpunode4):
 
-| Sweep point | Baseline trims | Policy trims | Makespan | Span p99 | Per-rank p99 | DP bytes | Wall h |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| fan-in 1, direct1 (v3) | 166.9 M | 174.7 M | 0.10 % | -8.86 % | -52.35 % | 7.65 % | 45.2 |
-| fan-in 2, direct2 | 277.0 M | 259.0 M | 4.25 % | -15.98 % | -19.30 % | 7.65 % | 49.7 |
-| fan-in 4, direct4 | 308.6 M | 294.7 M | 1.48 % | 5.88 % | 6.70 % | 7.78 % | 56.0 |
-| fan-in 7, direct | 313.8 M | 256.4 M | 11.11 % | 16.43 % | 15.75 % | 7.66 % | 55.5 |
-| burst 0 (control) | 137.7 M | 121.4 M | 8.87 % | 15.64 % | 14.87 % | 7.64 % | 23.3 |
-| burst 2 | 129.4 M | 119.5 M | 4.05 % | 3.61 % | 0.96 % | 7.75 % | 23.3 |
-| burst 4 | 143.8 M | 138.4 M | 2.85 % | 17.02 % | 13.95 % | 7.72 % | 24.8 |
-| burst 7 (32-direct) | 187.4 M | 171.8 M | 0.75 % | 7.68 % | 72.61 % | 8.16 % | 30.5 |
+| Seed | ISA | Makespan | Span p99 | Per-rank p99 | Policy trim change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 2884197 | v4 | 262.3 | 434.2 | -394.7 | -14.7 M |
+| 16939937 | v4 | 751.5 | 716.3 | 146.2 | -47.9 M |
+| 23846264 | v4 | 284.7 | 496.7 | -102.4 | -27.7 M |
+| 28230664 | v3 | 232.7 | -43.5 | -86.8 | -20.9 M |
+| 30781640 | v4 | 284.8 | 160.3 | 154.0 | -40.6 M |
+| 31415926 | v4 | -369.7 | 143.4 | -123.1 | +25.8 M |
+| 33832795 | v4 | -97.6 | 205.3 | -12.5 | +0.9 M |
+| 48086513 | v4 | 376.5 | -140.0 | 137.8 | -36.3 M |
+| 51058209 | v4 | 165.1 | -56.1 | -93.9 | -13.3 M |
+| 53589793 | v4 | 880.1 | 16.0 | 59.9 | -74.1 M |
+| 62862089 | v3 | 575.6 | -101.1 | -143.3 | -40.5 M |
+| 70679821 | v4 | -494.5 | 16.8 | 61.8 | +31.2 M |
+| 70938446 | v4 | 288.8 | 158.1 | -5.4 | -16.9 M |
+| 74944592 | v4 | 719.2 | -103.6 | 121.8 | -49.4 M |
+| 82534211 | v4 | 251.0 | -98.3 | -70.3 | -42.5 M |
+| 98628034 | v4 | 555.9 | 649.1 | 278.4 | -27.9 M |
 
-Fan-in: relief is non-monotone in the window (0.1, 4.3, 1.5, 11.1 % makespan)
-while baseline trims rise 167 M to 314 M and flatten between 4 and 7 - the
-knee. Burst sources: relief shrinks as the burst grows (8.9, 4.1, 2.9, 0.8 %
-makespan).
+### 2. The relief is the waste term, and nothing else
 
-**The negative control is not near zero.** The matrix note for
-`llama3-70b-32-burst0` says relief "should be near zero"; it measured 8.87 %
-makespan and 15.64 % span-p99 relief with 137.7 M baseline trims and no burst.
-Under the protocol, a material benefit in the no-incast condition "indicates a
-confound or implementation error". The likelier reading is that direct2 DP
-traffic congests this fabric organically (run #110 saw the unwindowed form
-collapse it), so burst0 is not an uncongested control - but that must be
-shown before the anchor result is called supported.
+This is the wave's central result. The policy removed 1.98 GiB of 166 GiB
+offered (1.19 %) and makespan fell 3.91 %, 3.3x the linear byte ceiling. The
+mechanism is visible in the transport counters, averaged over the sixteen
+seeds:
 
-## Screening arms
+| Arm | Offered | Wire volume | Trimmed payload | Trims | W | Control packets |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| fixed-low | 166.2 GiB | 3342 GiB | 1582 GiB | 401.7 M | 9.52 | 3.22 B |
+| policy | 164.2 GiB | 3186 GiB | 1496 GiB | 377.0 M | 9.11 | 3.04 B |
+| fixed-high | 163.8 GiB | 3014 GiB | 1384 GiB | 348.2 M | 8.45 | 2.82 B |
 
-| Arm | Makespan | Span p99 | DP bytes | Policy trims | Reading |
-| --- | ---: | ---: | ---: | ---: | --- |
-| incast7 p_high 0.2 | -24.89 % | -100.28 % | 15.74 % | 227.2 M | worse on every axis; policy trims 32 % above baseline |
-| incast7 p_high 0.4 | 8.40 % | -72.83 % | 31.76 % | 151.6 M | makespan recovers, tails do not |
-| incast7 p_high 0.6 | 12.11 % | -4.53 % | 47.53 % | 123.2 M | largest makespan relief; fixed-high at 0.6 loses 83.9 % on both tails |
-| burst4 p_high 0.4 | 19.34 % | -1.81 % | 32.04 % | 91.4 M | burst-4 keeps its advantage over 7-incast at equal dose |
-| clrburst | 1.33 % | 0.00 % | 7.76 % | 180.1 M | span and per-rank p99 identical to baseline: the policy shed nothing in CLR, as designed |
-| sr2x canary | 0.78 % | -14.09 % | 7.60 % | 3.7 M | completed in 11 h with 4.4 M baseline trims versus ~300 M under go-back-N (70x fewer) |
+Marginal amplification: 156 GiB of wire volume per 1.98 GiB shed (79x) for
+the policy, 327 GiB per 2.46 GiB (133x) for fixed-high. Across seeds the
+policy's makespan relief correlates 0.94 with its trim reduction, at 13 ms per
+million trims avoided, and the three seeds where the policy *added* trims
+(+25.8 M, +0.9 M, +31.2 M) are exactly the three negative seeds. Byte
+reduction is nearly constant across seeds (7.1-8.7 %) and predicts nothing.
+Prediction 2 holds in the strongest form the data allows: admission shedding
+works only through the retransmission chains it happens to delete, which is
+the term recovery-domain shedding attacks directly.
 
-Dose is non-monotone on one seed (0.1, 0.2, 0.4, 0.6 at 7 sources); every
-7-incast dose point shows the same shape: makespan can be bought, tail latency
-cannot. The sr2x completion reopens sustained oversubscription as a swept
-axis, per its matrix note.
+### 3. The dose grid: dose buys makespan, not tails - and the grid is not matched
 
-## Integrity of the record
+Each point at seed 314159265 on the 7-source 32-rank fabric:
 
-- Congestion gate: 30 of 30 arms passed (background bytes present, 4.00 MiB
-  peak queue, trims > 0, zero natural drops, zero PFC on best-effort).
-- Transport streams: 30 of 30 attested complete; 332-665 segments and
-  356-2057 GiB uncompressed per arm, about 43 TB hashed and discarded.
-- Binary: one `x86-64-v4` build (`sha256:ac669087fefe...`) on 27 arms; seeds
-  28230664 and 62862089 and fan-in direct1 ran on cpunode4 with the
-  `x86-64-v3` build. The attestation states cross-ISA divergence is
-  expected, so the anchor aggregate mixes two binaries; carry the ISA column
-  in any write-up.
-- Cross-run reproducibility: burst0, burst4, burst4-ph40 and sr2x completed
-  in both #116 (405073b) and #117; every reported metric is identical to the
-  printed digit. 414dc70 touched only CI plumbing, so this is the expected
-  result and the first time it was checkable.
+| p_high | Question | DP bytes shed | Makespan | Span p99 | W base / policy | Fixed-high tails |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 0.1 (32-direct) | origin | 8.16 % | 0.75 % | 7.68 % | 3.02 / 2.82 | +1.75 / +2.60 % |
+| 0.2 | does doubling move relief? | 15.74 % | -24.89 % | -100.28 % | 2.79 / 3.67 | -55.7 / -49.4 % |
+| 0.4 | curvature: scale or saturate? | 31.76 % | 8.40 % | -72.83 % | 2.94 / 2.68 | -11.5 / -14.6 % |
+| 0.6 | ceiling: can any dose restore relief? | 47.53 % | 12.11 % | -4.53 % | 2.80 / 2.16 | -83.9 / -83.9 % |
+| burst4 at 0.4 | dose x burst interaction | 32.04 % | 19.34 % | -1.81 % | 2.21 / 1.61 | +13.6 / +11.6 % |
+
+The byte lever is delivered exactly as dosed (8, 16, 32, 48 %), and at 0.4
+and 0.6 the policy's W falls with it, so makespan relief rises to 8.4 % and
+12.1 %. Tails do not follow: span p99 is negative at every dose above 0.1,
+and fixed-high at 0.6 loses 84 % on both tail metrics. The 0.2 point is an
+outlier in the wrong direction on every axis (policy W 3.67 against a 2.79
+baseline). Reading per question: doubling the dose did not move relief the
+right way (Q1); relief is still rising at 0.6 on makespan, so no saturation
+was located (Q2); the "no dose restores relief" falsifier did not fire for
+makespan but did for tails (Q3); burst-4 keeps its advantage at equal dose,
+so the sweet spot reads as a fabric property (Q4). Prediction 3 stands:
+dose is a makespan lever with a tail-latency cost, not the amplifier.
+
+Two caveats, one of them structural. The single-seed caveat is the declared
+one. The structural one was found while checking determinism: the four grid
+profiles differ from the origin only in `name` and `p_high`, and their
+fixed-low baselines should therefore be the same simulation. They are not
+(makespan 4508 / 4428 / 4514 / 4237 ms, four distinct stream hashes, two of
+them on the same node and binary). The cause is
+`astra-sim/network_frontend/ns3/ExperimentConfig.hh`: the selection decision
+hashes the seed, `run_hash = stable_string_hash(run_id)`, and the operation
+coordinates, and `run_id` is the profile name. Within one profile the arms are
+nested (a decision selected at 0.005 is selected at every higher threshold),
+which is what makes the three arms bit-matched. Across profiles that differ
+only by name the selection streams are unrelated, so the dose grid and the
+burst4 / burst4-ph40 pair compare unmatched baselines: cross-dose differences
+carry selection-stream noise of unknown size on top of ECMP noise. The
+same-profile pairs (policy versus its own baseline) are unaffected, as is the
+anchor family (one name, sixteen seeds).
+
+### 4. The burst0 paradox is the same run as in #112
+
+burst0, burst4, burst4-ph40 and sr2x completed in both #116 and #117 and every
+reported metric is identical to the printed digit, so the burst0 result
+(zero burst sources, 138 M trims, the sweep's largest relief at 8.87 %
+makespan) is reproduced, not re-observed. What #117 adds is the placement:
+W is 2.23 at zero sources, 2.07 and 2.28 at two and four, and only the
+7-source point rises to 3.02. The burst axis moves the waste term by at most
+35 %, while rank scale and fan-in move it fourfold. Prediction 4 holds, and the
+earlier readout's framing of burst0 as an unexplained protocol confound was
+wrong: the "negative control" is a Knee-regime fabric that self-congests,
+and the sweep's x-axis is the weak lever the #112 analysis said it was.
+
+### 5. Restraint is functional on tails, not on makespan
+
+Fixed-high makespan is negative in four conditions again (burst2 -3.63 %,
+fan-in direct1 -4.10 %, 32-direct -0.78 %, sr2x -0.57 %) and its per-rank p99
+is negative in the anchor (-4.4 %), clrburst (-13.7 %), burst2 (-20.5 %),
+direct1 (-80.5 %), direct2 (-28.9 %) and the 0.6 dose point (-83.9 %). In the
+Storm regime fixed-high does win on makespan (9.4 % against the policy's
+3.9 %), because there the waste term dominates everything and more deletion
+is more relief; it pays for it in tails. The bound is doing work; it is not
+merely safe.
+
+### 6. Critical steps are bit-identical
+
+clrburst: span p99 and per-rank p99 deltas of exactly 0.00 % between policy
+and fixed-low, makespan 1.33 %. The burst fires at step 1, which the schedule
+holds in CLR under every seed, and the policy shed nothing there. Fixed-high,
+which does shed into that step, lost 13.7 % per-rank p99. Prediction 6
+reproduced.
+
+### 7. The Light regime has nothing to relieve
+
+sr2x completed in 11 h with W = 0.02 (4.4 M trims against roughly 300 M for
+go-back-N on the same fabric) and relief of 0.78 %. Both halves of prediction
+7 hold: selective repair collapses the waste term by 70x, and once it is gone
+the admission policy has no channel left. Sustained oversubscription is back
+as a sweepable axis, with the go-back-N contrast as a finding of its own.
+
+### 8. Determinism inside the envelope, and one input that was not pinned
+
+Identical numbers across #116 and #117 for four arms, on rebuilt binaries
+from the compiler cache, is the cross-wave half of the envelope holding for
+the same ISA level. Three arms ran on the x86-64-v3 build (cpunode4, EPYC
+7453), the rest on x86-64-v4 (EPYC 9634 and 9754); the attestation records
+this, and the anchor aggregate mixes two of sixteen seeds from the other
+binary. The run_id finding in section 3 is not a determinism failure - same
+inputs did give same outputs - but it shows the determinism envelope has an
+input nobody listed: the profile name.
+
+## Against the protocol's decision rules
+
+Raw gates pass in all 30 arms. Two primary estimands improve at the anchor
+with CIs excluding zero. The causal-load ratio (DP byte relief over background
+bytes) is 2.27. The remaining condition, a near-zero no-incast control,
+cannot be evaluated by burst0, which is not an uncongested condition; the
+protocol's actual negative control (`profiles/no_incast_8.json`) was not in
+this wave. Under the rules as written this is "supported policy benefit" on
+makespan and span p99 at one predeclared point, with the control pending, and
+the mechanism analysis says why the magnitude is what it is.
+
+## What this means for the programme
+
+- The admission mechanism has been characterised to its ceiling. Its whole
+  effect is second-order relief of the waste term (section 2), its dose axis
+  trades tails for makespan (section 3), and its burst axis is weak (section
+  4). The next lever is the one the #112 analysis named: recovery-domain
+  shedding, where the trim notification itself triggers bounded forgiveness
+  and each forgiven range deletes a retransmission chain. The #117 counters
+  size the target: 1.5 TB of trimmed payload per anchor arm against 25 GiB
+  of DP bytes the admission policy can touch.
+- The next wave should follow the plan already laid out: TP-off plus
+  capacity-knee calibration (two arms), forgiveness versus admission at equal
+  shed budget (two to three arms), then pi-chunk seeds 17 onward on the
+  winning 32-rank point. The anchor has done its job and does not need more
+  seeds.
+- Two harness fixes before that wave. First, `run_id` must not vary across
+  profiles that are meant to share a baseline: either drop `run_hash` from
+  `stable_operation_hash` (the seed already keys the stream) or make `run_id`
+  an explicit profile field that sweep families share, and add a test that
+  two profiles differing only in `p_high` produce a byte-identical fixed-low
+  arm. Second, the aggregate profile check below.
+- Report the regime indicator. W (trimmed payload over offered) is computable
+  from `transport_summary.csv` in every arm and separates the three regimes
+  cleanly; `compare.py` should print it next to the trim counts.
 
 ## What will happen when pp2 finishes
 
-The sixteen-seed aggregate job will fail on a profile-path check.
-`aggregate_comparison_artifacts` in `experiments/ring_3d/compare.py` requires
-every artifact's `profile` string to be identical, but each arm writes
-`profile.resolve().as_posix()`, which on the cluster is
-`/w/nobackup/.../astra-sim/<SLURM job id>/_work/.../llama3_70b_16.json`. The
-sixteen archived files carry sixteen distinct strings (job ids 64890-64908).
-The check was never reached before: every earlier wave (#110-#116) lost at
-least one seed arm and failed the `expected_count == 16` gate first, so the
-aggregate has published as `missing` in every ledger. The two sweep
-aggregations are unaffected (`fan_in_sweep.py` expects differing profiles).
+The sixteen-seed aggregate job will fail. `aggregate_comparison_artifacts`
+in `experiments/ring_3d/compare.py` requires every artifact's `profile`
+string to be identical, but each arm writes `profile.resolve().as_posix()`,
+which on the cluster is `/w/nobackup/.../astra-sim/<SLURM job id>/_work/...`,
+and the sixteen archived files carry sixteen distinct strings. Every earlier
+wave lost at least one seed arm and failed the count gate first, so this
+check has never been reached; #117 is the first run that will hit it. The two
+sweep aggregations expect differing profiles and are unaffected. The aggregate
+section will publish as failure, `ledger-close` will keep #64 open, and the run
+will conclude failure despite 31 clean arms. A fix cannot rescue this run
+(the workflow is pinned to 414dc70); the numbers in section 1 are what the
+job would have produced. Fix: compare by workspace-relative path or content
+hash.
 
-Consequences: the aggregate ledger section publishes as failure,
-`ledger-close` keeps issue #64 open, and the run concludes failure despite 31
-clean arms. A fix pushed now cannot rescue this run (the workflow is pinned to
-414dc70) and "re-run failed jobs" re-runs the same code. The numbers above are
-what that job would have produced. Fix for a later push: compare profiles by
-workspace-relative path or content hash, with a unit test.
+## Integrity of the record
+
+- 30 of 30 arms: congestion gate passed, transport stream attested complete
+  (332-665 segments, 356-2057 GiB per arm, about 43 TB hashed and discarded).
+- 70 release assets, 1.17 GB; every bundle carries `attestation.json` with the
+  binary sha256, ISA level, node, and the uncompressed stream digests.
+- Simulator wall hours: 64-rank fan-in 45-56 h, anchor seeds 37-49 h,
+  32-rank arms 23-38 h, sr2x 11 h, pp2 open. In #116 every 64-rank arm died at
+  about 26.5 h; the courier and outbox design in 414dc70 is what got this wave
+  past that wall.

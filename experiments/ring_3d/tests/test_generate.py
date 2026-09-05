@@ -276,6 +276,76 @@ class Ring3DGeneratorTests(unittest.TestCase):
             del policy["run_id"]
         self.assertEqual(policies[0], policies[1])
 
+    def test_congestion_control_defaults_to_no_sender_reaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(self.profile_path, output)
+            config = Path(manifest["network_config"]).read_text(encoding="utf-8")
+
+        self.assertEqual(manifest["congestion_control"]["mode"], "none")
+        self.assertEqual(manifest["congestion_control"]["cc_mode"], 12)
+        self.assertIn("CC_MODE 12\n", config)
+        # smoke_8 runs 200 Gb/s links, so the HPCC 100 G literals scale x2.
+        self.assertIn("RATE_AI 100000000bps\n", config)
+        self.assertIn("RATE_HAI 200000000bps\n", config)
+        self.assertIn("MIN_RATE 200000000bps\n", config)
+
+    def test_congestion_control_dcqcn_writes_mode_one_and_scaled_rates(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["congestion_control"] = {
+            "mode": "dcqcn",
+            "rate_ai_fraction": 0.001,
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+            config = Path(manifest["network_config"]).read_text(encoding="utf-8")
+
+        self.assertEqual(manifest["congestion_control"]["cc_mode"], 1)
+        self.assertEqual(manifest["congestion_control"]["rate_ai_bps"], 200_000_000)
+        self.assertIn("CC_MODE 1\n", config)
+        self.assertIn("RATE_AI 200000000bps\n", config)
+
+    def test_congestion_control_rejects_unknown_keys_and_modes(self) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["network"]["congestion_control"] = {"mode": "dcqcn", "gain": 0.5}
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "congestion_control"):
+                load_profile(profile_path)
+
+            document["network"]["congestion_control"] = {"mode": "nscc"}
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "congestion_control.mode"):
+                load_profile(profile_path)
+
+            document["network"]["congestion_control"] = {
+                "mode": "dcqcn",
+                "min_rate_fraction": 0,
+            }
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "min_rate_fraction"):
+                load_profile(profile_path)
+
+    def test_checked_in_profiles_keep_the_no_congestion_control_transport(
+        self,
+    ) -> None:
+        """Every arm measured to date ran with no sender reaction at all."""
+        profiles = sorted(
+            (REPOSITORY_ROOT / "experiments/ring_3d/profiles").glob("*.json")
+        )
+        self.assertTrue(profiles)
+        for path in profiles:
+            with self.subTest(profile=path.name):
+                network = json.loads(path.read_text(encoding="utf-8"))["network"]
+                self.assertEqual(
+                    network.get("congestion_control", {"mode": "none"})["mode"],
+                    "none",
+                )
+
     def test_microburst_trigger_step_must_land_inside_the_run(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["microburst_trigger_step"] = document["steps"] + 1

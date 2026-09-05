@@ -23,6 +23,17 @@ DATA_LOSS_SCOPES = {
     "switch_to_switch",
 }
 PACKET_TRIM_MODES = {"ftd", "bts"}
+CONGESTION_CONTROL_MODES = {"none", "dcqcn"}
+# ns-3 CC_MODE numbers. 12 is no sender reaction at all: a queue pair is set to
+# link rate at creation and nothing ever changes it. 1 is Mellanox DCQCN.
+CC_MODE_NONE = 12
+CC_MODE_DCQCN = 1
+# The HPCC-era literals RATE_AI 50Mb/s, RATE_HAI 100Mb/s, MIN_RATE 100Mb/s were
+# written for 100 Gb/s links; as fractions of the link they are 1/2000, 1/1000,
+# 1/1000, which is what carries them to any other link rate.
+DEFAULT_RATE_AI_FRACTION = 1 / 2000
+DEFAULT_RATE_HAI_FRACTION = 1 / 1000
+DEFAULT_MIN_RATE_FRACTION = 1 / 1000
 # Queue 0 carries DSCP_CONTROL (TC_high) and priority groups 1 and 3 carry UET
 # data (TC_low), so TC_med for DSCP_TRIMMED must avoid all three. UEC 1.0.3
 # section 4.1.4.1 requires trimmed packets to sit in their own traffic class.
@@ -74,6 +85,52 @@ class TransportRecovery:
             "max_retransmission_retries": self.max_retransmission_retries,
             "selective_repair": self.selective_repair,
             "no_progress_timeout_ns": self.no_progress_timeout_ns,
+        }
+
+
+@dataclass(frozen=True)
+class CongestionControl:
+    """End-host sender reaction to congestion.
+
+    ``none`` is what every arm before this knob ran: CC_MODE 12, where a queue
+    pair blasts at link rate inside a static window and no signal slows it.
+    ``dcqcn`` is Mellanox DCQCN (CC_MODE 1), which is the only implemented mode
+    wired to trim notifications. It is not UEC's own NSCC, which is
+    window-based, so a result under it names DCQCN and not UEC congestion
+    control. The three rates are fractions of the link rate rather than
+    absolute literals, so a profile keeps its intended aggressiveness at any
+    link speed.
+    """
+
+    mode: str
+    rate_ai_fraction: float = DEFAULT_RATE_AI_FRACTION
+    rate_hai_fraction: float = DEFAULT_RATE_HAI_FRACTION
+    min_rate_fraction: float = DEFAULT_MIN_RATE_FRACTION
+
+    @property
+    def cc_mode(self) -> int:
+        return CC_MODE_NONE if self.mode == "none" else CC_MODE_DCQCN
+
+    def rates_bps(self, link_rate: str) -> tuple[int, int, int]:
+        """Resolve the three rate knobs against a link rate such as 400Gbps."""
+        link_bps = link_rate_bits_per_second(link_rate)
+        return (
+            round(link_bps * self.rate_ai_fraction),
+            round(link_bps * self.rate_hai_fraction),
+            round(link_bps * self.min_rate_fraction),
+        )
+
+    def manifest(self, link_rate: str) -> dict[str, str | int | float]:
+        rate_ai, rate_hai, min_rate = self.rates_bps(link_rate)
+        return {
+            "mode": self.mode,
+            "cc_mode": self.cc_mode,
+            "rate_ai_fraction": self.rate_ai_fraction,
+            "rate_hai_fraction": self.rate_hai_fraction,
+            "min_rate_fraction": self.min_rate_fraction,
+            "rate_ai_bps": rate_ai,
+            "rate_hai_bps": rate_hai,
+            "min_rate_bps": min_rate,
         }
 
 
@@ -193,6 +250,7 @@ class ClosNetwork:
     transport_recovery: TransportRecovery | None = None
     packet_trimming: PacketTrimming | None = None
     fabric: SwitchFabric | None = None
+    congestion_control: CongestionControl = CongestionControl(mode="none")
 
     @property
     def kind(self) -> str:
@@ -217,6 +275,7 @@ class RingNetwork:
     transport_recovery: TransportRecovery | None = None
     packet_trimming: PacketTrimming | None = None
     fabric: SwitchFabric | None = None
+    congestion_control: CongestionControl = CongestionControl(mode="none")
 
     @property
     def kind(self) -> str:
@@ -316,6 +375,56 @@ def _link_rate(value: Any) -> str:
     if not isinstance(value, str) or not value.endswith("Gbps"):
         raise ValueError("network.link_rate must be a rate such as 200Gbps")
     return value
+
+
+def link_rate_bits_per_second(link_rate: str) -> int:
+    """Bits per second of a validated ``<n>Gbps`` link rate."""
+    return round(float(link_rate[: -len("Gbps")]) * 1_000_000_000)
+
+
+def _fraction(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number in (0, 1]")
+    fraction = float(value)
+    if not isfinite(fraction) or not 0.0 < fraction <= 1.0:
+        raise ValueError(f"{field} must be a number in (0, 1]")
+    return fraction
+
+
+def _load_congestion_control(document: dict[str, Any]) -> CongestionControl:
+    """Parse the optional knob, defaulting to the historical no-CC transport."""
+    if "congestion_control" not in document:
+        return CongestionControl(mode="none")
+    control = document["congestion_control"]
+    optional = {"rate_ai_fraction", "rate_hai_fraction", "min_rate_fraction"}
+    if not isinstance(control, dict) or not {"mode"} <= set(control) <= (
+        {"mode"} | optional
+    ):
+        raise ValueError(
+            "network.congestion_control must contain 'mode' and may contain "
+            f"{sorted(optional)}"
+        )
+    mode = control["mode"]
+    if not isinstance(mode, str) or mode not in CONGESTION_CONTROL_MODES:
+        raise ValueError(
+            "network.congestion_control.mode must be one of "
+            f"{sorted(CONGESTION_CONTROL_MODES)}"
+        )
+    return CongestionControl(
+        mode=mode,
+        rate_ai_fraction=_fraction(
+            control.get("rate_ai_fraction", DEFAULT_RATE_AI_FRACTION),
+            "network.congestion_control.rate_ai_fraction",
+        ),
+        rate_hai_fraction=_fraction(
+            control.get("rate_hai_fraction", DEFAULT_RATE_HAI_FRACTION),
+            "network.congestion_control.rate_hai_fraction",
+        ),
+        min_rate_fraction=_fraction(
+            control.get("min_rate_fraction", DEFAULT_MIN_RATE_FRACTION),
+            "network.congestion_control.min_rate_fraction",
+        ),
+    )
 
 
 def _probability(value: Any, field: str) -> float:
@@ -606,6 +715,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         "transport_recovery",
         "packet_trimming",
         "fabric",
+        "congestion_control",
     }
     topology_keys = {"hosts_per_leaf", "spine_count"} if topology == "clos" else set()
     optional_topology_keys = {"failed_spine_count"} if topology == "clos" else set()
@@ -626,6 +736,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
     transport_recovery = _load_transport_recovery(document)
     packet_trimming = _load_packet_trimming(document)
     fabric = _load_fabric(document, packet_trimming)
+    congestion_control = _load_congestion_control(document)
     if (
         data_loss is not None or packet_trimming is not None
     ) and transport_recovery is None:
@@ -661,6 +772,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
             transport_recovery=transport_recovery,
             packet_trimming=packet_trimming,
             fabric=fabric,
+            congestion_control=congestion_control,
         )
 
     hosts_per_leaf = _positive_int(document["hosts_per_leaf"], "network.hosts_per_leaf")
@@ -692,6 +804,7 @@ def load_network(document: Any, host_count: int) -> PhysicalNetwork:
         transport_recovery=transport_recovery,
         packet_trimming=packet_trimming,
         fabric=fabric,
+        congestion_control=congestion_control,
     )
 
 

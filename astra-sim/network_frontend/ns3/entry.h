@@ -403,6 +403,29 @@ void qp_finish_print_log(FILE* fout, Ptr<RdmaQueuePair> q) {
     fflush(fout);
 }
 
+// Both terminal outcomes report the same transport counters, so they read them
+// through one function: a counter added on one path and not the other would be
+// a silent hole in exactly the failed flows that need diagnosing.
+void copy_transport_counters(AstraSimNs3::FlowRecord& flow,
+                             Ptr<RdmaQueuePair> q) {
+    flow.physical_bytes = q->m_size;
+    flow.data_attempted_bytes = q->m_data_attempted_bytes;
+    flow.retransmitted_bytes = q->m_retransmitted_bytes;
+    flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
+    flow.recovery_events = q->m_recovery_events;
+    flow.trim_notifications = q->m_trim_notifications;
+    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
+    flow.trim_bts_notifications = q->m_trim_bts_notifications;
+    flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
+    flow.trim_recovery_events = q->m_trim_recovery_events;
+    flow.stale_trim_notifications = q->m_stale_trim_notifications;
+    flow.timeouts = q->m_timeouts;
+    flow.cnp_received = q->m_cnp_received;
+    flow.first_trim_ns = q->m_first_trim_ns;
+    flow.first_repair_ns = q->m_first_repair_ns;
+    flow.end_time_ns = Simulator::Now().GetNanoSeconds();
+}
+
 // Registered by common.h::SetupNetwork and invoked for every completed QP.
 void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     const uint32_t sid = ip_to_node_id(q->sip);
@@ -419,18 +442,7 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
         throw runtime_error("Completed QP has no active flow record");
     }
     AstraSimNs3::FlowRecord flow = active->second;
-    flow.physical_bytes = q->m_size;
-    flow.data_attempted_bytes = q->m_data_attempted_bytes;
-    flow.retransmitted_bytes = q->m_retransmitted_bytes;
-    flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
-    flow.recovery_events = q->m_recovery_events;
-    flow.trim_notifications = q->m_trim_notifications;
-    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
-    flow.trim_bts_notifications = q->m_trim_bts_notifications;
-    flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
-    flow.trim_recovery_events = q->m_trim_recovery_events;
-    flow.stale_trim_notifications = q->m_stale_trim_notifications;
-    flow.end_time_ns = Simulator::Now().GetNanoSeconds();
+    copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
@@ -483,18 +495,7 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
 
     AstraSimNs3::FlowRecord flow = active->second;
-    flow.physical_bytes = q->m_size;
-    flow.data_attempted_bytes = q->m_data_attempted_bytes;
-    flow.retransmitted_bytes = q->m_retransmitted_bytes;
-    flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
-    flow.recovery_events = q->m_recovery_events;
-    flow.trim_notifications = q->m_trim_notifications;
-    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
-    flow.trim_bts_notifications = q->m_trim_bts_notifications;
-    flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
-    flow.trim_recovery_events = q->m_trim_recovery_events;
-    flow.stale_trim_notifications = q->m_stale_trim_notifications;
-    flow.end_time_ns = Simulator::Now().GetNanoSeconds();
+    copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Failed;
     flow.failure_reason =
         reason == static_cast<uint32_t>(RdmaFailureReason::TimeoutRetryExhausted)

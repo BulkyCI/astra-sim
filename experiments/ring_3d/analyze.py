@@ -564,6 +564,9 @@ class _FctJoin:
         }
 
 
+_HOST_TRANSPORT_EVENTS: Final = frozenset({"rto_fired", "cnp_taken"})
+
+
 def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
     path = ns3_dir / "transport_summary.csv"
     if not path.is_file():
@@ -599,6 +602,11 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "trim_bts_egress_queue",
         "trim_bts_lasthop_admission",
         "trim_bts_lasthop_egress_queue",
+        # Host-transport reactions. They carry no packet, so they contribute
+        # counts and no bytes, and they answer to the control plane: a
+        # retransmission timeout is a missing ACK, a rate cut is a CNP.
+        "rto_fired",
+        "cnp_taken",
     }
     trim_events = {event for event in valid_events if event.startswith("trim_")}
     # The simulator aggregates in memory and emits one row per (event, plane)
@@ -615,6 +623,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             raise ValueError("invalid control transport event plane")
         if event.startswith("trim_") and plane != "data":
             raise ValueError("trim conversion must account for undelivered data")
+        if event in _HOST_TRANSPORT_EVENTS and plane != "control":
+            raise ValueError("host transport reaction must ride the control plane")
         row_events = _as_int(row, "event_count")
         row_bytes = _as_int(row, "total_bytes")
         if row_events < 0 or row_bytes < 0:
@@ -689,6 +699,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             ),
             "trimmed_queue_drop_count": events["switch_trimmed_queue_drop"],
         },
+        "rto_fired_count": events["rto_fired"],
+        "cnp_taken_count": events["cnp_taken"],
     }
 
 
@@ -724,17 +736,26 @@ def _network_health(
             "burst_drain_ns": drain_ns,
         }
     event_bytes = transport.get("event_bytes") or {}
+    # A fabric with no trimming trimmed none of the bytes it was offered, so
+    # W is zero there and not undefined.
     trimmed_bytes = sum(
         int(event_bytes.get(event, 0)) for event in _TRIM_ADMISSION_EVENTS
     )
-    arrival_bytes = int(event_bytes.get("data_arrival", 0))
+    # The data-plane arrival trace is connected only when the profile enables
+    # loss or trimming, so a missing event means unmeasured, not zero arrivals.
+    arrival = event_bytes.get("data_arrival")
+    arrival_bytes = None if arrival is None else int(arrival)
     return {
         "status": "available",
         "offered_physical_bytes": offered_physical_bytes,
         "trimmed_admission_bytes": trimmed_bytes,
         "W": _ratio(trimmed_bytes, offered_physical_bytes),
         "data_arrival_bytes": arrival_bytes,
-        "wire_per_offered": _ratio(arrival_bytes, offered_physical_bytes),
+        "wire_per_offered": (
+            None
+            if arrival_bytes is None
+            else _ratio(arrival_bytes, offered_physical_bytes)
+        ),
         "burst_drain_ns": drain_ns,
     }
 
@@ -898,6 +919,8 @@ _COUNTER_FIELDS: Final = (
     "trim_lasthop_notifications",
     "trim_recovery_events",
     "stale_trim_notifications",
+    "timeouts",
+    "cnp_received",
 )
 """Telemetry columns summed verbatim. The column name is the only name they
 have, so the totals stay keyed by it rather than restating each one."""
@@ -968,6 +991,7 @@ class _FlowStatistics:
         "total_logical_bytes",
         "total_physical_bytes",
         "total_traffic",
+        "trim_to_repair",
     )
 
     def __init__(self, join: _FctJoin) -> None:
@@ -994,6 +1018,7 @@ class _FlowStatistics:
         self.by_parallelism_domain = _durations()
         self.by_flow_kind = _durations()
         self.by_domain_and_kind = _durations()
+        self.trim_to_repair = array("q")
 
     def consume(self, row: dict[str, str]) -> None:
         """Fold one flow into every accumulator, then drop it.
@@ -1021,6 +1046,14 @@ class _FlowStatistics:
             and _optional_nonnegative_int(row, "data_attempted_bytes") < physical_bytes
         ):
             raise ValueError("completed flow cannot deliver more bytes than attempted")
+
+        # Zero means the flow never saw a trim or never sent a repair. A
+        # repair before the first trim is NACK-driven and answers a different
+        # question, so it stays out of this distribution.
+        first_trim_ns = _optional_nonnegative_int(row, "first_trim_ns")
+        first_repair_ns = _optional_nonnegative_int(row, "first_repair_ns")
+        if first_trim_ns and first_repair_ns >= first_trim_ns:
+            self.trim_to_repair.append(first_repair_ns - first_trim_ns)
 
         kind = row.get("flow_kind")
         domain = row.get("parallelism_domain")
@@ -1195,6 +1228,14 @@ def summarize(
             "stale_trim_notification_count": statistics.counters[
                 "stale_trim_notifications"
             ],
+            "timeout_count": statistics.counters["timeouts"],
+            "cnp_received_count": statistics.counters["cnp_received"],
+            # How long a trimmed flow waited before its first repair left the
+            # sender. It separates a repair-driven tail from a congestion-
+            # control-driven one, which no byte counter can.
+            "first_trim_to_first_repair_ns": _timing_statistics(
+                statistics.trim_to_repair
+            ),
         },
         "collective_completion": collective_completion,
         "physical_traffic_bytes": {

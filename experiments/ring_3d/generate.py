@@ -45,6 +45,7 @@ try:
         write_clr_mask,
     )
     from .topology import (
+        CongestionControl,
         DataPlaneLoss,
         PacketTrimming,
         PhysicalNetwork,
@@ -63,6 +64,7 @@ except ImportError:
         write_clr_mask,
     )
     from topology import (
+        CongestionControl,
         DataPlaneLoss,
         PacketTrimming,
         PhysicalNetwork,
@@ -1104,6 +1106,8 @@ def write_network_config(
     transport_recovery: TransportRecovery | None,
     packet_trimming: PacketTrimming | None,
     fabric: SwitchFabric | None,
+    congestion_control: CongestionControl,
+    link_rate: str,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     # The bundled ns-3 setup unconditionally opens these legacy input files,
@@ -1180,6 +1184,13 @@ def write_network_config(
             f"DATA_QUEUE_BYTES {fabric.data_queue_bytes}\n"
             f"TRIMMED_QUEUE_BYTES {fabric.trimmed_queue_bytes}\n"
         )
+    rate_ai_bps, rate_hai_bps, min_rate_bps = congestion_control.rates_bps(link_rate)
+    congestion_settings = (
+        f"CC_MODE {congestion_control.cc_mode}\n"
+        f"RATE_AI {rate_ai_bps}bps\n"
+        f"RATE_HAI {rate_hai_bps}bps\n"
+        f"MIN_RATE {min_rate_bps}bps\n"
+    )
     if packet_trimming is None:
         trim_settings = "PACKET_TRIM_MODE disabled\n"
     else:
@@ -1202,10 +1213,10 @@ def write_network_config(
             f"QLEN_MON_INTERVAL {queue_monitor_interval_ns}\n"
             "QLEN_MON_END 20000\n\n"
             "SIMULATOR_STOP_TIME 40000000000000.00\n\n"
-            "CC_MODE 12\nALPHA_RESUME_INTERVAL 1\nRATE_DECREASE_INTERVAL 4\n"
+            f"{congestion_settings}"
+            "ALPHA_RESUME_INTERVAL 1\nRATE_DECREASE_INTERVAL 4\n"
             "CLAMP_TARGET_RATE 0\nRP_TIMER 900\nEWMA_GAIN 0.00390625\n"
-            "FAST_RECOVERY_TIMES 1\nRATE_AI 50Mb/s\nRATE_HAI 100Mb/s\n"
-            "MIN_RATE 100Mb/s\nDCTCP_RATE_AI 1000Mb/s\n\n"
+            "FAST_RECOVERY_TIMES 1\nDCTCP_RATE_AI 1000Mb/s\n\n"
             "ERROR_RATE_PER_LINK 0.0000\nL2_CHUNK_SIZE 4000\nL2_ACK_INTERVAL 1\n"
             "L2_BACK_TO_ZERO 0\n"
             f"{data_loss_settings}{recovery_settings}{trim_settings}\n"
@@ -1507,6 +1518,8 @@ def materialize(
         profile.network.transport_recovery,
         profile.network.packet_trimming,
         profile.network.fabric,
+        profile.network.congestion_control,
+        profile.network.link_rate,
     )
     experiment_config = output_dir / "experiment.json"
     write_experiment_config(experiment_config, profile, clr_schedule, selection_policy)
@@ -1574,6 +1587,9 @@ def materialize(
             profile.network.packet_trimming.manifest()
             if profile.network.packet_trimming is not None
             else {"enabled": False}
+        ),
+        "congestion_control": profile.network.congestion_control.manifest(
+            profile.network.link_rate
         ),
         "fabric": (
             profile.network.fabric.manifest()

@@ -103,6 +103,8 @@ fields are:
 | `decision_hash` | Reproducibility audit key for eligible decisions |
 | `start_time_ns`, `end_time_ns` | Simulated QP interval |
 | `terminal_outcome` / `failure_reason` | Explicit transport terminal state; failures invalidate primary latency analysis |
+| `timeouts` / `cnp_received` | Retransmission-timeout firings that rescheduled data, and rate cuts taken. `cnp_received` is zero unless the profile sets `network.congestion_control.mode: dcqcn` |
+| `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
 
 `source_port` identifies a live five-tuple, not a flow. ns-3 owns only the
 range `[10000, 65535]` per ordered host pair, so the bridge returns a port to

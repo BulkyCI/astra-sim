@@ -1057,6 +1057,23 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             "Stale trim notifications",
                             recovery.get("stale_trim_notification_count", 0),
                         ],
+                        [
+                            "Retransmission timeouts fired",
+                            recovery.get("timeout_count", 0),
+                        ],
+                        [
+                            "Rate cuts taken (CNP)",
+                            recovery.get("cnp_received_count", 0),
+                        ],
+                        [
+                            "First trim to first repair (p50)",
+                            _format_optional_duration_ns(
+                                (
+                                    recovery.get("first_trim_to_first_repair_ns")
+                                    or {}
+                                ).get("p50_ns")
+                            ),
+                        ],
                         ["Terminal failures", failure_value],
                     ],
                 )

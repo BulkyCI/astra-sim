@@ -46,6 +46,10 @@ FLOW_FIELDS = [
     "decision_hash",
     "start_time_ns",
     "end_time_ns",
+    "timeouts",
+    "cnp_received",
+    "first_trim_ns",
+    "first_repair_ns",
 ]
 
 COLLECTIVE_FIELDS = [
@@ -143,6 +147,10 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "decision_hash": "42",
             "start_time_ns": "10",
             "end_time_ns": "20",
+            "timeouts": "0",
+            "cnp_received": "0",
+            "first_trim_ns": "0",
+            "first_repair_ns": "0",
         }
 
     def test_summary_accepts_dp_all_reduce_provenance(self) -> None:
@@ -269,6 +277,27 @@ class Ring3DAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(health["wire_per_offered"], 1.5)
         self.assertEqual(health["burst_drain_ns"], 500)
 
+    def test_network_health_marks_an_unconnected_arrival_trace_unmeasured(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\nqbb_drop,data,1,0\n",
+                encoding="utf-8",
+            )
+
+            health = summarize(telemetry, ns3_dir=ns3)["network_health"]
+
+        self.assertEqual(health["status"], "available")
+        self.assertEqual(health["W"], 0.0)
+        self.assertIsNone(health["data_arrival_bytes"])
+        self.assertIsNone(health["wire_per_offered"])
+
     def test_network_health_without_transport_events_keeps_the_burst_drain(
         self,
     ) -> None:
@@ -320,6 +349,76 @@ class Ring3DAnalysisTests(unittest.TestCase):
         # Step 18 keeps its worst node (800 ns), not node 2's 200 ns; the TP
         # collective at step 19 never enters the DP table.
         self.assertEqual(spans, {"18": 800, "19": 400})
+
+    def test_host_transport_counters_reach_the_recovery_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            trimmed = self.valid_shed_flow()
+            trimmed.update(
+                {
+                    "flow_kind": "foreground_payload",
+                    "decision": "admitted",
+                    "admission_eligible": "false",
+                    "transport_role": "collective_payload",
+                    "logical_bytes": "4096",
+                    "physical_bytes": "4096",
+                    "data_attempted_bytes": "8192",
+                    "trimmed_payload_bytes": "1024",
+                    "trim_notifications": "2",
+                    "timeouts": "3",
+                    "cnp_received": "5",
+                    "first_trim_ns": "1000",
+                    "first_repair_ns": "1600",
+                }
+            )
+            # A repair that precedes the first trim answers a NACK, not a
+            # trim, so it must not enter the distribution.
+            nack_repaired = self.valid_shed_flow()
+            nack_repaired.update(
+                {
+                    "source_port": "10002",
+                    "first_trim_ns": "5000",
+                    "first_repair_ns": "4000",
+                }
+            )
+            self.write_telemetry(telemetry, [trimmed, nack_repaired])
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\n"
+                "rto_fired,control,3,0\n"
+                "cnp_taken,control,5,0\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+        recovery = summary["transport_recovery"]
+        self.assertEqual(recovery["timeout_count"], 3)
+        self.assertEqual(recovery["cnp_received_count"], 5)
+        self.assertEqual(
+            recovery["first_trim_to_first_repair_ns"]["count"], 1
+        )
+        self.assertEqual(recovery["first_trim_to_first_repair_ns"]["p50_ns"], 600)
+        transport = summary["ns3_observability"]["transport"]
+        self.assertEqual(transport["rto_fired_count"], 3)
+        self.assertEqual(transport["cnp_taken_count"], 5)
+
+    def test_host_transport_event_must_ride_the_control_plane(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\ncnp_taken,data,1,0\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "control plane"):
+                summarize(telemetry, ns3_dir=ns3)
 
     def test_summary_reports_data_loss_without_control_injection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -547,6 +646,16 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "trim_lasthop_notification_count": 0,
                     "trim_recovery_event_count": 0,
                     "stale_trim_notification_count": 0,
+                    "timeout_count": 0,
+                    "cnp_received_count": 0,
+                    "first_trim_to_first_repair_ns": {
+                        "count": 0,
+                        "min_ns": None,
+                        "p50_ns": None,
+                        "p95_ns": None,
+                        "p99_ns": None,
+                        "max_ns": None,
+                    },
                 },
             )
 

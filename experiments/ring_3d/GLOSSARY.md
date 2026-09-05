@@ -57,6 +57,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `network.transport_recovery.no_progress_timeout_ns` | Forward-progress deadline: fail a queue pair whose cumulative acknowledgement has not advanced for this simulated interval | `5000000000` | Liveness bound for recovery loops sustained by budget-exempt signals (NACKs, trim notifications); failure reason `no_forward_progress` |
 | `network.fabric` | Switch buffer and flow-control regime | Absent (32 MB, PFC on) | Requires `buffer_size_mb`, `pfc_enabled`, `data_queue_bytes`; optional `headroom_factor`, `trimmed_queue_bytes`. Mandatory when trimming is enabled, and must be identical across every arm of a comparison |
 | `network.packet_trimming` | Optional UEC 1.0.3 section 4.1 packet trimming | Absent | Requires `mode: "ftd"` (UET-conformant) or `"bts"` (research-only); optional `trimmed_queue` (default 2), `trimmed_queue_weight` (default 25), `min_trim_size_bytes` (default 24), and `last_hop_codepoint` (default `true`). Only switch admission or egress queue rejection can trigger it |
+| `network.congestion_control` | End-host sender reaction to congestion | Absent (`none`) | `mode: "none"` writes `CC_MODE 12`, where a queue pair blasts at link rate inside a static window and nothing slows it; `mode: "dcqcn"` writes `CC_MODE 1`, Mellanox DCQCN, the only implemented mode wired to trim notifications. Optional `rate_ai_fraction` (default 1/2000), `rate_hai_fraction` and `min_rate_fraction` (default 1/1000) are fractions of `link_rate`, so a profile keeps its aggressiveness at any link speed. DCQCN is not UEC's NSCC, which is window-based: name the mode in every result |
 | `selection_policy` | Typed low/high logical-admission selection knobs | `p_low=0.005`, `p_high=0.1` | Profile, manifest, and `experiment.json` | Materialized selection probabilities |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |
 | `microburst_bytes` | Per-flow offered background bytes | 128 MiB | Required even when disabled |
@@ -126,6 +127,19 @@ a naturally emitted framework burst or as packet loss.
   accepted out-of-order ranges, or the optional `DSCP_TRIMMABLE_RTX` codepoint
   for retransmitted data (UEC 1.0.3 section 3.6.4.7.1 marks that codepoint
   OPTIONAL).
+- Under `CC_MODE 1` every trim notification is a rate cut, last-hop trims
+  included. UEC 1.0.3 p. 356 excludes DSCP_TRIMMED_LASTHOP from the congestion
+  signal only where RCCC covers the last hop; this model has no RCCC, so
+  keeping the exclusion would leave destination incast uncontrolled.
+- `timeouts` and `cnp_received` are per-queue-pair cumulative counts:
+  retransmission-timeout firings that actually rescheduled data, and rate cuts
+  taken. `m_recovery_retries` resets on every acknowledgement advance and
+  cannot answer either question. `first_trim_ns` and `first_repair_ns` are
+  simulated times with zero meaning never; their difference, summarized as
+  `first_trim_to_first_repair_ns`, separates a repair-driven tail from a
+  congestion-control-driven one.
+- `rto_fired` and `cnp_taken` in `transport_summary.csv` are host-transport
+  reactions, not packets. They ride the control plane and carry zero bytes.
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use
   `transport_summary.csv` to distinguish those cases.

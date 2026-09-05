@@ -102,6 +102,11 @@ struct FlowRecord {
     uint32_t trim_lasthop_notifications = 0;
     uint32_t trim_recovery_events = 0;
     uint32_t stale_trim_notifications = 0;
+    uint32_t timeouts = 0;
+    uint32_t cnp_received = 0;
+    // Zero means never; no packet can be trimmed or repaired at time zero.
+    uint64_t first_trim_ns = 0;
+    uint64_t first_repair_ns = 0;
     uint64_t start_time_ns = 0;
     uint64_t end_time_ns = 0;
     FlowTerminalOutcome terminal_outcome = FlowTerminalOutcome::Pending;
@@ -130,7 +135,8 @@ class ExperimentTelemetry {
                "trim_notifications,trim_ftd_repairs,trim_bts_notifications,"
                "trim_lasthop_notifications,"
                "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
-               "failure_reason,decision_hash,start_time_ns,end_time_ns\n";
+               "failure_reason,decision_hash,start_time_ns,end_time_ns,"
+               "timeouts,cnp_received,first_trim_ns,first_repair_ns\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
             << "rank,parallelism_domain,collective_type,training_step,"
@@ -170,6 +176,8 @@ class ExperimentTelemetry {
                     << ',' << terminal_outcome_name(flow.terminal_outcome)
                     << ',' << flow.failure_reason << ',' << flow.decision_hash
                     << ',' << flow.start_time_ns << ',' << flow.end_time_ns
+                    << ',' << flow.timeouts << ',' << flow.cnp_received << ','
+                    << flow.first_trim_ns << ',' << flow.first_repair_ns
                     << '\n';
     }
 

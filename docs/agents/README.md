@@ -7,8 +7,11 @@ small while retaining the non-obvious project decisions.
 | --- | --- |
 | Any code, configuration, test, or documentation change | [Development workflow](development.md) |
 | Interpreting the original DBLP paper | [DBLP paper brief](ring-3d-paper-brief.md) |
+| Citing exactly what the DBLP paper does (transport, no congestion control, baseline definition, CLR cadence, result attribution) | [DBLP paper detailed read](dblp-paper-detailed-read.md), page-cited; the older [paper brief](ring-3d-paper-brief.md) is the short form |
 | Evaluating a DBLP criticism or validity threat | [DBLP known flaws](ring-3d-known-flaws.md) |
 | Changing packet loss, control traffic, priority classes, or recovery | [Loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md), then [implementation-gap audit](loss-tolerant-rdma-audit.md) |
+| Knowing what UEC transport actually specifies (NSCC, RCCC, trimming, SACK, UUD) and how far our ns-3 backend is from it | [UEC transport brief](uec-transport-brief.md), sourced, with a gap table and a CC recommendation |
+| Checking a UEC claim against the current spec (v1.0.3) and pulling NSCC/RCCC simulator defaults | [UEC 1.0.3 reconciliation](uec-1.0.3-reconciliation.md) |
 | Deciding whether a paper mechanism maps to ASTRA-sim | [ASTRA-sim pivot](ring-3d-astra-pivot.md) |
 | Interpreting Ring-3D claims, limits, or roadmap | [Ring-3D research context](ring-3d-research-context.md) |
 | Editing profiles, CLR, microbursts, or analysis | [Ring-3D local guide](../../experiments/ring_3d/AGENTS.md), then [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md) |

@@ -16,6 +16,7 @@ small while retaining the non-obvious project decisions.
 | Defining an experimental comparison or interpreting results | [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md) |
 | Diagnosing a slow, stalled, or timed-out simulation; changing hot-path or recovery code; sizing CI time budgets | [Simulation liveness and performance discipline](simulation-liveness-and-performance.md) |
 | Judging whether the approach offers relief, how much, and how to frame the contribution after CI run #117 | [Run #117 wave readout](run-117-wave-readout.md), then the [referee pass](run-117-referee-pass.md) |
+| Deciding the next wave after run #117: selective-repair canary, no-CC finding, regime map, and the revised order of work | [Next steps after run #117](next-steps-after-run-117.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commits/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/authoring-skills/SKILL.md) |

@@ -9,6 +9,9 @@
 - Before committing, read and follow
   [`.github/skills/git-commit/SKILL.md`](.github/skills/git-commit/SKILL.md).
   It defines this repository's required Conventional Commit message format.
+- A push to `main` runs the full evaluation wave unless every changed file is
+  documentation or the head commit subject contains `[skip ci]`. Put
+  `[skip ci]` on a push that must not start a wave.
 
 ## Verification
 

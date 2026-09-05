@@ -63,7 +63,7 @@ Llama/Megatron/DeepSpeed replay:
 See [experiments/ring_3d/README.md](../../experiments/ring_3d/README.md) and
 [experiments/ring_3d/VALIDATION_PROTOCOL.md](../../experiments/ring_3d/VALIDATION_PROTOCOL.md)
 for executable setup and predeclared estimands, and
-[the run #117 wave readout](run-117-wave-readout.md) for the current measured
+[the run #117 readout](run-117-readout.md) for the current measured
 result.
 
 ## Current CLR proxy

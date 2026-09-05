@@ -3,8 +3,26 @@ name: CI
 on:
   push:
     branches: [ "main" ]
+    # A push whose every changed file is documentation starts no run: no
+    # ledger issue, no release, no cluster wave (run #118 on 2026-09-05 was a
+    # docs-only push that provisioned 31 runners). A push that also touches
+    # code still runs in full. To skip a run for any other reason, put
+    # `[skip ci]` in the head commit's subject; GitHub honours it natively
+    # for push and pull_request events and nothing here needs to check it.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - "LICENSE"
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       run_structural_studies:

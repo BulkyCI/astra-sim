@@ -33,7 +33,14 @@ A composite action cannot check out the repository that contains it, so
 ## Independence of runs
 
 Each push is an independent experiment and must leave a record, so the
-concurrency group is keyed by `github.run_id` and nothing is cancelled. A pull
+concurrency group is keyed by `github.run_id` and nothing is cancelled. Two
+pushes leave no record because they start no run: a push whose changed files
+all match the `paths-ignore` list in `workflow_main.yml` (documentation,
+templates, the licence), and a push whose head commit subject contains
+`[skip ci]`, which GitHub applies before any job exists. Neither opens a
+ledger issue or a release; that is the point, since an evaluation wave costs
+31 cluster jobs. Do not add a job-level keyword gate: jobs behind `always()`
+would still run and write "missing" ledger rows, which is what run #118 did. A pull
 request is an iteration of a proposal rather than an experiment, so its group is
 keyed by the head ref with `cancel-in-progress`. Both live in one expression in
 `workflow_main.yml`; do not add a second concurrency block.

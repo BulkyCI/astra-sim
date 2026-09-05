@@ -2,12 +2,10 @@
 
 Written 2026-09-05 from the run #117 release bundles
 (`zuihrl5stp6ulacoogghyp4loy7xsjpj`) and a read of the transport and
-harness code. It follows the [wave readout](run-117-wave-readout.md) and
-supersedes its "decisive experiment" section. The readout graded the
-phase-aware policy on network health and found relief under go-back-N. This
-memo asks the researcher's next question: is that relief a property of the
-idea, or of the recovery algorithm it happened to run on, and what should
-the next wave be.
+harness code. The [run #117 readout](run-117-readout.md) holds the
+results; this memo holds the reasoning behind the next wave: whether the
+relief is a property of the idea or of the recovery algorithm it ran on,
+and what to run to find out.
 
 ## 1. The canary reorders the programme
 

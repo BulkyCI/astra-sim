@@ -22,6 +22,7 @@ small while retaining the non-obvious project decisions.
 | Judging whether the approach offers relief, how much, and how to frame the contribution after CI run #117 | [Run #117 wave readout](run-117-wave-readout.md), then the [referee pass](run-117-referee-pass.md) |
 | Deciding the next wave after run #117: selective-repair canary, no-CC finding, regime map, and the revised order of work | [Next steps after run #117](next-steps-after-run-117.md) |
 | Confirming why the CLR schedule is the pinned explicit critical-step list `[1, 2, 3, 20]`, not a decay/spike proxy | [CLR schedule evidence](clr-schedule-evidence.md) |
+| Building the forgive protocol, the congestion-control knob, the tail telemetry, or the regime-map profiles | [Forgive protocol design](forgive-protocol-design.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/author-skill/SKILL.md) |

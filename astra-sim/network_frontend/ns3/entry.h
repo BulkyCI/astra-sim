@@ -198,6 +198,31 @@ void register_logical_send_event(int src_id,
     }
 }
 
+// The transport's recovery-verdict callback. ns-3 knows a five-tuple and a
+// byte range; this resolves the flow the way the telemetry join does, by
+// (src, dst, source_port), and lets the experiment layer answer. An unknown
+// five-tuple pulls: a range whose flow has already terminated cannot be
+// charged to anything.
+uint8_t recovery_verdict(uint32_t sip,
+                         uint32_t dip,
+                         uint16_t sport,
+                         uint16_t dport,
+                         uint64_t seq,
+                         uint32_t length) {
+    (void)dport;
+    (void)seq;
+    const uint32_t src = ip_to_node_id(Ipv4Address(sip));
+    const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
+    const FlowKey key = make_flow_key(sport, static_cast<int>(src),
+                                      static_cast<int>(dst));
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        return static_cast<uint8_t>(AstraSimNs3::RecoveryVerdict::Pull);
+    }
+    return static_cast<uint8_t>(
+        AstraSimNs3::evaluate_forgiveness(active->second, length));
+}
+
 void start_rdma_flow(AstraSimNs3::FlowRecord flow,
                      void (*msg_handler)(void*) = nullptr,
                      void* fun_arg = nullptr) {
@@ -315,6 +340,19 @@ void send_flow(int src_id,
         flow.priority_group = AstraSimNs3::priority_group_for_vnet(request.vnet);
         flow.physical_bytes = message_size;
     }
+    // The budget is denominated in the bytes that were eligible for it, and
+    // eligibility is decided here, at the sender, for the receiving rank that
+    // will later be asked to forgive some of them.
+    if (decision.eligible && dst_id >= 0) {
+        const uint32_t dst = static_cast<uint32_t>(dst_id);
+        const uint32_t step = request.operation.training_step;
+        AstraSimNs3::forgiveness_ledger.register_eligible(dst, step,
+                                                          message_size);
+        if (decision.shed) {
+            AstraSimNs3::forgiveness_ledger.register_shed(dst, step,
+                                                          message_size);
+        }
+    }
     start_rdma_flow(flow, msg_handler, fun_arg);
 }
 
@@ -421,6 +459,7 @@ void copy_transport_counters(AstraSimNs3::FlowRecord& flow,
     flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.timeouts = q->m_timeouts;
     flow.cnp_received = q->m_cnp_received;
+    flow.priority_pulls = q->m_priority_pulls;
     flow.first_trim_ns = q->m_first_trim_ns;
     flow.first_repair_ns = q->m_first_repair_ns;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
@@ -537,5 +576,20 @@ int setup_ns3_simulation(string network_configuration) {
         return -1;
     }
     SetConfig();
-    return SetupNetwork(qp_finish, qp_fail) ? 0 : -1;
+    const bool recovery_domain =
+        AstraSimNs3::experiment_config.enabled &&
+        AstraSimNs3::experiment_config.domain ==
+            AstraSimNs3::SheddingDomain::Recovery;
+    if (recovery_domain) {
+        // The experiment configuration asserts the transport contract; this is
+        // where the assertion meets the transport that was actually built.
+        if (selective_retransmission == 0 || packet_trim_mode != "ftd") {
+            cerr << "Recovery domain requires SELECTIVE_RETRANSMISSION 1 and "
+                    "PACKET_TRIM_MODE ftd in the network configuration\n";
+            return -1;
+        }
+    }
+    return SetupNetwork(qp_finish, qp_fail, recovery_verdict, recovery_domain)
+        ? 0
+        : -1;
 }

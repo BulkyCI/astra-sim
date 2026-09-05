@@ -40,6 +40,121 @@ enum class FlowTerminalOutcome : uint8_t {
     Failed,
 };
 
+// Where the phase-aware budget is spent. Admission decides before a payload is
+// offered and substitutes the whole message. Recovery decides after a switch
+// has already trimmed a packet and lets that packet's bytes go, which is the
+// only point at which the policy can act during a congestion episode.
+enum class SheddingDomain : uint8_t {
+    Admission = 0,
+    Recovery,
+};
+
+// What the transport should do with one trimmed range. The numbers cross into
+// ns-3 as RdmaHw::RecoveryVerdict and must not drift from it.
+enum class RecoveryVerdict : uint8_t {
+    Pull = 0,
+    Forgive = 1,
+    PullPriority = 2,
+};
+
+// One receiving rank's budget for one training step.
+struct StepLedger {
+    uint64_t eligible = 0;
+    uint64_t shed = 0;
+    uint64_t forgiven = 0;
+    // Set when the rank has written its DP All-Reduce row for the step. After
+    // that the step's bytes are accounted for and nothing more may be
+    // forgiven against them.
+    bool closed = false;
+};
+
+// Dense (receiving rank, step) budget table. Ranks stay under a few hundred
+// and steps under a few hundred, so the whole table is well under a megabyte
+// and every access is one multiply-add. A default-constructed ledger is empty
+// and total: every query answers "do not forgive" and every update is a
+// no-op, which is exactly the admission domain's behaviour.
+class ForgivenessLedger {
+  public:
+    ForgivenessLedger() = default;
+
+    static ForgivenessLedger make(uint32_t ranks, uint32_t steps) {
+        ForgivenessLedger ledger;
+        if (ranks == 0 || steps == 0) {
+            return ledger;
+        }
+        ledger.ranks_ = ranks;
+        ledger.steps_ = steps;
+        ledger.cells_.assign(static_cast<size_t>(ranks) * steps, StepLedger{});
+        return ledger;
+    }
+
+    bool empty() const {
+        return cells_.empty();
+    }
+
+    void register_eligible(uint32_t dst, uint32_t step, uint64_t bytes) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->eligible += bytes;
+        }
+    }
+
+    void register_shed(uint32_t dst, uint32_t step, uint64_t bytes) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->shed += bytes;
+        }
+    }
+
+    void close(uint32_t dst, uint32_t step) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->closed = true;
+        }
+    }
+
+    // The safety law, in one place: shed and forgiven bytes share one budget,
+    // and the budget is the step's threshold times the bytes that were
+    // eligible for it. Absorbing: neither term ever decreases, so a range
+    // charged once is never refunded.
+    bool may_forgive(uint32_t dst,
+                     uint32_t step,
+                     uint64_t bytes,
+                     uint64_t threshold) const {
+        const StepLedger* cell = find(dst, step);
+        if (cell == nullptr || cell->closed) {
+            return false;
+        }
+        const uint64_t spent = cell->shed + cell->forgiven + bytes;
+        return spent * kDecisionScale <= cell->eligible * threshold;
+    }
+
+    void charge(uint32_t dst, uint32_t step, uint64_t bytes) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->forgiven += bytes;
+        }
+    }
+
+    const StepLedger* cell(uint32_t dst, uint32_t step) const {
+        return find(dst, step);
+    }
+
+  private:
+    // Steps are one-based in every profile, mask, and telemetry row.
+    StepLedger* find(uint32_t dst, uint32_t step) {
+        return const_cast<StepLedger*>(
+            const_cast<const ForgivenessLedger*>(this)->find(dst, step));
+    }
+
+    const StepLedger* find(uint32_t dst, uint32_t step) const {
+        if (dst >= ranks_ || step == 0 || step > steps_) {
+            return nullptr;
+        }
+        return &cells_[static_cast<size_t>(dst) * steps_ + (step - 1)];
+    }
+
+    uint32_t ranks_ = 0;
+    uint32_t steps_ = 0;
+    std::vector<StepLedger> cells_;
+};
+
 struct MicroburstFlow {
     uint32_t src = 0;
     uint32_t dst = 0;
@@ -60,8 +175,11 @@ struct ExperimentConfig {
     std::map<uint32_t, uint16_t> vnet_to_priority_group;
     std::map<uint32_t, uint64_t> shedding_threshold_by_step;
     bool selection_policy_configured = false;
+    SheddingDomain domain = SheddingDomain::Admission;
     uint64_t p_low_threshold = 0;
     uint64_t p_high_threshold = 0;
+    uint32_t rank_count = 0;
+    uint32_t step_count = 0;
     bool clr_mask_configured = false;
     std::map<uint32_t, bool> clr_mask_by_step;
     bool microburst_enabled = false;
@@ -104,6 +222,11 @@ struct FlowRecord {
     uint32_t stale_trim_notifications = 0;
     uint32_t timeouts = 0;
     uint32_t cnp_received = 0;
+    uint32_t priority_pulls = 0;
+    // Bytes the receiver accepted without ever seeing them, and how many
+    // trimmed ranges that took. Recovery domain only.
+    uint64_t forgiven_bytes = 0;
+    uint32_t forgiven_ranges = 0;
     // Zero means never; no packet can be trimmed or repaired at time zero.
     uint64_t first_trim_ns = 0;
     uint64_t first_repair_ns = 0;
@@ -114,6 +237,7 @@ struct FlowRecord {
 };
 
 inline ExperimentConfig experiment_config;
+inline ForgivenessLedger forgiveness_ledger;
 
 class ExperimentTelemetry {
   public:
@@ -136,7 +260,9 @@ class ExperimentTelemetry {
                "trim_lasthop_notifications,"
                "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
                "failure_reason,decision_hash,start_time_ns,end_time_ns,"
-               "timeouts,cnp_received,first_trim_ns,first_repair_ns\n";
+               "timeouts,cnp_received,first_trim_ns,first_repair_ns,"
+               "forgiven_bytes,forgiven_ranges,priority_pulls,"
+               "delivered_bytes\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
             << "rank,parallelism_domain,collective_type,training_step,"
@@ -177,8 +303,10 @@ class ExperimentTelemetry {
                     << ',' << flow.failure_reason << ',' << flow.decision_hash
                     << ',' << flow.start_time_ns << ',' << flow.end_time_ns
                     << ',' << flow.timeouts << ',' << flow.cnp_received << ','
-                    << flow.first_trim_ns << ',' << flow.first_repair_ns
-                    << '\n';
+                    << flow.first_trim_ns << ',' << flow.first_repair_ns << ','
+                    << flow.forgiven_bytes << ',' << flow.forgiven_ranges
+                    << ',' << flow.priority_pulls << ','
+                    << delivered_bytes(flow) << '\n';
     }
 
     void record_collective_completion(
@@ -192,6 +320,13 @@ class ExperimentTelemetry {
         }
         if (end_time_ns < start_time_ns) {
             throw std::runtime_error("collective completion precedes its start time");
+        }
+        // The rank has accounted for this step's DP All-Reduce, so its budget
+        // for the step is spent whether or not it was used. A trim arriving
+        // after this can only be pulled.
+        if (rank >= 0 && AstraSim::is_dp_all_reduce_payload(operation)) {
+            forgiveness_ledger.close(static_cast<uint32_t>(rank),
+                                     operation.training_step);
         }
         collective_events << rank << ','
                           << parallelism_domain_name(operation.parallelism_domain)
@@ -220,6 +355,16 @@ class ExperimentTelemetry {
     }
 
   private:
+    // Offered minus forgiven. A completed queue pair in the recovery domain
+    // delivered fewer bytes than it offered, by exactly the forgiven count;
+    // physical_bytes stays the offered figure so it keeps joining fct.txt and
+    // keeps denominating W.
+    static uint64_t delivered_bytes(const FlowRecord& flow) {
+        return flow.physical_bytes >= flow.forgiven_bytes
+            ? flow.physical_bytes - flow.forgiven_bytes
+            : 0;
+    }
+
     static const char* flow_kind_name(FlowKind kind) {
         switch (kind) {
         case FlowKind::ForegroundPayload:
@@ -345,6 +490,13 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
     }
 
     decision.eligible = true;
+    // The recovery domain spends the same budget after a trim, so shedding at
+    // admission as well would double-spend it. Eligibility is still recorded:
+    // it is what makes a flow forgivable later, and it keeps the two domains'
+    // eligible populations identical for a matched comparison.
+    if (experiment_config.domain == SheddingDomain::Recovery) {
+        return decision;
+    }
     decision.decision_hash = stable_operation_hash(request, src, dst, tag);
     if (experiment_config.clr_mask_configured) {
         const auto clr = experiment_config.clr_mask_by_step.find(
@@ -368,6 +520,37 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
     decision.shed =
         decision.decision_hash % kDecisionScale < threshold->second;
     return decision;
+}
+
+// The verdict the transport asks for, and the only place the budget moves.
+// The transport is semantics-blind: it supplies a flow and a byte count, and
+// learns nothing about steps, phases, or budgets. Total by construction, since
+// this runs on the packet path: an unknown step, a closed ledger, or an
+// exhausted budget all answer "pull".
+inline RecoveryVerdict evaluate_forgiveness(FlowRecord& flow, uint64_t bytes) {
+    if (!experiment_config.enabled ||
+        experiment_config.domain != SheddingDomain::Recovery ||
+        flow.kind != FlowKind::ForegroundPayload || !flow.admission_eligible) {
+        return RecoveryVerdict::Pull;
+    }
+    const uint32_t step = flow.operation.training_step;
+    const auto clr = experiment_config.clr_mask_by_step.find(step);
+    if (clr == experiment_config.clr_mask_by_step.end()) {
+        return RecoveryVerdict::Pull;
+    }
+    const uint64_t threshold = clr->second ? experiment_config.p_low_threshold
+                                           : experiment_config.p_high_threshold;
+    const uint32_t dst = static_cast<uint32_t>(flow.dst);
+    if (!forgiveness_ledger.may_forgive(dst, step, bytes, threshold)) {
+        // A critical step that cannot spend more budget still wants its repair
+        // ahead of the rest; outside one, an ordinary pull is enough.
+        return clr->second ? RecoveryVerdict::PullPriority
+                           : RecoveryVerdict::Pull;
+    }
+    forgiveness_ledger.charge(dst, step, bytes);
+    flow.forgiven_bytes += bytes;
+    flow.forgiven_ranges++;
+    return RecoveryVerdict::Forgive;
 }
 
 inline uint16_t priority_group_for_vnet(uint32_t vnet) {
@@ -514,6 +697,7 @@ inline void configure_clr_mask(const std::string& configuration_path) {
 inline void configure_experiment(const std::string& configuration_path,
                                  const std::string& output_dir) {
     experiment_config = ExperimentConfig{};
+    forgiveness_ledger = ForgivenessLedger{};
     if (configuration_path.empty() || configuration_path == "empty") {
         return;
     }
@@ -536,7 +720,7 @@ inline void configure_experiment(const std::string& configuration_path,
     reject_unknown_keys(root,
                         {"schema_version", "enabled", "seed", "run_id",
                          "eligibility", "selection_probability_by_step",
-                         "selection_policy",
+                         "selection_policy", "scale",
                          "default_priority_group", "provenance",
                          "vnet_to_priority_group", "microburst"},
                         "experiment configuration");
@@ -642,12 +826,59 @@ inline void configure_experiment(const std::string& configuration_path,
         if (!policy.is_object()) {
             throw std::runtime_error("selection_policy must be an object");
         }
-        reject_unknown_keys(policy, {"semantics", "p_low", "p_high"},
-                            "selection_policy");
+        reject_unknown_keys(
+            policy,
+            {"semantics", "p_low", "p_high", "domain", "transport"},
+            "selection_policy");
+        if (policy.contains("domain")) {
+            const auto& domain = policy.at("domain");
+            if (domain == "admission") {
+                experiment_config.domain = SheddingDomain::Admission;
+            } else if (domain == "recovery") {
+                experiment_config.domain = SheddingDomain::Recovery;
+            } else {
+                throw std::runtime_error(
+                    "selection_policy.domain must be admission or recovery");
+            }
+        }
+        const char* expected_semantics =
+            experiment_config.domain == SheddingDomain::Recovery
+                ? "recovery_forgiveness"
+                : "logical_admission_selection";
         if (!policy.contains("semantics") ||
-            policy.at("semantics") != "logical_admission_selection") {
+            policy.at("semantics") != expected_semantics) {
             throw std::runtime_error(
-                "selection_policy.semantics must be logical_admission_selection");
+                std::string("selection_policy.semantics must be ") +
+                expected_semantics);
+        }
+        if (experiment_config.domain == SheddingDomain::Recovery) {
+            // The frontend cannot read network_config.txt, so the generator
+            // asserts the transport contract here and entry.h checks the
+            // assertion against the transport ns-3 actually built. Recovery
+            // needs both: without ftd trimming nothing reaches the receiver to
+            // forgive, and without selective repair the receiver never
+            // consults the out-of-order range a forgiven hole becomes.
+            if (!policy.contains("transport")) {
+                throw std::runtime_error(
+                    "recovery domain requires selection_policy.transport");
+            }
+            const auto& transport = policy.at("transport");
+            if (!transport.is_object()) {
+                throw std::runtime_error(
+                    "selection_policy.transport must be an object");
+            }
+            reject_unknown_keys(transport,
+                                {"selective_repair", "packet_trimming_ftd"},
+                                "selection_policy.transport");
+            for (const char* key : {"selective_repair", "packet_trimming_ftd"}) {
+                if (!transport.contains(key) ||
+                    !transport.at(key).is_boolean() ||
+                    !transport.at(key).get<bool>()) {
+                    throw std::runtime_error(
+                        std::string("recovery domain requires "
+                                    "selection_policy.transport.") + key);
+                }
+            }
         }
         for (const char* key : {"p_low", "p_high"}) {
             if (!policy.contains(key)) {
@@ -674,6 +905,35 @@ inline void configure_experiment(const std::string& configuration_path,
                 "selection_policy.p_high must be at least p_low");
         }
         experiment_config.selection_policy_configured = true;
+    }
+
+    if (root.contains("scale")) {
+        const auto& scale = root.at("scale");
+        if (!scale.is_object()) {
+            throw std::runtime_error("scale must be an object");
+        }
+        reject_unknown_keys(scale, {"ranks", "steps"}, "scale");
+        for (const char* key : {"ranks", "steps"}) {
+            if (!scale.contains(key) || !scale.at(key).is_number_unsigned() ||
+                scale.at(key).get<uint64_t>() == 0 ||
+                scale.at(key).get<uint64_t>() >
+                    std::numeric_limits<uint32_t>::max()) {
+                throw std::runtime_error(
+                    std::string("scale.") + key + " must be a nonzero uint32");
+            }
+        }
+        experiment_config.rank_count =
+            static_cast<uint32_t>(scale.at("ranks").get<uint64_t>());
+        experiment_config.step_count =
+            static_cast<uint32_t>(scale.at("steps").get<uint64_t>());
+    }
+    if (experiment_config.domain == SheddingDomain::Recovery) {
+        if (experiment_config.rank_count == 0 ||
+            experiment_config.step_count == 0) {
+            throw std::runtime_error("recovery domain requires scale");
+        }
+        forgiveness_ledger = ForgivenessLedger::make(
+            experiment_config.rank_count, experiment_config.step_count);
     }
 
     if (root.contains("microburst")) {

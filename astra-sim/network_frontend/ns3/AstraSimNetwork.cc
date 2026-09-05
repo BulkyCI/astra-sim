@@ -479,11 +479,9 @@ int main(int argc, char* argv[]) {
             queues_per_dim, injection_scale, comm_scale, rendezvous_protocol);
     }
 
-    // Initialize ns3 simulation.
-    if (auto ok = setup_ns3_simulation(network_configuration); ok == -1) {
-        std::cerr << "Fail to setup ns3 simulation." << std::endl;
-        return -1;
-    }
+    // The experiment configuration is parsed first: the shedding domain
+    // decides whether ns-3 is built with the recovery-verdict fork, so the
+    // network cannot be set up before it is known.
     try {
         AstraSimNs3::configure_experiment(experiment_configuration,
                                           experiment_output_dir);
@@ -492,6 +490,12 @@ int main(int argc, char* argv[]) {
         cerr << "Unable to configure experiment: " << error.what() << "\n";
         Simulator::Destroy();
         return 1;
+    }
+
+    // Initialize ns3 simulation.
+    if (auto ok = setup_ns3_simulation(network_configuration); ok == -1) {
+        std::cerr << "Fail to setup ns3 simulation." << std::endl;
+        return -1;
     }
 
     // Tell workload layer to schedule first events.

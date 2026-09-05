@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .generate import Profile, load_profile, materialize
+    from .generate import Profile, SheddingDomain, load_profile, materialize
     from .generate_clr_schedule import ClrScheduleParameters
 except ImportError:
-    from generate import Profile, load_profile, materialize
+    from generate import Profile, SheddingDomain, load_profile, materialize
     from generate_clr_schedule import ClrScheduleParameters
 
 
@@ -59,6 +59,7 @@ def run_experiment(
     p_low: float | None = None,
     p_high: float | None = None,
     allow_clr_exposure: bool = False,
+    domain: SheddingDomain | None = None,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
     skip_analysis: bool = False,
 ) -> dict[str, Any]:
@@ -84,6 +85,7 @@ def run_experiment(
         p_low=p_low,
         p_high=p_high,
         allow_clr_exposure=allow_clr_exposure,
+        domain=domain,
         clr_schedule_parameters=clr_schedule_parameters,
     )
     binary = binary.resolve() if binary else find_default_binary()
@@ -207,6 +209,11 @@ def main() -> int:
         type=float,
         help="Gaussian CLR epoch-boundary spike amplitude",
     )
+    parser.add_argument(
+        "--domain",
+        choices=tuple(domain.value for domain in SheddingDomain),
+        help="override the profile's shedding domain; the matched-arm knob",
+    )
     parser.add_argument("--skip-analysis", action="store_true")
     arguments = parser.parse_args()
     clr_schedule_parameters = ClrScheduleParameters(
@@ -246,6 +253,9 @@ def main() -> int:
         simulation_timeout_seconds=arguments.simulation_timeout_seconds,
         p_low=p_low,
         p_high=p_high,
+        domain=(
+            None if arguments.domain is None else SheddingDomain(arguments.domain)
+        ),
         clr_schedule_parameters=clr_schedule_parameters,
         skip_analysis=arguments.skip_analysis,
     )

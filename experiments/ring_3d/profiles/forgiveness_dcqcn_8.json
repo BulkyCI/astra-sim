@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "name": "ring-3d-forgiveness-dcqcn-8",
+  "parallelism": {
+    "tp": 2,
+    "pp": 1,
+    "dp": 4
+  },
+  "steps": 3,
+  "compute_duration_us": 10,
+  "tp_all_reduce_bytes": 65536,
+  "pp_bytes": 0,
+  "dp_all_reduce_bytes": 1048576,
+  "seed": 20260317,
+  "selection_policy": {
+    "p_low": 0.005,
+    "p_high": 0.1,
+    "domain": "recovery"
+  },
+  "network": {
+    "topology": "clos",
+    "hosts_per_leaf": 2,
+    "spine_count": 4,
+    "link_rate": "200Gbps",
+    "fabric": {
+      "buffer_size_mb": 2,
+      "pfc_enabled": false,
+      "headroom_factor": 0,
+      "data_queue_bytes": 262144,
+      "trimmed_queue_bytes": 65536
+    },
+    "packet_trimming": {
+      "mode": "ftd"
+    },
+    "transport_recovery": {
+      "retransmission_timeout_ns": 100000,
+      "max_retransmission_retries": 1024,
+      "selective_repair": true
+    },
+    "congestion_control": {
+      "mode": "dcqcn"
+    }
+  },
+  "microburst_bytes": 1048576,
+  "microburst_enabled": true,
+  "microburst_flow_count": 7,
+  "microburst_destination_rank": 0,
+  "microburst_offset_spacing_ns": 0,
+  "microburst_trigger_step": 2,
+  "dp_all_reduce_implementation": "direct"
+}

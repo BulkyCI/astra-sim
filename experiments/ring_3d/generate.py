@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -175,6 +176,19 @@ class GradientBucketSample:
     gradient_accumulation_steps: int
 
 
+class SheddingDomain(StrEnum):
+    """Where the phase-aware budget is spent.
+
+    ``admission`` decides before a payload is offered and substitutes the whole
+    message. ``recovery`` decides after a switch has already trimmed a packet
+    and lets that packet's bytes go, which is the only point at which the
+    policy can act during a congestion episode.
+    """
+
+    ADMISSION = "admission"
+    RECOVERY = "recovery"
+
+
 @dataclass(frozen=True)
 class SelectionPolicy:
     """Logical-admission selection parameters retained for paired runs.
@@ -185,6 +199,15 @@ class SelectionPolicy:
 
     p_low: float
     p_high: float
+    domain: SheddingDomain = SheddingDomain.ADMISSION
+
+    @property
+    def semantics(self) -> str:
+        return (
+            "recovery_forgiveness"
+            if self.domain is SheddingDomain.RECOVERY
+            else "logical_admission_selection"
+        )
 
 
 @dataclass(frozen=True)
@@ -257,10 +280,12 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     policy = document.get("selection_policy")
     if not isinstance(policy, dict):
         raise ValueError("selection_policy must be an object")
-    expected_keys = {"p_low", "p_high"}
-    if set(policy) != expected_keys:
+    required_keys = {"p_low", "p_high"}
+    optional_keys = {"domain"}
+    if not required_keys <= set(policy) <= required_keys | optional_keys:
         raise ValueError(
-            f"selection_policy must contain exactly {sorted(expected_keys)}"
+            f"selection_policy must contain exactly {sorted(required_keys)} "
+            f"plus optional {sorted(optional_keys)}"
         )
     p_low = _probability(policy["p_low"], "selection_policy.p_low")
     p_high = _probability(policy["p_high"], "selection_policy.p_high")
@@ -270,7 +295,15 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
         )
     if p_high < p_low:
         raise ValueError("selection_policy.p_high must be at least p_low")
-    return SelectionPolicy(p_low=p_low, p_high=p_high)
+    domain_value = policy.get("domain", SheddingDomain.ADMISSION.value)
+    if domain_value not in tuple(domain.value for domain in SheddingDomain):
+        raise ValueError(
+            "selection_policy.domain must be one of "
+            f"{sorted(domain.value for domain in SheddingDomain)}"
+        )
+    return SelectionPolicy(
+        p_low=p_low, p_high=p_high, domain=SheddingDomain(domain_value)
+    )
 
 
 def _load_workload(document: dict[str, Any]) -> Workload:
@@ -446,6 +479,19 @@ def parse_profile_document(document: Any) -> Profile:
     workload = _load_workload(document)
     explicit_clr_schedule = _load_explicit_clr_schedule(document, steps)
     network = load_network(document.get("network"), ranks)
+    if selection_policy.domain is SheddingDomain.RECOVERY:
+        recovery = network.transport_recovery
+        trimming = network.packet_trimming
+        if recovery is None or not recovery.selective_repair:
+            raise ValueError(
+                "selection_policy.domain 'recovery' requires "
+                "network.transport_recovery.selective_repair"
+            )
+        if trimming is None or trimming.mode != "ftd":
+            raise ValueError(
+                "selection_policy.domain 'recovery' requires "
+                "network.packet_trimming.mode 'ftd'"
+            )
     microburst_flow_count = _require_positive_int(
         document.get("microburst_flow_count", min(2, ranks // 2)),
         "microburst_flow_count",
@@ -1294,6 +1340,7 @@ def resolve_selection_policy(
     p_low: float | None = None,
     p_high: float | None = None,
     allow_clr_exposure: bool = False,
+    domain: SheddingDomain | None = None,
 ) -> SelectionPolicy:
     """Resolve optional command-line overrides against the typed profile policy.
 
@@ -1317,7 +1364,13 @@ def resolve_selection_policy(
         raise ValueError("p_low must be greater than zero and at most 0.01")
     if resolved_high < resolved_low:
         raise ValueError("p_high must be at least p_low")
-    return SelectionPolicy(p_low=resolved_low, p_high=resolved_high)
+    return SelectionPolicy(
+        p_low=resolved_low,
+        p_high=resolved_high,
+        domain=(
+            profile.selection_policy.domain if domain is None else domain
+        ),
+    )
 
 
 def _selection_probabilities_for_schedule(
@@ -1337,6 +1390,20 @@ def write_experiment_config(
     selection_policy: SelectionPolicy,
 ) -> None:
     microburst_flows = _microburst_flows(profile)
+    policy_document: dict[str, Any] = {
+        "semantics": selection_policy.semantics,
+        "p_low": selection_policy.p_low,
+        "p_high": selection_policy.p_high,
+    }
+    if selection_policy.domain is SheddingDomain.RECOVERY:
+        policy_document["domain"] = selection_policy.domain.value
+        # The simulator's frontend cannot read network_config.txt, so the
+        # transport contract the recovery domain depends on is asserted here
+        # and checked against the built transport at setup.
+        policy_document["transport"] = {
+            "selective_repair": True,
+            "packet_trimming_ftd": True,
+        }
     policy = {
         "schema_version": 1,
         "enabled": True,
@@ -1346,11 +1413,9 @@ def write_experiment_config(
         "selection_probability_by_step": _selection_probabilities_for_schedule(
             clr_schedule, selection_policy
         ),
-        "selection_policy": {
-            "semantics": "logical_admission_selection",
-            "p_low": selection_policy.p_low,
-            "p_high": selection_policy.p_high,
-        },
+        "selection_policy": policy_document,
+        # The receiving ranks and steps the forgiveness ledger is sized for.
+        "scale": {"ranks": profile.ranks, "steps": profile.steps},
         "default_priority_group": 3,
         "provenance": {"control_bytes": 64, "priority_group": 1},
         "vnet_to_priority_group": {"0": 3},
@@ -1460,6 +1525,7 @@ def materialize(
     p_low: float | None = None,
     p_high: float | None = None,
     allow_clr_exposure: bool = False,
+    domain: SheddingDomain | None = None,
     clr_schedule_parameters: ClrScheduleParameters | None = None,
 ) -> dict[str, Any]:
     profile = load_profile(profile_path)
@@ -1468,7 +1534,11 @@ def materialize(
             profile, seed=_require_positive_int(seed_override, "seed_override")
         )
     selection_policy = resolve_selection_policy(
-        profile, p_low=p_low, p_high=p_high, allow_clr_exposure=allow_clr_exposure
+        profile,
+        p_low=p_low,
+        p_high=p_high,
+        allow_clr_exposure=allow_clr_exposure,
+        domain=domain,
     )
     if output_dir.exists() and clean:
         shutil.rmtree(output_dir)
@@ -1552,7 +1622,8 @@ def materialize(
         "ranks": profile.ranks,
         "parallelism": {"tp": profile.tp, "pp": profile.pp, "dp": profile.dp},
         "selection_policy": {
-            "semantics": "logical_admission_selection",
+            "semantics": selection_policy.semantics,
+            "domain": selection_policy.domain.value,
             "p_low": selection_policy.p_low,
             "p_high": selection_policy.p_high,
         },

@@ -12,6 +12,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_regime_map:
+        description: Run the 64-rank regime map (congestion control x fan-in x oversubscription)
+        required: false
+        default: false
+        type: boolean
+      run_forgive_studies:
+        description: Run the recovery-domain forgiveness comparisons
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -87,7 +97,7 @@ jobs:
         uv run --locked python -m unittest discover -s experiments/ring_3d/tests -v
         uv run --locked python -m unittest discover -s experiments/dblp/tests -v
         uv run --locked python -m unittest discover -s .github/scripts/tests -t .github/scripts -v
-        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh ci/dcs/seed-store.sh ci/dcs/resolve-runtime.sh ci/dcs/outbox.sh
+        bash -n experiments/ring_3d/smoke.sh experiments/ring_3d/failure_liveness.sh experiments/ring_3d/forgiveness_smoke.sh experiments/dblp/smoke.sh utils/setup.sh .github/workflows/setup.sh ci/dcs/build.sh ci/dcs/install-runtime.sh ci/dcs/seed-store.sh ci/dcs/resolve-runtime.sh ci/dcs/outbox.sh
         git diff --check
 
   native-build:
@@ -169,6 +179,12 @@ jobs:
 
     - name: Verify 3D Ring retry-exhaustion telemetry
       run: timeout --foreground 2m bash ./experiments/ring_3d/failure_liveness.sh
+
+    # Five runs of an 8-rank profile: the recovery arm, its admission
+    # reference, a same-seed repeat, the short-timeout race, and a DCQCN arm.
+    # Measured at 3m09s locally on four cores.
+    - name: Verify 3D Ring recovery-domain forgiveness
+      run: timeout --foreground 12m bash ./experiments/ring_3d/forgiveness_smoke.sh
 
     - name: Verify separate DBLP injected-loss profile
       run: timeout --foreground 2m bash ./experiments/dblp/smoke.sh
@@ -495,12 +511,19 @@ jobs:
       id: plan
       env:
         INCLUDE_STRUCTURAL: ${{ github.event_name == 'workflow_dispatch' && inputs.run_structural_studies }}
+        INCLUDE_REGIME_MAP: ${{ github.event_name == 'workflow_dispatch' && inputs.run_regime_map }}
+        INCLUDE_FORGIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_studies }}
       run: |
         set -euo pipefail
-        matrix="$(jq -c --arg structural "$INCLUDE_STRUCTURAL" '
+        matrix="$(jq -c \
+          --arg structural "$INCLUDE_STRUCTURAL" \
+          --arg regime_map "$INCLUDE_REGIME_MAP" \
+          --arg forgive "$INCLUDE_FORGIVE" '
           [ .[]
             | select(.gate == "always"
-                     or (.gate == "structural" and $structural == "true"))
+                     or (.gate == "structural" and $structural == "true")
+                     or (.gate == "regime_map" and $regime_map == "true")
+                     or (.gate == "forgive" and $forgive == "true"))
             | del(.gate, .notes) ]
         ' .github/workflows/evaluation-matrix.json)"
         echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"

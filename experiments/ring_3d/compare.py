@@ -13,6 +13,7 @@ from typing import Any, Final
 try:
     from .generate import (
         REPOSITORY_ROOT,
+        SheddingDomain,
         dp_fan_in,
         load_profile,
         resolve_selection_policy,
@@ -21,6 +22,7 @@ try:
 except ImportError:
     from generate import (
         REPOSITORY_ROOT,
+        SheddingDomain,
         dp_fan_in,
         load_profile,
         resolve_selection_policy,
@@ -124,15 +126,25 @@ METRICS = {
     "total_physical_bytes": ("physical_traffic_bytes", "total", "physical_bytes"),
     "W": ("network_health", "W"),
 }
+RECOVERY_METRICS: Final = {
+    "W_prime": ("network_health", "W_prime"),
+    "forgiven_bytes": ("forgiveness", "forgiven_bytes"),
+}
 
 BYTE_METRICS = {
     "foreground_logical_operation_physical_bytes",
     "dp_all_reduce_physical_bytes",
     "total_physical_bytes",
+    "forgiven_bytes",
 }
-# Dimensionless metrics: they carry no nanoseconds and no bytes, and a zero
-# baseline means the fabric has no such events rather than a division by zero.
-RATIO_METRICS = {"W"}
+# Dimensionless metrics: they carry no nanoseconds and no bytes.
+RATIO_METRICS = {"W", "W_prime"}
+# Metrics whose baseline is legitimately zero. A fabric that never trims has
+# W = 0 in every arm, and an admission arm forgives nothing by construction,
+# so a zero there is the measurement rather than a broken run. The relative
+# column is meaningless at a zero baseline; the absolute reduction carries the
+# whole signal. Any other metric at zero is a broken run and raises.
+ZERO_BASELINE_METRICS = RATIO_METRICS | {"forgiven_bytes"}
 
 BURST_STEP_SPAN_METRIC = "dp_all_reduce_span_burst_step_ns"
 AFTERMATH_STEP_SPAN_METRIC = "dp_all_reduce_span_aftermath_step_ns"
@@ -142,16 +154,22 @@ _DP_SPAN_BY_STEP: Final = (
 )
 
 
-def comparison_metrics(burst_step: int | None, aftermath_step: int | None) -> dict[
-    str, tuple[str, ...]
-]:
+def comparison_metrics(
+    burst_step: int | None,
+    aftermath_step: int | None,
+    recovery: bool = False,
+) -> dict[str, tuple[str, ...]]:
     """Metric paths for one profile: the fixed set plus its congestion episode.
 
     The burst step is the profile's ``microburst_trigger_step`` and the
     aftermath step is the next one, which a run ending at the burst does not
-    have. Both are omitted for a profile with no incast.
+    have. Both are omitted for a profile with no incast. The recovery-domain
+    metrics are omitted for an admission profile, where W' is W and no byte is
+    ever forgiven.
     """
     metrics = dict(METRICS)
+    if recovery:
+        metrics.update(RECOVERY_METRICS)
     if burst_step is not None:
         metrics[BURST_STEP_SPAN_METRIC] = (*_DP_SPAN_BY_STEP, str(burst_step))
     if aftermath_step is not None:
@@ -196,6 +214,15 @@ METRIC_GLOSSARY = {
         "pre-registered network-health signal of the best-effort fabric. "
         "Dimensionless; a lower value is a healthier fabric."
     ),
+    "W_prime": (
+        "Trimmed-on-admission payload bytes the transport still had to repair, "
+        "per offered byte: W minus the forgiven share. The recovery domain "
+        "moves W' below W without changing what the fabric trimmed."
+    ),
+    "forgiven_bytes": (
+        "Bytes a receiver accepted without ever seeing them, inside the "
+        "phase-aware budget. Zero in every admission arm."
+    ),
     BURST_STEP_SPAN_METRIC: (
         "Worst DP All-Reduce all-rank span at the microburst trigger step: "
         "how long the incast held the collective it landed on."
@@ -205,7 +232,7 @@ METRIC_GLOSSARY = {
         "the queue backlog the burst left behind."
     ),
 }
-assert METRIC_GLOSSARY.keys() == comparison_metrics(1, 2).keys(), (
+assert METRIC_GLOSSARY.keys() == comparison_metrics(1, 2, True).keys(), (
     "every comparison metric needs exactly one glossary sentence"
 )
 
@@ -223,11 +250,7 @@ def compare_summaries(
         policy_value = _metric(policy, path, ratio=ratio)
         reduction = baseline_value - policy_value
         if baseline_value == 0:
-            # Both arms share the fabric, so a ratio the baseline never
-            # observed the policy cannot observe either; the relative
-            # reduction is zero, not undefined. Any other zero baseline is a
-            # broken run.
-            if not ratio or reduction != 0:
+            if name not in ZERO_BASELINE_METRICS:
                 raise ValueError(f"comparison baseline metric {name} must be nonzero")
             reduction_percent = 0.0
         else:
@@ -462,6 +485,7 @@ _ARM_TITLES = {
     "fixed_p_low_baseline": "Fixed-low baseline",
     "fixed_p_high_baseline": "Fixed-high baseline",
     "dblp_policy": "Phase-aware policy",
+    "recovery_policy": "Recovery-domain policy",
 }
 _EVIDENCE_COLUMNS = (
     ("trim_notification_count", "Trims"),
@@ -545,6 +569,7 @@ def _coordinate_lines(comparison: dict[str, Any]) -> list[str]:
             f"p_low = {treatment.get('p_low', 'not recorded')}, "
             f"p_high = {treatment.get('p_high', 'not recorded')}",
         ),
+        ("Shedding domain", policy.get("domain", "admission")),
         (
             "Per-simulator timeout",
             f"{comparison.get('simulation_timeout_seconds', 'not recorded')} s",
@@ -639,6 +664,22 @@ def render_comparison_report(comparison: dict[str, Any]) -> str:
                 "The policy's claim is captured headroom: its relief should "
                 "approach the fixed-high ceiling while critical steps stay at "
                 "the strict bound, which the fixed-high arm abandons.",
+            ]
+        )
+    recovery = comparison.get("recovery_aggregate")
+    if recovery:
+        lines.extend(
+            [
+                "",
+                "## Recovery-domain relief over fixed-low",
+                "",
+                *_metric_table(recovery, ("Fixed-low", "Recovery")),
+                "",
+                "Both policy arms spend the same budget on the same eligible "
+                "population; only the moment differs. The admission arm chooses "
+                "before the payload is offered, the recovery arm after a switch "
+                "has already trimmed it. W' below W is the transport work the "
+                "recovery arm removed, and forgiven bytes are what it cost.",
             ]
         )
     per_seed = comparison.get("per_seed") or []
@@ -830,6 +871,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
         "per_seed": per_seed,
         "aggregate": aggregate_comparisons(per_seed),
         "headroom_aggregate": aggregate_comparisons(per_seed, "headroom_metrics"),
+        "recovery_aggregate": aggregate_comparisons(per_seed, "recovery_metrics"),
     }
 
 
@@ -882,7 +924,8 @@ def run_comparison(
         if burst_step is not None and burst_step < profile_model.steps
         else None
     )
-    metrics = comparison_metrics(burst_step, aftermath_step)
+    recovery = profile_model.selection_policy.domain is SheddingDomain.RECOVERY
+    metrics = comparison_metrics(burst_step, aftermath_step, recovery)
 
     per_seed: list[dict[str, Any]] = []
     for seed in seeds:
@@ -914,8 +957,22 @@ def run_comparison(
                 "p_low": profile_policy.p_low,
                 "p_high": profile_policy.p_high,
                 "allow_clr_exposure": False,
+                "domain": SheddingDomain.ADMISSION,
             },
         }
+        for arm in arms.values():
+            arm.setdefault("domain", SheddingDomain.ADMISSION)
+        if recovery:
+            # The same budget, spent after the trim instead of before it. Every
+            # other input is the arm's own, so the pair isolates the domain.
+            arms["recovery_policy"] = {
+                "directory": seed_dir / "recovery_policy",
+                "label": f"seed {seed} recovery-domain policy",
+                "p_low": profile_policy.p_low,
+                "p_high": profile_policy.p_high,
+                "allow_clr_exposure": False,
+                "domain": SheddingDomain.RECOVERY,
+            }
         if analyze_only:
             # Parse, don't validate: an arm's summary.json exists exactly when
             # its simulations and gates completed, so totality is checked here,
@@ -948,6 +1005,7 @@ def run_comparison(
                     p_low=arm["p_low"],
                     p_high=arm["p_high"],
                     allow_clr_exposure=arm["allow_clr_exposure"],
+                    domain=arm["domain"],
                 )
             summary = _read_summary(arm["directory"])
             require_primary_analysis(summary, arm["label"])
@@ -977,6 +1035,20 @@ def run_comparison(
                     summaries["dblp_policy"],
                     metrics,
                 ),
+                # The recovery domain against the same conservative control the
+                # admission policy is measured against, so the two relief
+                # figures are directly comparable.
+                **(
+                    {
+                        "recovery_metrics": compare_summaries(
+                            summaries["fixed_p_low_baseline"],
+                            summaries["recovery_policy"],
+                            metrics,
+                        )
+                    }
+                    if recovery
+                    else {}
+                ),
                 # The relief an unbounded permissive policy takes over the
                 # conservative control: the ceiling the phase-aware policy is
                 # measured against.
@@ -994,7 +1066,8 @@ def run_comparison(
     comparison = {
         "profile": repository_relative_profile(profile),
         "selection_policy": {
-            "semantics": "logical_admission_selection",
+            "semantics": profile_policy.semantics,
+            "domain": profile_policy.domain.value,
             "baseline": {"p_low": baseline_p_low, "p_high": baseline_p_high},
             "policy": {"p_low": profile_policy.p_low, "p_high": profile_policy.p_high},
         },
@@ -1017,6 +1090,7 @@ def run_comparison(
         "per_seed": per_seed,
         "aggregate": aggregate_comparisons(per_seed),
         "headroom_aggregate": aggregate_comparisons(per_seed, "headroom_metrics"),
+        "recovery_aggregate": aggregate_comparisons(per_seed, "recovery_metrics"),
     }
     _write_comparison(output, comparison)
     return comparison

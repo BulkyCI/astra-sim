@@ -330,21 +330,119 @@ class Ring3DGeneratorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "min_rate_fraction"):
                 load_profile(profile_path)
 
-    def test_checked_in_profiles_keep_the_no_congestion_control_transport(
-        self,
-    ) -> None:
-        """Every arm measured to date ran with no sender reaction at all."""
+    def test_only_new_families_turn_congestion_control_on(self) -> None:
+        """Every arm measured to date ran with no sender reaction at all.
+
+        The regime map sweeps it and the forgiveness DCQCN fixture needs it to
+        have rate cuts to be neutral about. Anything else turning it on would
+        silently rewrite what the earlier waves measured.
+        """
         profiles = sorted(
             (REPOSITORY_ROOT / "experiments/ring_3d/profiles").glob("*.json")
         )
         self.assertTrue(profiles)
+        swept = set()
         for path in profiles:
+            network = json.loads(path.read_text(encoding="utf-8"))["network"]
+            mode = network.get("congestion_control", {"mode": "none"})["mode"]
+            if mode != "none":
+                swept.add(path.name)
+                continue
             with self.subTest(profile=path.name):
-                network = json.loads(path.read_text(encoding="utf-8"))["network"]
-                self.assertEqual(
-                    network.get("congestion_control", {"mode": "none"})["mode"],
-                    "none",
-                )
+                self.assertEqual(mode, "none")
+        self.assertEqual(
+            swept,
+            {"forgiveness_dcqcn_8.json"}
+            | {
+                f"regime_64_dcqcn_{algorithm}_{ratio}.json"
+                for algorithm in ("direct2", "direct7")
+                for ratio in ("2to1", "4to1")
+            },
+        )
+
+    def test_recovery_domain_reaches_the_experiment_configuration(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            manifest = materialize(profile_path, output)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(policy["selection_policy"]["domain"], "recovery")
+        self.assertEqual(
+            policy["selection_policy"]["semantics"], "recovery_forgiveness"
+        )
+        self.assertEqual(
+            policy["selection_policy"]["transport"],
+            {"selective_repair": True, "packet_trimming_ftd": True},
+        )
+        self.assertEqual(policy["scale"], {"ranks": 8, "steps": 3})
+        self.assertEqual(manifest["selection_policy"]["domain"], "recovery")
+
+    def test_admission_domain_writes_no_recovery_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(self.profile_path, output)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(
+            policy["selection_policy"]["semantics"], "logical_admission_selection"
+        )
+        self.assertNotIn("domain", policy["selection_policy"])
+        self.assertNotIn("transport", policy["selection_policy"])
+
+    def test_recovery_domain_refuses_a_transport_that_cannot_carry_it(self) -> None:
+        document = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+            ).read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+
+            without_repair = json.loads(json.dumps(document))
+            del without_repair["network"]["transport_recovery"]["selective_repair"]
+            profile_path.write_text(json.dumps(without_repair), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "selective_repair"):
+                load_profile(profile_path)
+
+            without_ftd = json.loads(json.dumps(document))
+            without_ftd["network"]["packet_trimming"]["mode"] = "bts"
+            profile_path.write_text(json.dumps(without_ftd), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "ftd"):
+                load_profile(profile_path)
+
+            unknown_domain = json.loads(json.dumps(document))
+            unknown_domain["selection_policy"]["domain"] = "switch"
+            profile_path.write_text(json.dumps(unknown_domain), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "domain"):
+                load_profile(profile_path)
+
+    def test_domain_override_forces_the_admission_arm(self) -> None:
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+        )
+        from experiments.ring_3d.generate import SheddingDomain
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output, domain=SheddingDomain.ADMISSION)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(
+            policy["selection_policy"]["semantics"], "logical_admission_selection"
+        )
+        self.assertNotIn("domain", policy["selection_policy"])
 
     def test_microburst_trigger_step_must_land_inside_the_run(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))

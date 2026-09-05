@@ -50,6 +50,10 @@ FLOW_FIELDS = [
     "cnp_received",
     "first_trim_ns",
     "first_repair_ns",
+    "forgiven_bytes",
+    "forgiven_ranges",
+    "priority_pulls",
+    "delivered_bytes",
 ]
 
 COLLECTIVE_FIELDS = [
@@ -151,6 +155,10 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "cnp_received": "0",
             "first_trim_ns": "0",
             "first_repair_ns": "0",
+            "forgiven_bytes": "0",
+            "forgiven_ranges": "0",
+            "priority_pulls": "0",
+            "delivered_bytes": "64",
         }
 
     def test_summary_accepts_dp_all_reduce_provenance(self) -> None:
@@ -419,6 +427,117 @@ class Ring3DAnalysisTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "control plane"):
                 summarize(telemetry, ns3_dir=ns3)
+
+    def eligible_flow(
+        self,
+        dst: str,
+        step: str,
+        logical_bytes: int,
+        forgiven_bytes: int = 0,
+        port: str = "10000",
+    ) -> dict[str, str]:
+        """An admitted DP All-Reduce payload, the population the budget covers."""
+        flow = self.valid_shed_flow()
+        flow.update(
+            {
+                "flow_kind": "foreground_payload",
+                "decision": "admitted",
+                "admission_eligible": "true",
+                "transport_role": "collective_payload",
+                "dst": dst,
+                "training_step": step,
+                "source_port": port,
+                "logical_bytes": str(logical_bytes),
+                "physical_bytes": str(logical_bytes),
+                "data_attempted_bytes": str(logical_bytes),
+                "forgiven_bytes": str(forgiven_bytes),
+                "forgiven_ranges": "1" if forgiven_bytes else "0",
+            }
+        )
+        return flow
+
+    def write_recovery_manifest(
+        self, root: Path, clr_steps: tuple[str, ...], p_low: float, p_high: float
+    ) -> Path:
+        mask = root / "clr_mask.csv"
+        mask.write_text(
+            "step_id,is_clr,probability\n"
+            + "".join(
+                f"{step},{1 if str(step) in clr_steps else 0},"
+                f"{p_low if str(step) in clr_steps else p_high}\n"
+                for step in range(1, 4)
+            ),
+            encoding="utf-8",
+        )
+        manifest = root / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "clr_mask": str(mask),
+                    "selection_policy": {
+                        "semantics": "recovery_forgiveness",
+                        "domain": "recovery",
+                        "p_low": p_low,
+                        "p_high": p_high,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return manifest
+
+    def test_ledger_law_verifies_a_budget_respecting_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            # Step 2 is non-critical, so the budget is 10% of 1000 B.
+            self.write_telemetry(
+                telemetry,
+                [
+                    self.eligible_flow("4", "2", 1_000, 100, "10001"),
+                    self.eligible_flow("5", "2", 1_000, 0, "10002"),
+                ],
+            )
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+        forgiveness = summary["forgiveness"]
+        self.assertEqual(forgiveness["forgiven_bytes"], 100)
+        self.assertEqual(forgiveness["forgiven_bytes_by_training_step"], {"2": 100})
+        self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
+        self.assertEqual(forgiveness["ledger_law"]["forgiven_cell_count"], 1)
+
+    def test_ledger_law_rejects_a_cell_over_its_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            # Step 1 is critical, so the budget is 0.5% of 1000 B, and 100 B
+            # forgiven is twenty times over.
+            self.write_telemetry(
+                telemetry, [self.eligible_flow("4", "1", 1_000, 100, "10001")]
+            )
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
+            law = summarize(telemetry, manifest_path=manifest)["forgiveness"][
+                "ledger_law"
+            ]
+
+        self.assertEqual(law["status"], "violated")
+        self.assertEqual(law["violation_count"], 1)
+        self.assertEqual(law["violations"][0]["dst"], "4")
+        self.assertEqual(law["violations"][0]["training_step"], "1")
+
+    def test_ledger_law_is_unavailable_without_the_mask_and_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(
+                telemetry, [self.eligible_flow("4", "2", 1_000, 100, "10001")]
+            )
+
+            law = summarize(telemetry)["forgiveness"]["ledger_law"]
+
+        self.assertEqual(law["status"], "not_available")
 
     def test_summary_reports_data_loss_without_control_injection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

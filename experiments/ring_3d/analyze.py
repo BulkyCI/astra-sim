@@ -340,6 +340,84 @@ def _summarize_collectives(rows: Iterator[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+def _clr_steps(manifest: dict[str, Any] | None) -> frozenset[str] | None:
+    """Critical steps from the mask the run actually used, as strings.
+
+    The mask, not the schedule metadata: an explicit profile schedule and a
+    generated proxy both end up in `clr_mask.csv`, and that file is what the
+    simulator read.
+    """
+    if manifest is None:
+        return None
+    mask_path = manifest.get("clr_mask")
+    if not isinstance(mask_path, str) or not Path(mask_path).is_file():
+        return None
+    return frozenset(
+        row["step_id"] for row in iter_csv(Path(mask_path)) if row["is_clr"] == "1"
+    )
+
+
+def _forgiven_by_step(
+    cells: dict[tuple[str, str], dict[str, int]],
+) -> dict[str, int]:
+    """Sum forgiven bytes over receiving ranks, one pass over the cells."""
+    totals: dict[str, int] = defaultdict(int)
+    for (_dst, step), cell in cells.items():
+        if cell["forgiven_bytes"]:
+            totals[step] += cell["forgiven_bytes"]
+    return {
+        step: totals[step]
+        for step in sorted(totals, key=_training_step_sort_key)
+    }
+
+
+def _check_ledger_law(
+    cells: dict[tuple[str, str], dict[str, int]],
+    manifest: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Verify shed + forgiven <= p(step) * eligible for every (rank, step).
+
+    This is the recovery domain's safety property, and it is checkable from
+    the telemetry alone: the flow rows carry eligible, shed, and forgiven
+    bytes, and the CLR mask decides which threshold each step is held to.
+    A violation invalidates the arm; it is not a rounding artifact, because
+    the simulator applies the same integer law before charging.
+    """
+    if not cells:
+        return {"status": "no_eligible_traffic"}
+    policy = (manifest or {}).get("selection_policy")
+    clr_steps = _clr_steps(manifest)
+    if not isinstance(policy, dict) or clr_steps is None:
+        return {"status": "not_available", "cell_count": len(cells)}
+    try:
+        p_low = float(policy["p_low"])
+        p_high = float(policy["p_high"])
+    except (KeyError, TypeError, ValueError):
+        return {"status": "not_available", "cell_count": len(cells)}
+    violations = [
+        {
+            "dst": dst,
+            "training_step": step,
+            "threshold": p_low if step in clr_steps else p_high,
+            **cell,
+        }
+        for (dst, step), cell in sorted(cells.items())
+        if cell["shed_bytes"] + cell["forgiven_bytes"]
+        > (p_low if step in clr_steps else p_high) * cell["eligible_bytes"]
+    ]
+    return {
+        "status": "violated" if violations else "verified",
+        "cell_count": len(cells),
+        "forgiven_cell_count": sum(
+            1 for cell in cells.values() if cell["forgiven_bytes"]
+        ),
+        # Bounded on purpose: a violated arm is rejected, and the first few
+        # cells name the rank and step to look at.
+        "violations": violations[:10],
+        "violation_count": len(violations),
+    }
+
+
 def _load_manifest(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -602,13 +680,22 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "trim_bts_egress_queue",
         "trim_bts_lasthop_admission",
         "trim_bts_lasthop_egress_queue",
+        # A trimmed range the receiver accepted without it: the bytes are
+        # undelivered, so the event accounts for them on the data plane.
+        "trim_forgiven",
         # Host-transport reactions. They carry no packet, so they contribute
         # counts and no bytes, and they answer to the control plane: a
         # retransmission timeout is a missing ACK, a rate cut is a CNP.
         "rto_fired",
         "cnp_taken",
     }
-    trim_events = {event for event in valid_events if event.startswith("trim_")}
+    # Switch conversions only: trim_forgiven is the receiver's answer to one,
+    # not a second conversion, and adding it would double-count the payload.
+    trim_events = {
+        event
+        for event in valid_events
+        if event.startswith("trim_") and event != "trim_forgiven"
+    }
     # The simulator aggregates in memory and emits one row per (event, plane)
     # pair at exit: a raw row per packet event grew past 100 GB per arm and
     # its per-packet flushes exhausted shared CI storage.
@@ -701,6 +788,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         },
         "rto_fired_count": events["rto_fired"],
         "cnp_taken_count": events["cnp_taken"],
+        "trim_forgiven_count": events["trim_forgiven"],
+        "trim_forgiven_bytes": bytes_by_event["trim_forgiven"],
     }
 
 
@@ -745,11 +834,17 @@ def _network_health(
     # loss or trimming, so a missing event means unmeasured, not zero arrivals.
     arrival = event_bytes.get("data_arrival")
     arrival_bytes = None if arrival is None else int(arrival)
+    # Forgiven bytes were trimmed and then never repaired, so W' is what the
+    # fabric lost that the transport still had to carry again.
+    forgiven_bytes = int(event_bytes.get("trim_forgiven", 0))
+    repaired_bytes = trimmed_bytes - forgiven_bytes
     return {
         "status": "available",
         "offered_physical_bytes": offered_physical_bytes,
         "trimmed_admission_bytes": trimmed_bytes,
         "W": _ratio(trimmed_bytes, offered_physical_bytes),
+        "forgiven_bytes": forgiven_bytes,
+        "W_prime": _ratio(max(repaired_bytes, 0), offered_physical_bytes),
         "data_arrival_bytes": arrival_bytes,
         "wire_per_offered": (
             None
@@ -921,6 +1016,9 @@ _COUNTER_FIELDS: Final = (
     "stale_trim_notifications",
     "timeouts",
     "cnp_received",
+    "forgiven_bytes",
+    "forgiven_ranges",
+    "priority_pulls",
 )
 """Telemetry columns summed verbatim. The column name is the only name they
 have, so the totals stay keyed by it rather than restating each one."""
@@ -928,6 +1026,9 @@ have, so the totals stay keyed by it rather than restating each one."""
 _FOREGROUND_LOGICAL_KINDS: Final = frozenset(
     {"foreground_payload", "provenance_control"}
 )
+
+_LEDGER_FIELDS: Final = ("eligible_bytes", "shed_bytes", "forgiven_bytes")
+"""One receiving rank's budget for one step, as the flow rows record it."""
 
 _STEP_BUCKET_FIELDS: Final = (
     "flows",
@@ -992,6 +1093,7 @@ class _FlowStatistics:
         "total_physical_bytes",
         "total_traffic",
         "trim_to_repair",
+        "ledger",
     )
 
     def __init__(self, join: _FctJoin) -> None:
@@ -1019,6 +1121,9 @@ class _FlowStatistics:
         self.by_flow_kind = _durations()
         self.by_domain_and_kind = _durations()
         self.trim_to_repair = array("q")
+        self.ledger: dict[tuple[str, str], dict[str, int]] = defaultdict(
+            lambda: dict.fromkeys(_LEDGER_FIELDS, 0)
+        )
 
     def consume(self, row: dict[str, str]) -> None:
         """Fold one flow into every accumulator, then drop it.
@@ -1079,6 +1184,19 @@ class _FlowStatistics:
             self.foreground_traffic.add(logical_bytes, physical_bytes)
         if _is_dp_all_reduce(row):
             self.dp_all_reduce_traffic.add(logical_bytes, physical_bytes)
+
+        # The budget is charged to the receiving rank for the step, which is
+        # exactly the key the simulator's ledger uses.
+        forgiven_bytes = _optional_nonnegative_int(row, "forgiven_bytes")
+        if _as_bool(row, "admission_eligible") or forgiven_bytes:
+            cell = self.ledger[
+                (row.get("dst", "unknown"), row.get("training_step", "unknown"))
+            ]
+            if _as_bool(row, "admission_eligible"):
+                cell["eligible_bytes"] += logical_bytes
+                if shed:
+                    cell["shed_bytes"] += logical_bytes
+            cell["forgiven_bytes"] += forgiven_bytes
 
         bucket = self.by_step[row.get("training_step", "unknown")]
         bucket["flows"] += 1
@@ -1245,6 +1363,15 @@ def summarize(
         },
         "background_microburst_timeline": statistics.background_timeline(),
         "network_health": network_health,
+        "forgiveness": {
+            "forgiven_bytes": statistics.counters["forgiven_bytes"],
+            "forgiven_range_count": statistics.counters["forgiven_ranges"],
+            "priority_pull_count": statistics.counters["priority_pulls"],
+            "forgiven_bytes_by_training_step": _forgiven_by_step(
+                statistics.ledger
+            ),
+            "ledger_law": _check_ledger_law(statistics.ledger, manifest),
+        },
         "fct_join": fct_join,
         "flow_control_regime": _flow_control_regime(manifest),
         "lossless_transport": lossless_transport,

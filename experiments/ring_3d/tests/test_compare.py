@@ -54,6 +54,14 @@ def summary(
             "data_arrival_bytes": 20_000,
             "wire_per_offered": 1.0,
             "burst_drain_ns": 500,
+            "forgiven_bytes": 0,
+            "W_prime": trimmed_per_offered,
+        },
+        "forgiveness": {
+            "forgiven_bytes": 0,
+            "forgiven_range_count": 0,
+            "priority_pull_count": 0,
+            "ledger_law": {"status": "verified"},
         },
         "collective_completion": {
             "per_rank_completion_time_ns": {
@@ -467,6 +475,82 @@ class Ring3DComparisonTests(unittest.TestCase):
             ],
         )
         self.assertIn("headroom_aggregate", comparison)
+
+    def test_recovery_profile_builds_four_matched_arms(self) -> None:
+        def fake_run_experiment(
+            _profile: Path, output: Path, **_kwargs: object
+        ) -> dict[str, object]:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "summary.json").write_text(
+                json.dumps(congested_summary()), encoding="utf-8"
+            )
+            return {}
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with patch(
+                "experiments.ring_3d.compare.run_experiment",
+                side_effect=fake_run_experiment,
+            ) as mocked_run:
+                comparison = run_comparison(
+                    REPOSITORY_ROOT
+                    / "experiments/ring_3d/profiles/forgiveness_smoke_8.json",
+                    Path(temporary_directory) / "comparison",
+                    [17],
+                )
+
+        self.assertEqual(mocked_run.call_count, 4)
+        arms = [
+            (
+                call.kwargs["p_low"],
+                call.kwargs["p_high"],
+                call.kwargs["domain"].value,
+            )
+            for call in mocked_run.call_args_list
+        ]
+        # The recovery arm carries the policy's own budget, and only its domain
+        # differs from the admission policy arm.
+        self.assertEqual(
+            arms,
+            [
+                (0.005, 0.005, "admission"),
+                (0.1, 0.1, "admission"),
+                (0.005, 0.1, "admission"),
+                (0.005, 0.1, "recovery"),
+            ],
+        )
+        self.assertIn("recovery_aggregate", comparison)
+        self.assertIn("W_prime", comparison["recovery_aggregate"])
+        self.assertIn("forgiven_bytes", comparison["recovery_aggregate"])
+        self.assertEqual(comparison["selection_policy"]["domain"], "recovery")
+        report = render_comparison_report(comparison)
+        self.assertIn("## Recovery-domain relief over fixed-low", report)
+
+    def test_admission_profile_builds_three_arms_and_no_recovery_metrics(
+        self,
+    ) -> None:
+        def fake_run_experiment(
+            _profile: Path, output: Path, **_kwargs: object
+        ) -> dict[str, object]:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "summary.json").write_text(
+                json.dumps(congested_summary()), encoding="utf-8"
+            )
+            return {}
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with patch(
+                "experiments.ring_3d.compare.run_experiment",
+                side_effect=fake_run_experiment,
+            ) as mocked_run:
+                comparison = run_comparison(
+                    REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json",
+                    Path(temporary_directory) / "comparison",
+                    [17],
+                )
+
+        self.assertEqual(mocked_run.call_count, 3)
+        self.assertIsNone(comparison["recovery_aggregate"])
+        self.assertNotIn("W_prime", comparison["aggregate"])
 
     def test_chained_arm_runs_then_analyze_only_matches_full_comparison(self) -> None:
         def fake_run_experiment(

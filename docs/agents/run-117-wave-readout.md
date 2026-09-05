@@ -2,335 +2,338 @@
 
 Run #117 is commit `414dc70c51ff`, workflow run 33526691181, ledger issue
 #64, release `zuihrl5stp6ulacoogghyp4loy7xsjpj`. I wrote this on 2026-09-05
-at 01:30 UTC with the run still open: 30 of 31 comparisons collected, the
-64-rank pp2 control still simulating (83 h elapsed, guard expires 2026-09-06
-07:59 UTC), so the three aggregate jobs and the ledger close have not run.
-This is my own account of the wave: what I bet on, what came back, what I got
-wrong, where that leaves the programme, and what I do next.
+with the run still open: 30 of 31 comparisons collected, the 64-rank pp2
+control still simulating (guard expires 2026-09-06 07:59 UTC), so the
+aggregate jobs and the ledger close have not run. The sources are the ledger
+comments on #64, `comparison.json`, `transport_summary.csv` and
+`collective_events.csv` streamed from the 30 release bundles, local re-runs
+of `compare.py --aggregate-inputs` and `fan_in_sweep.py`, the DBLP paper
+(arXiv:2605.01989), and this directory's records. A referee pass over an
+earlier draft of this document is in
+[run-117-referee-pass.md](run-117-referee-pass.md); the objections it raised
+are folded in below and cited by marker.
 
-What I read: `gh api` over the run, its 194 jobs, the release, and issues #57
-to #64; the 31 ledger comments on #64; `comparison.json` and every arm's
-`ns3/transport_summary.csv` streamed out of the 30 release bundles; a local
-re-run of `compare.py --aggregate-inputs` and `fan_in_sweep.py` from this
-tree; and the programme's own records in this directory, which I lean on
-below.
+This is not a data readout. The numbers are here, but the questions I am
+answering are the ones a reviewer will ask: does this approach offer
+relief, how much, under what condition, and what is the contribution.
 
-## The bet
+## What the paper claims and what we actually built
 
-The idea under test is DBLP's: a training job does not need every gradient
-byte in every step, and a transport that knows which steps are critical can
-accept bounded loss outside them and buy tail latency with it. ASTRA-sim
-cannot say anything about accuracy, so the pivot document limits this project
-to mechanism-level evidence: under a specified, reproducible modeled network
-condition, does a phase-aware policy improve DP All-Reduce tail latency and
-makespan against a matched baseline. The evidence ladder in that document
-runs mechanism validity, causal comparison, robustness, scale, and then the
-external-validity boundary.
+DBLP's claim is about the burst. A fixed small loss tolerance forces many
+retransmission rounds during a loss burst; a receiver that knows the step
+is not critical stops recovery once enough has arrived, and the burst
+iteration finishes 4 to 6 times sooner (Tables II to VI in the paper), with
+17 to 34 % less training time overall because 40 % of every non-critical
+gradient never has to arrive at all. The evidence is three workers and one
+server over UDP with TCP control, loss injected at 60 to 90 % on chosen
+iterations, CIFAR-scale CNNs and GPT-2-S. The paper was conceived for a
+commodity fabric where loss is silent and recovery is expensive.
 
-Getting to a wave that could climb that ladder took most of August. The
-Phase-1 reference livelocked on port exhaustion, then ran 93 times slow after
-a hot-path regression, then the hosted runners could not hold a six-hour
-job. I moved the heavy arms to the DCS SLURM cluster behind just-in-time
-runners, split each comparison into its own job with its own guard, and
-discovered that the runner's token dies at 24 hours, which killed every
-64-rank arm in #116 at about 26.5 h. Run #112 was the first wave with enough
-surviving arms to read, and my reading of it is what shaped #117.
+The fabric we simulate is neither. UEC trimming signals every loss with a
+64-byte header and the transport repairs it; there is no silent loss and no
+unacknowledged byte. And the policy we built is not the paper's: it
+substitutes a 64-byte provenance flow for a random 0.5 % or 10 % of DP
+All-Reduce payloads at admission, before the network has seen them. It
+never declines a repair. So the experiment tests the paper's *phase signal*
+(protect critical steps, relax elsewhere) attached to the paper's *bandwidth
+half* (never send some of the gradient), on a fabric where the paper's
+*recovery half* (stop retransmitting early) has no analogue yet. That
+distinction is the whole reading of this wave.
 
-That reading reduced the programme to a cost model. When the workload is
-communication-bound, makespan is offered load plus a waste term
-W(offered/capacity): retransmission volume, convex in load, exploding past a
-knee. Admission shedding, the mechanism we have today, removes
-dose x dp_share of the *offered* load, which at p_high = 0.1 is about 1.7 %.
-The pathology I measured in the #112 bundles was the waste term, at 5 to 19
-times the offered term. I classify regimes by amplification (wire volume
-over offered payload): Light below 1.2x has nothing to relieve, the Knee at
-1.5 to 3x is where W is steepest, and the Storm above 5x is timing chaos with
-a seed standard deviation near 7 %. The publishable contribution I named
-then was recovery-domain shedding: let the trim notification itself trigger
-bounded forgiveness, so each forgiven range deletes a retransmission chain
-and the mechanism attacks W directly.
+The matched design is as tight as claimed. Every arm of a seed shares
+traces, topology, burst, CLR mask and RNG stream; within one profile the
+three arms are nested, a decision selected at 0.005 is selected at every
+higher threshold; and the per-collective telemetry shows steps 1 to 3, the
+CLR steps where all three arms hold the strict bound, bit-identical between
+fixed-low and policy in 16 of 16 anchor seeds. When the arms diverge, it is
+the treatment.
 
-#117 was built to test that reading before I build the new protocol. It
-carried three changes from #112: the anchor family grew from five seeds to
-sixteen pre-registered pi-chunk seeds, a four-point p_high dose grid went in
-at the 7-source incast endpoint, and raw-log escrow gave way to hashed
-provenance. I wrote down eight predictions:
+## What was settled before this wave
 
-1. The sixteen-seed anchor (Storm) buys a no-harm bound and no more. At sd
-   7.2 % the CI half-width is +/-3.8 %, and resolving a ~1 % effect would
-   take ~200 seeds.
-2. Any relief above the ~1.7 % byte ceiling comes through the nonlinear
-   channel: the mechanism relieves congestion, W, and does not relieve
-   bandwidth, so relief should track trim reduction and should not track
-   byte reduction.
-3. Dose (p_high from 0.1 to 0.6) is not the amplifier, because even dose
-   1.0 caps at dp_share of offered. Each grid point carried one falsifiable
-   question.
-4. The burst-count axis has weak leverage; burst0 already self-congests.
-5. Restraint does work: fixed-high sheds strictly more and loses in several
-   conditions, which falsifies a dose-monotone story.
-6. Critical steps are bit-identical across arms (clrburst at 0.00 %).
-7. If the sr2x canary completes, it lands in the Light regime and reopens
-   sustained oversubscription as an axis.
-8. Determinism holds inside an envelope of source, toolchain, and CPU
-   family, which is what lets stream hashes replace raw-log escrow.
+Four of the objections a reader of the paper raises first were worked
+through in July and are already in the design, and the wave inherits them
+rather than re-litigating them.
 
-## Where every arm landed on the regime axis
+- Sparsification. The paper's transport drops gradient chunks silently
+  underneath whatever compression or error-feedback state the optimizer
+  keeps (known-flaws register, item 2). We settled it by scope: this is a
+  pure-drop study with no compression layer, the CLR evidence record
+  separates pure-drop tolerance from compression-with-error-feedback
+  tolerance explicitly, and no claim here touches optimizer semantics.
+- Compute and transport interleaving. The paper's baseline is
+  stop-and-wait, so its end-to-end gains include network time that a real
+  framework hides (item 1). Our trace is a production-shaped overlapped
+  window: TP=8 all-reduces interleaved with 5.4 ms of compute per node,
+  two accumulation steps, one representative DP gradient bucket of 256 per
+  step. What it does not replay is a full backward pass, so exposed
+  communication is a design parameter of the window rather than a
+  measurement of a framework. Every makespan number here is a
+  communication-window makespan and is labelled as such.
+- CLR identification. The paper detects the critical regime from a
+  gradient-norm drop, which ASTRA-sim cannot compute. We pinned an
+  explicit schedule, steps 1 to 3 and 20 of 20, derived from literature
+  independent of DBLP (the circularity guard in the CLR evidence record),
+  and the phase-aware policy reads that mask. Step 20 is the schedule's
+  weakest-evidenced element and is stated as a hedge.
+- Topology. The paper's prototype is three workers and one server, a
+  hub-and-spoke that concentrates pressure at one NIC (item 5). We run
+  decentralised ring and windowed direct collectives on rail-optimised Clos
+  fabrics across a health spectrum, healthy 1:1, degraded 4:3 and designed
+  2:1, and the microburst is an explicit seven-source incast rather than an
+  injected loss rate.
 
-W is trimmed-payload bytes per offered byte (`trim_ftd_admission` plus
-last-hop trims, over `total_physical_bytes`), my hop-independent measure of
-the waste term. wire/offered is `data_arrival` over offered and counts every
-hop. Fixed-low arms; the 32- and 64-rank rows are one seed each, the anchor
-row is the range across sixteen seeds.
+Those four are why the comparison is a matched three-arm design on a modern
+fabric at all. What they do not settle, and what this wave was for, is
+whether the mechanism survives the move.
 
-| Family | Regime | W (trim/offered) | wire/offered | Control packets | Policy makespan relief |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 64-rank sr2x (selective repair, 2:1) | Light | 0.02 | 2.5x | 0.49 B | 0.78 % |
-| 64-rank fan-in direct1 / 2 / 4 / 7 (degraded 1:1) | Knee | 1.34 / 2.22 / 2.53 / 2.58 | 5.1-7.7x | 2.4-4.1 B | 0.10 / 4.25 / 1.48 / 11.11 % |
-| 32-rank burst 0 / 2 / 4 / 7 (healthy 1:1) | Knee | 2.23 / 2.07 / 2.28 / 3.02 | 6.4-9.1x | 1.7-2.2 B | 8.87 / 4.05 / 2.85 / 0.75 % |
-| 32-rank 7-incast dose grid 0.2 / 0.4 / 0.6 | Knee | 2.79 / 2.94 / 2.80 | 8.5-8.8x | 2.1-2.2 B | -24.89 / 8.40 / 12.11 % |
-| 16-rank anchor, 16 seeds (Clos, 7-source burst) | Storm | 8.68-10.37 | 18.6-21.6x | 3.0-3.5 B | +3.91 % mean |
+## Does it offer relief, and how much
 
-In the anchor, every offered byte is trimmed and re-sent between nine and
-ten times. The 32- and 64-rank families run two to three times over, and
-sr2x barely trims. The wave sorted itself the way the taxonomy said it would:
-one Storm family, two Knee families, one Light canary.
+Three regimes, one measure. W is trimmed-payload bytes per offered byte,
+computable from `transport_summary.csv` in every arm, and it separates the
+families cleanly.
+
+| Family | W (fixed-low) | Policy makespan relief | Burst-step relief |
+| --- | ---: | ---: | --- |
+| 16-rank anchor, 16 seeds, 2:1 Clos, go-back-N (Storm) | 8.7-10.4 | +3.91 %, CI [1.13, 6.68] % | 116 ms mean, CI +/-229 ms |
+| 32-rank burst sweep 0/2/4/7, healthy 1:1, go-back-N (Knee) | 2.1-3.0 | 8.9 / 4.1 / 2.9 / 0.8 %, one seed | shifts between steps 18 and 19 |
+| 64-rank fan-in 1/2/4/7, degraded 1:1, go-back-N (Knee) | 1.3-2.6 | 0.1 / 4.3 / 1.5 / 11.1 %, one seed | not resolvable, one seed |
+| 64-rank sr2x, 2:1, selective repair (Light) | 0.02 | 0.78 % | every per-step delta within +/-4 ms |
+
+The anchor is the only family with a confidence interval, and it clears
+zero on makespan (291.6 ms of 7145 ms) and on DP operation-span p99
+(153.4 ms of 1026 ms, CI [5.0, 301.7]); per-rank p99 spans zero. Fixed-high,
+which sheds through the critical steps, gets 9.42 % on makespan and loses on
+every tail metric. The sixteen seeds came in at sd 5.21 %, better than the
+7.19 % I sized for.
+
+Now the question the paper actually asks. Decomposing the same sixteen
+seeds by training step:
+
+| Steps | Fixed-low span | Policy span | Delta | Note |
+| --- | ---: | ---: | ---: | --- |
+| 1-3 (CLR) | 345 / 280 / 256 ms | identical | 0.0 ms, 16/16 seeds | fixed-high: 203 / 189 / 247 ms |
+| 4-17 (permissive, no burst) | 191-305 ms | 176-295 ms | +239 ms summed; per step +20 to +54 ms, each CI spanning zero | 84 % of the makespan relief |
+| 18 (burst) | 771.8 ms | 656.0 ms | +115.8 ms, sd 430, CI +/-229 ms | per-seed from +1080 to -485 ms |
+| 19 (aftermath) | 734.8 ms | 792.6 ms | -57.8 ms, CI +/-185 ms | the storm outlives the burst |
+| 20 (CLR) | 283.1 ms | 296.8 ms | -13.7 ms | history differs by then |
+
+So the answer to "how much" is in two parts. The admission policy relieves
+the steady state: about 30 ms per permissive step, accumulated over fourteen
+steps, on a fabric whose go-back-N recovery re-sends every offered byte nine
+to ten times. At the burst episode, the one place DBLP claims to act, the
+policy's effect is not resolvable with sixteen seeds; resolving a 116 ms
+effect against a 430 ms seed spread would take about 60 seeds, and the
+aftermath step moves the other way. In the Knee families the burst-step
+delta is a single seed and flips sign between steps 18 and 19 (32-direct:
+-525 ms then +769 ms), which is timing, not relief. Under selective repair
+there is nothing at any step.
+
+The extent, then: single-digit percent on makespan, only where the recovery
+algorithm has manufactured a retransmission storm, and no demonstrated
+relief of the burst tail anywhere. That is the honest number, and it is
+smaller than the paper's for a reason I can now name.
+
+## Why: the mechanism gap and the fabric gap
+
+The relief we do measure has a mechanism I can point at, and it is not the
+paper's. Shedding 1.98 GiB of the anchor's 166 GiB offered load took 156 GiB
+off the wire, a marginal amplification of 79x; across seeds the makespan
+relief correlates 0.94 with the policy's trim reduction, and the three seeds
+where the policy added trims are the three negative seeds. Byte reduction is
+flat across seeds and predicts nothing. This is consistent with, though not
+proof of [O2], relief flowing entirely through avoided retransmission
+chains: the policy lowers offered load a little, and go-back-N turns a
+little less load into a lot less waste. It is a bandwidth lever with a
+convex payoff, acting in the steady state.
+
+The paper's lever is different. DBLP does not lower offered load before the
+burst; it declines recovery during the burst, when the network has already
+said which packets it could not carry. That is evidence-informed loss at
+the moment the tail is being formed. Our admission policy sheds blind,
+before the burst, uniformly over the step, so it cannot concentrate its
+relief where the tail is. The per-step table is what that looks like:
+relief everywhere except the one step that matters.
+
+The fabric gap is worse for us than the mechanism gap. The Storm regime
+that gives the anchor its confidence interval is produced by go-back-N: the
+same 2:1 fabric family under selective repair shows W of 0.02, seventy
+times fewer trims, and the policy relieves nothing [O6]. UEC pairs trimming
+with selective retransmission; go-back-N on a trimming fabric is a
+recovery algorithm the specification does not intend. Every number in this
+programme's anchor family is therefore conditional on a baseline transport a
+modern fabric does not run, and a reviewer who knows the fabric will say so
+first. What survives under selective repair is only the burst episode
+itself: a queue that overflows, trims, and repairs once. That is the paper's
+regime, and it is the one regime our mechanism cannot reach.
+
+The dose grid says the same thing from the other side, with the caveat that
+its four points share a seed but not a selection stream (the profile name is
+hashed into every decision, so their fixed-low baselines differ), and each
+is one seed [O4]. The byte lever arrives as dosed (8, 16, 32, 48 % of DP
+bytes shed) and makespan relief rises to 8.4 % and 12.1 % at 0.4 and 0.6,
+while span p99 is negative at every dose above 0.1 and fixed-high at 0.6
+loses 84 % on both tails. More blind shedding buys steady-state makespan and
+sells the tail. That is what a bandwidth lever does.
+
+## The two points from the last meeting
+
+The collaborator's notes on 18 August were "10 % incast: increase incast"
+and "mean reduction 50 % anomaly". The wave answers both.
+
+Increasing the incast was the burst-source sweep and the dose grid. More
+burst sources gave less relief, not more (8.9, 4.1, 2.9, 0.8 % makespan at
+0, 2, 4, 7 sources), because the fabric self-congests under go-back-N
+before any burst arrives and the burst is a small perturbation on top; and
+raising the dose from 10 % to 60 % bought makespan and sold the tail. The
+suggestion assumed the incast was the congestion. The counters say the
+recovery algorithm is.
+
+The 50 % anomaly is the per-rank p99 estimand. It is the top three of 320
+samples, so one extra ECMP collision moves it by half. With sixteen seeds
+its paired deltas run from -395 ms to +278 ms on a 756 ms base, which is
+-52 % to +37 %, with a CI spanning zero; the single-seed values of -108 %
+and +73 % in the 32-rank arms are draws from that same spread. It is not an
+anomaly of the mechanism. It is the noise floor of an estimand this design
+cannot resolve, which is why the decisive experiment below moves the
+primary estimand to the burst step.
 
 ## What went well
 
-The harness finally held. Every one of the 31 cluster arms outlived the
-24-hour token wall that ended #116; the sealed runtime store, the courier and
-outbox path, and the attestation step all worked on their first full wave.
-Thirty arms passed the congestion gate, thirty streams were attested
-complete (332 to 665 segments, 356 to 2057 GiB per arm, about 43 TB hashed
-and discarded), and every bundle reached the release with its
-`attestation.json`. Four arms that also completed in #116 came back identical
-to the printed digit, on binaries rebuilt from the compiler cache, which is
-the cross-wave half of the determinism envelope holding at the same ISA
-level. I can now say a stream hash is a commitment.
+The harness held for the first time. Every cluster arm outlived the 24-hour
+runner-token wall that ended #116; 30 of 30 arms passed the congestion gate
+with attested complete streams (about 43 TB hashed and discarded); four arms
+that also completed in #116 reproduced to the printed digit on rebuilt
+binaries. The pre-registered pi-chunk seeds, the nested arms, and the
+bit-identical CLR steps make the matched comparison stronger than anything
+in the source paper. The waste-term counters turned an unexplained 4 % into
+a mechanism with a size, and the sr2x canary completed and showed what
+selective repair does to that mechanism. Those two facts are the wave's
+contribution to the programme, and they are worth more than the confidence
+interval.
 
-The anchor did better than the no-harm bound I sized it for. Sixteen paired
-seeds, ring all-reduce, three arms per seed, aggregated with the same
-`compare.py` code the CI job runs:
+## What went wrong, in the order it matters
 
-| Estimand | Fixed-low | Policy | Reduction | 95 % CI | % |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| makespan | 7145.1 ms | 6853.5 ms | 291.6 ms | [91.0, 492.3] | 3.91 |
-| DP all-reduce operation-span p99 | 1026.0 ms | 872.7 ms | 153.4 ms | [5.0, 301.7] | 10.80 |
-| DP all-reduce per-rank p99 | 755.6 ms | 760.1 ms | -4.5 ms | [-90.1, 81.0] | -4.90 |
-| DP physical bytes | 25.34 GiB | 23.36 GiB | 1.98 GiB | [1.92, 2.05] | 7.82 |
+1. The pre-registered primary estimand has never produced a signal. Per-rank
+   p99 spans zero in every regime and every wave; it is dominated by ECMP
+   timing at this scale and the design cannot resolve it [O8]. The burst-step
+   and aftermath-step span are the estimands the paper's claim needs and the
+   protocol does not name.
+2. The anchor's baseline transport is not the fabric's transport. Go-back-N
+   makes the Storm; selective repair removes it [O6]. There is no
+   selective-repair arm in any family with a burst.
+3. The wave has no negative control. burst0, which the matrix calls one, is
+   a Knee-regime fabric that congests itself (W 2.23 with no burst); the
+   protocol's `no_incast_8.json` did not run [O9]. The "supported policy
+   benefit" verdict is conditional on it and on go-back-N, and should say so
+   in the same sentence [O5].
+4. The dose grid and the burst4 pair are unmatched across profiles because
+   `run_id` enters the selection hash (`ExperimentConfig.hh`). A one-line
+   fix, but the grid's cross-dose readings are noise-limited until it is
+   rerun with a shared identifier and seeds [O4].
+5. The pp2 arm, the only carrier of non-sheddable pipeline traffic and hence
+   of the 3D-parallel realism argument, has never completed in three waves
+   [O11].
+6. The sixteen-seed aggregate job will fail on an absolute-profile-path
+   equality check in `compare.py` when pp2 ends, so the run will conclude
+   failure with 31 clean arms; the numbers above are what it would have
+   produced.
 
-The paired makespan deltas came in at sd 5.21 %, so the half-width is
-+/-2.78 % instead of the +/-3.83 % I planned for, and a mean of +3.91 %
-clears it: CI [1.13, 6.68] %. Three of the sixteen seeds are negative
-(31415926, 33832795, 70679821). Headroom: fixed-high makespan -9.42 %
-[500, 863 ms], span p99 6.06 % with a CI spanning zero, per-rank p99
-negative. The policy captured 43 % of the unbounded makespan headroom without
-shedding inside CLR, and it beats fixed-high on span p99.
+## Can it withstand review
 
-Per-seed deltas in ms, positive is relief; ISA marks the two seeds that ran
-on the x86-64-v3 binary on cpunode4.
+The referee pass returned major revision: no fatal objection, six major.
+Read as a whole they say one thing. The document, and the programme behind
+it, claims tail relief and measures steady-state relief; the mechanism is
+argued from correlation; the strongest result is conditional on a recovery
+algorithm the fabric does not use; and the claims that generalise (no
+channel under selective repair, dose is not the amplifier) rest on one seed
+each. None of these is a flaw in the harness or the statistics. They are
+all the same gap: the experiment has not yet put the paper's mechanism on
+the modern wire.
 
-| Seed | ISA | Makespan | Span p99 | Per-rank p99 | Policy trim change |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 2884197 | v4 | 262.3 | 434.2 | -394.7 | -14.7 M |
-| 16939937 | v4 | 751.5 | 716.3 | 146.2 | -47.9 M |
-| 23846264 | v4 | 284.7 | 496.7 | -102.4 | -27.7 M |
-| 28230664 | v3 | 232.7 | -43.5 | -86.8 | -20.9 M |
-| 30781640 | v4 | 284.8 | 160.3 | 154.0 | -40.6 M |
-| 31415926 | v4 | -369.7 | 143.4 | -123.1 | +25.8 M |
-| 33832795 | v4 | -97.6 | 205.3 | -12.5 | +0.9 M |
-| 48086513 | v4 | 376.5 | -140.0 | 137.8 | -36.3 M |
-| 51058209 | v4 | 165.1 | -56.1 | -93.9 | -13.3 M |
-| 53589793 | v4 | 880.1 | 16.0 | 59.9 | -74.1 M |
-| 62862089 | v3 | 575.6 | -101.1 | -143.3 | -40.5 M |
-| 70679821 | v4 | -494.5 | 16.8 | 61.8 | +31.2 M |
-| 70938446 | v4 | 288.8 | 158.1 | -5.4 | -16.9 M |
-| 74944592 | v4 | 719.2 | -103.6 | 121.8 | -49.4 M |
-| 82534211 | v4 | 251.0 | -98.3 | -70.3 | -42.5 M |
-| 98628034 | v4 | 555.9 | 649.1 | 278.4 | -27.9 M |
+Two objections go to the premise rather than the data. The phase-tolerance
+premise (40 % additional loss outside the critical regime is harmless)
+comes from CIFAR-scale CNNs on three workers and cannot be tested in
+ASTRA-sim [O10]; every claim here must be conditional on a tolerance
+oracle, and none should depend on the premise holding for a 70B-class
+model. And "the bound is doing work" conflates metrics [O7]: fixed-high wins
+makespan in the Storm and loses tails everywhere; per metric, the bound
+costs makespan and protects tails, which is the trade it was designed to
+make.
 
-The result I care most about is that the relief has a mechanism I can point
-at. The policy removed 1.98 GiB of 166 GiB offered, 1.19 %, and makespan
-fell 3.91 %, 3.3 times the linear byte ceiling. The transport counters,
-averaged over the sixteen seeds, show where the rest came from:
+## How to frame the contribution
 
-| Arm | Offered | Wire volume | Trimmed payload | Trims | W | Control packets |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| fixed-low | 166.2 GiB | 3342 GiB | 1582 GiB | 401.7 M | 9.52 | 3.22 B |
-| policy | 164.2 GiB | 3186 GiB | 1496 GiB | 377.0 M | 9.11 | 3.04 B |
-| fixed-high | 163.8 GiB | 3014 GiB | 1384 GiB | 348.2 M | 8.45 | 2.82 B |
+Three framings are on the table.
 
-Shedding 1.98 GiB took 156 GiB off the wire, a marginal amplification of
-79x; fixed-high's 2.46 GiB took off 327 GiB, 133x. Across seeds the policy's
-makespan relief correlates 0.94 with its trim reduction, at 13 ms per
-million trims avoided, and the three seeds where the policy added trims
-(+25.8 M, +0.9 M, +31.2 M) are the three negative seeds. Byte reduction
-hardly varies across seeds (7.1 to 8.7 %) and predicts nothing. Prediction 2
-held in the strongest form the data allows. Admission shedding helps only
-through the retransmission chains it happens to delete, and those chains are
-what the forgiveness protocol would target on purpose.
+The one the programme has been carrying, "phase-aware admission shedding
+relieves congestion by 4 to 11 % on a UEC fabric", does not survive O1, O5
+and O6. It measures the wrong step, on the wrong recovery algorithm, and
+its best number is a bandwidth effect.
 
-Three smaller confirmations. clrburst reproduced the 0.00 % span and
-per-rank p99 deltas between policy and fixed-low, with makespan 1.33 %: the
-burst fires at step 1, which is CLR under every seed, the policy shed
-nothing there, and fixed-high, which did shed into it, lost 13.7 % per-rank
-p99. The bound is doing work. Fixed-high makespan is negative in four
-conditions again (burst2 -3.63 %, fan-in direct1 -4.10 %, 32-direct
--0.78 %, sr2x -0.57 %), and its per-rank p99 is negative in the anchor
-(-4.4 %), clrburst (-13.7 %), burst2 (-20.5 %), direct1 (-80.5 %), direct2
-(-28.9 %) and the 0.6 dose point (-83.9 %); it wins on Storm makespan (9.4 %
-against 3.9 %) because there more deletion is more relief, and pays in tails.
-And sr2x completed in 11 h with W = 0.02, 4.4 M trims against roughly 300 M
-for go-back-N on the same fabric, and relief of 0.78 %: selective repair
-collapses the waste term by 70x, and once the waste is gone the admission
-policy has no channel left. Sustained oversubscription is back as an axis I
-can sweep, and the go-back-N contrast is a result on its own.
+The one the data supports today is a regime paper: where can a bounded-loss
+transport help on a modern lossy-Ethernet fabric, and where can it not. Its
+findings are already in hand and each is a real result. Relief from
+admission-time shedding is a property of the recovery algorithm, not of the
+training phase, and it vanishes when repair is selective. Admission-time
+shedding cannot reach the burst episode, because it acts before the
+network has said anything. The waste ratio W places any fabric in one of
+three regimes and predicts whether there is anything to relieve. And the
+paper's own headline, relief at the burst iteration, is the one estimand
+the mechanism leaves untouched. This reframes DBLP for the fabric it was
+not designed for: the phase signal is still the interesting idea, but on a
+wire that signals and repairs every loss the only decision left for it to
+inform is whether to repair, so bounded loss on a modern fabric must be a
+recovery-time decision or it is a bandwidth trick.
 
-## What went wrong
+The one worth the next six months is the protocol paper that follows from
+that: recovery-domain bounded loss on UEC, where the trim notification
+itself is the trigger and the receiver, which owns the phase signal,
+declines the repair of trimmed DP ranges outside the critical regime under
+the same byte budget the admission policy had. Its claim is the paper's
+claim, tail relief at the burst, tested on the paper's own estimand with a
+selective-repair baseline. Whether it holds is an open empirical question,
+and the anchor's counters bound the prize: the burst step and its aftermath
+are 1.5 s of a 7.1 s run, three times the span of any other step.
 
-The dose grid is not the matched experiment I wrote into the matrix. I found
-this by accident while checking determinism. The four grid profiles differ
-from the origin only in `name` and `p_high`, so their fixed-low baselines
-should be the same simulation. They are not: makespan 4508 / 4428 / 4514 /
-4237 ms, four distinct stream hashes, two of them on the same node and
-binary. The cause is in
-`astra-sim/network_frontend/ns3/ExperimentConfig.hh`: the selection decision
-hashes the seed, `run_hash = stable_string_hash(run_id)`, and the operation
-coordinates, and `run_id` is the profile name. Within one profile the arms
-are nested (a decision selected at 0.005 is selected at every higher
-threshold), which is why the three arms of a pair are bit-matched. Across
-profiles that differ only by name the selection streams are unrelated. So
-the dose grid and the burst4 / burst4-ph40 pair compare unmatched
-baselines, and any cross-dose difference carries selection-stream noise of a
-size I cannot estimate on top of the ECMP noise. When I wrote "matching the
-existing burst-sweep origin so the p_high=0.1 runs need no rerun" into the
-matrix notes, I believed the seed was the whole stream. It was not, and the
-grid's answers below have to be read with that in mind.
+My recommendation is to write the second and build the third. The second is
+honest about what the admission mechanism is, and it is the argument that
+makes the third necessary rather than incremental.
 
-What the grid does say, per point at seed 314159265 on the 7-source 32-rank
-fabric:
+## The decisive experiment
 
-| p_high | Question | DP bytes shed | Makespan | Span p99 | W base / policy | Fixed-high tails |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 0.1 (32-direct) | origin | 8.16 % | 0.75 % | 7.68 % | 3.02 / 2.82 | +1.75 / +2.60 % |
-| 0.2 | does doubling move relief? | 15.74 % | -24.89 % | -100.28 % | 2.79 / 3.67 | -55.7 / -49.4 % |
-| 0.4 | curvature: scale or saturate? | 31.76 % | 8.40 % | -72.83 % | 2.94 / 2.68 | -11.5 / -14.6 % |
-| 0.6 | ceiling: can any dose restore relief? | 47.53 % | 12.11 % | -4.53 % | 2.80 / 2.16 | -83.9 / -83.9 % |
-| burst4 at 0.4 | dose x burst interaction | 32.04 % | 19.34 % | -1.81 % | 2.21 / 1.61 | +13.6 / +11.6 % |
+One wave, designed around the objections rather than around more seeds.
 
-The byte lever arrived exactly as dosed (8, 16, 32, 48 %). At 0.4 and 0.6 the
-policy's W fell with it and makespan relief rose to 8.4 % and 12.1 %. Tails
-went the other way: span p99 is negative at every dose above 0.1, and
-fixed-high at 0.6 loses 84 % on both tail metrics. The 0.2 point is an
-outlier in the wrong direction on every axis, with policy W at 3.67 against
-a 2.79 baseline. Per question: doubling the dose did not move relief the
-right way (Q1); makespan relief is still rising at 0.6, so I did not locate
-a saturation point (Q2); the "no dose restores relief" falsifier did not
-fire for makespan but did fire for tails (Q3); burst-4 keeps its advantage at
-equal dose, so the sweet spot reads as a property of the fabric (Q4).
-Prediction 3 stands as far as one unmatched seed can carry it: dose is a
-makespan lever with a tail-latency price, and it is not the amplifier.
+- Fabric: the 32-rank 1:1 rail fabric with the 7-source step-18 burst, run
+  under selective repair, so W starts near zero and the only congestion is
+  the episode itself. This answers O3 and O6 at once.
+- Arms, matched and nested as now: no shedding; admission shedding at the
+  current bound; recovery-domain forgiveness at the same byte budget. The
+  third arm is the intervention O2 asks for, fixing shed bytes and varying
+  where the decision is made.
+- Estimands, pre-registered: span and per-rank p99 of the burst step and of
+  the aftermath step, then makespan. Per-rank p99 over the whole run is
+  demoted to a diagnostic [O8].
+- Control: `no_incast_8.json` in the same wave [O9].
+- Seeds: pi chunks 17 onward, eight per arm; the Knee's seed spread is
+  unknown and eight is the minimum that gives a CI at all.
+- Harness before the wave: `run_id` out of the selection hash or shared per
+  family, the aggregate profile check by relative path, and W printed next
+  to the trim counts in every report.
 
-The run will end in failure on paper. `aggregate_comparison_artifacts` in
-`experiments/ring_3d/compare.py` requires every artifact's `profile` string
-to be identical, but each arm writes `profile.resolve().as_posix()`, which on
-the cluster is `/w/nobackup/.../astra-sim/<SLURM job id>/_work/...`, and the
-sixteen archived files carry sixteen distinct strings. Every earlier wave
-lost at least one seed arm and failed the count gate first, so this check
-was never reached; #117 will be the first run to hit it. The two sweep
-aggregations expect differing profiles and are unaffected. The aggregate
-section will publish as failure, `ledger-close` will keep #64 open, and the
-run will conclude failure despite 31 clean arms. A fix cannot rescue this
-run, because the workflow is pinned to 414dc70; the numbers above are what
-the job would have produced.
-
-I misread burst0 in my first draft of this document and called it an
-unexplained protocol confound. burst0, burst4, burst4-ph40 and sr2x
-completed in both #116 and #117 with every metric identical, so the burst0
-result (zero burst sources, 138 M trims, the sweep's largest relief at 8.87 %
-makespan) is reproduced, not observed a second time. What #117 adds is
-placement: W is 2.23 at zero sources, 2.07 and 2.28 at two and four, and the
-7-source point rises to 3.02. The burst axis moves the waste term by at most
-35 %, while rank scale and fan-in move it fourfold. Prediction 4 held. burst0
-is a Knee-regime fabric that congests itself, which is what I had already
-concluded from #112, and the wave has no true negative control: the
-protocol's no-incast profile, `profiles/no_incast_8.json`, was not in it.
-
-Two smaller things. Per-rank p99 in the anchor is still chaos, with per-seed
-deltas from -395 ms to +278 ms and a CI spanning zero; the Storm regime does
-not give up tail evidence at sixteen seeds, as I expected. And three arms
-ran on the x86-64-v3 build (cpunode4, EPYC 7453) while the rest ran on
-x86-64-v4 (EPYC 9634 and 9754), so the anchor aggregate mixes two of sixteen
-seeds from the other binary. The attestation records it, and it is not a
-determinism failure, since the same inputs gave the same outputs. What the
-run_id finding shows is that the envelope has an input I never wrote down:
-the profile name.
-
-pp2 remains unknown. It has never completed in three waves (#115 and #116
-cancelled it early), it is now 27 h past the longest completed sibling
-(direct4 at 56.0 h), and GitHub does not serve an in-progress job's log, so I
-cannot read its liveness checkpoints until it ends.
-
-## Where we are
-
-On the evidence ladder: mechanism validity is established in every arm, the
-causal comparison is established at one predeclared point with two of three
-primary estimands clearing zero and a causal-load ratio of 2.27, robustness
-is partial (both sweeps complete but single-seed, the dose grid unmatched),
-and scale evidence now exists for 64 ranks on a degraded fabric for the
-first time. The near-zero no-incast control the protocol asks for is still
-owed. By the rules as written this is "supported policy benefit" on makespan
-and span p99, with the control pending, and the waste-term counters say why
-the magnitude is what it is.
-
-Against the paper, the position is narrower than the project's name. What
-we have is a phase-aware admission policy on a UEC trimming fabric where
-every trimmed packet is repaired: the transport still tolerates zero actual
-loss, and the DBLP idea of accepting residual loss has not been exercised.
-What #117 proves is that the admission policy's relief is exactly the
-retransmission volume it removes as a side effect. That is the strongest
-possible argument for moving the loss-acceptance point into the recovery
-path, and it is the argument I wanted before building it. The anchor has
-done its job. It sized the seed noise, it produced the one confidence
-interval the programme has, and it is the wrong regime for a headline, as I
-said after #112.
-
-## What I do next
-
-1. Harness fixes before any push, all small. Make `run_id` an explicit
-   profile field that a sweep family shares, or drop `run_hash` from
-   `stable_operation_hash` since the seed already keys the stream, and add a
-   test that two profiles differing only in `p_high` produce a byte-identical
-   fixed-low arm. Compare profiles in the aggregate by workspace-relative
-   path or content hash. Print W next to the trim counts in `compare.py`,
-   since it separates the regimes cleanly and every arm already has it.
-2. Build the forgiveness protocol. The design is written: push-first,
-   pull-repair, the receiver owns acceptance, forgiven ranges are marked
-   received so the ordinary cumulative ACK advances the sender, a batched
-   forgiveness bitmap rides on the ACK, and the safety law is shed plus
-   forgiven at most p(s) times eligible(s), checked synchronously. One design
-   question is still open from the last session: whether a separate FORGIVE
-   verb is needed at all, or an ACK that advances past forgiven ranges is
-   enough, and whether acknowledging bytes ahead of delivery is a safe
-   fast-path in a permissive regime. I owe that answer before the code.
-3. The next wave, in this order: TP-off plus a capacity-knee calibration
-   (two arms); forgiveness against admission at equal shed budget (two to
-   three arms); the real no-incast control; then pi-chunk seeds 17 onward on
-   the winning 32-rank point, about eight of them. The anchor moves from
-   always-on to a single canary so the cluster budget goes to the Knee.
-4. Real hardware waits. The accuracy half of DBLP can only be shown on a
-   real model, and the collaborator's question about paying for GPU time
-   gets a yes only after forgiveness shows a Knee-regime effect with a
-   confidence interval behind it.
+If forgiveness relieves the burst step under selective repair with a CI
+that clears zero, the programme has the paper's result on the modern wire
+and the protocol paper writes itself. If it does not, the regime paper's
+conclusion stands as the finding: bounded loss has no purchase on a fabric
+that repairs cheaply, and the phase signal belongs in scheduling rather
+than in transport, which is where the source paper's own future-work
+section already points.
 
 ## Integrity of the record
 
 - 30 of 30 arms passed the congestion gate; 30 of 30 streams attested
-  complete.
+  complete (332 to 665 segments, 356 to 2057 GiB per arm).
 - 70 release assets, 1.17 GB; every bundle carries `attestation.json` with
-  the binary sha256, ISA level, node, and the uncompressed stream digests.
+  the binary sha256, ISA level, node, and stream digests. Three arms ran on
+  the x86-64-v3 binary, the rest on x86-64-v4; the anchor mixes two of
+  sixteen seeds from the other build.
 - Simulator wall hours: 64-rank fan-in 45 to 56 h, anchor seeds 37 to 49 h,
-  32-rank arms 23 to 38 h, sr2x 11 h, pp2 still open. In #116 every 64-rank
-  arm died at about 26.5 h; the courier and outbox design in 414dc70 is what
-  carried this wave past that wall.
+  32-rank arms 23 to 38 h, sr2x 11 h, pp2 still open past 83 h.

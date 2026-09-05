@@ -15,7 +15,7 @@ small while retaining the non-obvious project decisions.
 | Editing policy selection, completion, or telemetry bridge | [ns-3 policy implementation](../../astra-sim/network_frontend/ns3/POLICY_IMPLEMENTATION.md) |
 | Defining an experimental comparison or interpreting results | [Validation protocol](../../experiments/ring_3d/VALIDATION_PROTOCOL.md) |
 | Diagnosing a slow, stalled, or timed-out simulation; changing hot-path or recovery code; sizing CI time budgets | [Simulation liveness and performance discipline](simulation-liveness-and-performance.md) |
-| Reading CI run #117 against the programme's predictions (regime placement, waste-term channel, dose grid, run_id hashing, aggregate profile-path failure) | [Run #117 wave readout](run-117-wave-readout.md) |
+| Judging whether the approach offers relief, how much, and how to frame the contribution after CI run #117 | [Run #117 wave readout](run-117-wave-readout.md), then the [referee pass](run-117-referee-pass.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commits/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/authoring-skills/SKILL.md) |

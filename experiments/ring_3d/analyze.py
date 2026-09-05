@@ -294,6 +294,7 @@ def _summarize_collectives(rows: Iterator[dict[str, str]]) -> dict[str, Any]:
     spans_by_domain = _durations()
     spans_by_domain_and_type = _durations()
     spans_by_step = _durations()
+    dp_all_reduce_span_by_step: dict[str, int] = {}
     rank_counts = array("q")
     for (domain, collective_type, training_step, _node), operation in operations.items():
         span = operation.window.span_ns
@@ -301,6 +302,13 @@ def _summarize_collectives(rows: Iterator[dict[str, str]]) -> dict[str, Any]:
         spans_by_domain[domain].append(span)
         spans_by_domain_and_type[(domain, collective_type)].append(span)
         spans_by_step[str(training_step)].append(span)
+        if domain == "dp" and collective_type == "all_reduce":
+            step = str(training_step)
+            # A step issues one DP All-Reduce per workload node; the step is
+            # held for as long as its worst one, so the step reduces by max.
+            dp_all_reduce_span_by_step[step] = max(
+                span, dp_all_reduce_span_by_step.get(step, 0)
+            )
         rank_counts.append(operation.rank_count)
 
     return {
@@ -322,6 +330,12 @@ def _summarize_collectives(rows: Iterator[dict[str, str]]) -> dict[str, Any]:
                 spans_by_domain_and_type
             ),
             "by_training_step": _timing_by_step(spans_by_step),
+        },
+        "dp_all_reduce_span_ns_by_training_step": {
+            step: dp_all_reduce_span_by_step[step]
+            for step in sorted(
+                dp_all_reduce_span_by_step, key=_training_step_sort_key
+            )
         },
     }
 
@@ -675,6 +689,53 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             ),
             "trimmed_queue_drop_count": events["switch_trimmed_queue_drop"],
         },
+    }
+
+
+# Trimming on admission is the switch rejecting an offered byte outright, so
+# these two events carry the whole of W. The egress-queue variants trim a
+# packet the switch already admitted and are reported separately.
+_TRIM_ADMISSION_EVENTS: Final = ("trim_ftd_admission", "trim_ftd_lasthop_admission")
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _network_health(
+    transport: dict[str, Any],
+    offered_physical_bytes: int,
+    background_window: _Window | None,
+) -> dict[str, Any]:
+    """Fabric health per offered byte: the pre-registered W and its companions.
+
+    W is trimmed-on-admission payload bytes per offered byte. wire_per_offered
+    is the bytes receivers actually saw per offered byte, so repair traffic
+    pushes it above one and the two together separate a fabric that loses
+    bytes from one that re-carries them. burst_drain_ns is how long the
+    background incast occupied the fabric; compare it against the incast's
+    serialization floor, which this module cannot see.
+    """
+    drain_ns = background_window.span_ns if background_window is not None else None
+    if transport.get("status") != "available":
+        return {
+            "status": "not_available",
+            "offered_physical_bytes": offered_physical_bytes,
+            "burst_drain_ns": drain_ns,
+        }
+    event_bytes = transport.get("event_bytes") or {}
+    trimmed_bytes = sum(
+        int(event_bytes.get(event, 0)) for event in _TRIM_ADMISSION_EVENTS
+    )
+    arrival_bytes = int(event_bytes.get("data_arrival", 0))
+    return {
+        "status": "available",
+        "offered_physical_bytes": offered_physical_bytes,
+        "trimmed_admission_bytes": trimmed_bytes,
+        "W": _ratio(trimmed_bytes, offered_physical_bytes),
+        "data_arrival_bytes": arrival_bytes,
+        "wire_per_offered": _ratio(arrival_bytes, offered_physical_bytes),
+        "burst_drain_ns": drain_ns,
     }
 
 
@@ -1080,6 +1141,12 @@ def summarize(
         else {"status": "not_available"}
     )
     ns3_observability = _summarize_ns3_observability(ns3_dir.resolve())
+    transport_events = ns3_observability.get("transport")
+    network_health = _network_health(
+        transport_events if isinstance(transport_events, dict) else {},
+        statistics.total_physical_bytes,
+        statistics.background_window,
+    )
     primary_eligible = (
         expected_rank_count is not None
         and not statistics.failed_count
@@ -1136,6 +1203,7 @@ def summarize(
             "dp_all_reduce": statistics.dp_all_reduce_traffic.summary(),
         },
         "background_microburst_timeline": statistics.background_timeline(),
+        "network_health": network_health,
         "fct_join": fct_join,
         "flow_control_regime": _flow_control_regime(manifest),
         "lossless_transport": lossless_transport,

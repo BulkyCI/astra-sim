@@ -12,6 +12,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from experiments.ring_3d.compare import (
+    AFTERMATH_STEP_SPAN_METRIC,
+    BURST_STEP_SPAN_METRIC,
     DEFAULT_SEEDS,
     aggregate_comparison_artifacts,
     aggregate_comparisons,
@@ -20,12 +22,20 @@ from experiments.ring_3d.compare import (
     require_congestion,
     require_finite_buffer_data_drop,
     require_primary_analysis,
+    comparison_metrics,
+    profile_identity,
     render_comparison_report,
+    repository_relative_profile,
     run_comparison,
 )
 
 
-def summary(makespan: int, fct_p99: int) -> dict[str, object]:
+def summary(
+    makespan: int,
+    fct_p99: int,
+    trimmed_per_offered: float = 0.02,
+    dp_span_by_step: dict[str, int] | None = None,
+) -> dict[str, object]:
     statistic = {
         "count": 8,
         "min_ns": fct_p99 - 10,
@@ -36,6 +46,15 @@ def summary(makespan: int, fct_p99: int) -> dict[str, object]:
     }
     return {
         "rank_completion_time_ns": {**statistic, "max_ns": makespan},
+        "network_health": {
+            "status": "available",
+            "offered_physical_bytes": 20_000,
+            "trimmed_admission_bytes": int(20_000 * trimmed_per_offered),
+            "W": trimmed_per_offered,
+            "data_arrival_bytes": 20_000,
+            "wire_per_offered": 1.0,
+            "burst_drain_ns": 500,
+        },
         "collective_completion": {
             "per_rank_completion_time_ns": {
                 "by_parallelism_domain_and_collective_type": {
@@ -47,6 +66,11 @@ def summary(makespan: int, fct_p99: int) -> dict[str, object]:
                     "dp": {"all_reduce": statistic}
                 }
             },
+            "dp_all_reduce_span_ns_by_training_step": (
+                dp_span_by_step
+                if dp_span_by_step is not None
+                else {str(step): makespan // 2 for step in range(1, 21)}
+            ),
         },
         "flow_completion_time_ns": {
             "all": statistic,
@@ -250,6 +274,76 @@ class Ring3DComparisonTests(unittest.TestCase):
             comparison["selection_policy"]["baseline"],
             {"p_low": 0.005, "p_high": 0.005},
         )
+
+    def test_aggregate_artifacts_match_across_differing_absolute_paths(self) -> None:
+        """One sweep runs one profile even when its seeds ran in other workspaces."""
+
+        def one_seed_comparison(seed: int, root: str) -> dict[str, object]:
+            per_seed = [
+                {
+                    "seed": seed,
+                    "metrics": compare_summaries(
+                        summary(1_000, 100), summary(900 - seed, 90 - seed)
+                    ),
+                }
+            ]
+            return {
+                "profile": f"{root}/experiments/ring_3d/profiles/llama3_70b_16.json",
+                "selection_policy": {"semantics": "logical_admission_selection"},
+                "seeds": [seed],
+                "congestion_required": True,
+                "simulation_timeout_seconds": 9_000,
+                "per_seed": per_seed,
+                "aggregate": aggregate_comparisons(per_seed),
+            }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = []
+            for index, (seed, root) in enumerate(
+                ((1, "/home/runner/work/astra-sim/astra-sim"), (2, "/scratch/pp2/checkout"))
+            ):
+                path = Path(temporary_directory) / f"artifact_{index}.json"
+                path.write_text(
+                    json.dumps(one_seed_comparison(seed, root)), encoding="utf-8"
+                )
+                paths.append(path)
+
+            comparison = aggregate_comparison_artifacts(paths)
+
+        self.assertEqual(
+            comparison["profile"],
+            "experiments/ring_3d/profiles/llama3_70b_16.json",
+        )
+        self.assertEqual(comparison["seeds"], [1, 2])
+
+    def test_profile_identity_keeps_a_path_outside_the_profile_directory(self) -> None:
+        self.assertEqual(profile_identity("/tmp/generated.json"), "/tmp/generated.json")
+        self.assertEqual(
+            repository_relative_profile(
+                REPOSITORY_ROOT / "experiments/ring_3d/profiles/smoke_8.json"
+            ),
+            "experiments/ring_3d/profiles/smoke_8.json",
+        )
+
+    def test_episode_metrics_track_the_profile_trigger_step(self) -> None:
+        baseline = summary(1_000, 100, 0.25, {"18": 900, "19": 400})
+        policy = summary(900, 90, 0.10, {"18": 600, "19": 300})
+        metrics = compare_summaries(
+            baseline,
+            policy,
+            comparison_metrics(18, 19),
+        )
+
+        self.assertEqual(metrics[BURST_STEP_SPAN_METRIC]["reduction_ns"], 300)
+        self.assertEqual(metrics[AFTERMATH_STEP_SPAN_METRIC]["reduction_ns"], 100)
+        self.assertAlmostEqual(metrics["W"]["reduction_ns"], 0.15)
+        self.assertAlmostEqual(metrics["W"]["reduction_percent"], 60.0)
+
+    def test_zero_trim_fabric_reports_no_relative_change_in_w(self) -> None:
+        metrics = compare_summaries(summary(1_000, 100, 0.0), summary(900, 90, 0.0))
+
+        self.assertEqual(metrics["W"]["reduction_ns"], 0.0)
+        self.assertEqual(metrics["W"]["reduction_percent"], 0.0)
 
     def test_congestion_gate_requires_queue_and_pfc_evidence(self) -> None:
         evidence = congestion_evidence(congested_summary())

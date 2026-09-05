@@ -42,9 +42,12 @@ combination `dp` + `CollectivePayload` + `All_Reduce`. Any other request is
 ineligible and must use normal transport.
 
 For an eligible request, `stable_operation_hash()` combines the configured
-selection seed, run identifier, training step, workload node, message sequence,
-source, destination, and tag. The decision is deterministic for the full set
-of those values:
+selection seed, training step, workload node, message sequence, source,
+destination, and tag. `run_id` is parsed and written to the manifest as
+provenance but is excluded from the hash: two profiles that differ only by
+name must draw the same selection stream, otherwise a renamed profile is
+silently unmatched against the arm it is compared with. The decision is
+deterministic for the full set of the hashed values:
 
 $$
 \texttt{selected} \iff

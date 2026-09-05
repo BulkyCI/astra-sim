@@ -69,6 +69,49 @@ def _format_optional_bytes(value: Any) -> str:
     return _format_bytes(value) if isinstance(value, int) else "unknown"
 
 
+def _format_optional_ratio(value: Any) -> str:
+    return f"{value:.4f}" if isinstance(value, (int, float)) else "not available"
+
+
+def _network_health_lines(summary: dict[str, Any]) -> list[str]:
+    """Render the fabric-health estimands beside the traffic they normalize."""
+    health = summary.get("network_health")
+    if not isinstance(health, dict):
+        return []
+    return [
+        "",
+        "### Network health",
+        "",
+        "> W is trimmed-on-admission payload bytes per offered byte, the primary "
+        "health signal of a best-effort fabric. Wire-per-offered above one means "
+        "repair traffic re-carried bytes. Burst drain is the span of the "
+        "background incast; judge it against its serialization floor.",
+        "",
+        *_markdown_table(
+            ["Signal", "Value"],
+            [
+                ["W (trimmed per offered byte)", _format_optional_ratio(health.get("W"))],
+                [
+                    "Wire per offered byte",
+                    _format_optional_ratio(health.get("wire_per_offered")),
+                ],
+                [
+                    "Burst drain",
+                    _format_optional_duration_ns(health.get("burst_drain_ns")),
+                ],
+                [
+                    "Trimmed on admission",
+                    _format_optional_bytes(health.get("trimmed_admission_bytes")),
+                ],
+                [
+                    "Offered physical bytes",
+                    _format_optional_bytes(health.get("offered_physical_bytes")),
+                ],
+            ],
+        ),
+    ]
+
+
 def _format_probability(value: Any) -> str:
     try:
         return f"{float(value) * 100:.2f}%"
@@ -603,7 +646,8 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                             for collective_type, values in sorted(types.items()):
                                 if (
                                     row := _timing_table_row(
-                                        f"{domain} / {collective_type} per-rank",
+                                        f"{domain} / {collective_type} per-rank "
+                                        "(diagnostic)",
                                         values,
                                     )
                                 ) is not None:
@@ -627,7 +671,9 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 lines.extend(["", "## Logical collective-completion latency", ""])
                 lines.append(
                     "> Per-rank latency is measured from native collective issue to native completion. "
-                    "All-rank span is $\\max(end)-\\min(start)$ for one logical collective across ranks."
+                    "All-rank span is $\\max(end)-\\min(start)$ for one logical collective across ranks. "
+                    "Per-rank p99 is a transport diagnostic, retired as a primary estimand because it "
+                    "resolves ECMP path-timing noise; the all-rank span is the primary collective estimand."
                 )
                 lines.append("")
                 if collective_rows:
@@ -682,6 +728,8 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                 ],
             )
         )
+
+        lines.extend(_network_health_lines(summary))
 
         step_data = summary.get("by_training_step")
         if isinstance(step_data, dict):

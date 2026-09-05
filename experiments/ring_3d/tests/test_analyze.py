@@ -226,6 +226,101 @@ class Ring3DAnalysisTests(unittest.TestCase):
                 [{"switch": 8, "port": 3, "queue": 3}],
             )
 
+    def test_network_health_normalizes_trims_and_wire_by_offered_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            background = self.valid_shed_flow()
+            background.update(
+                {
+                    "flow_kind": "background_microburst",
+                    "decision": "admitted",
+                    "admission_eligible": "false",
+                    "parallelism_domain": "unknown",
+                    "origin_transport_role": "background_traffic",
+                    "transport_role": "background_traffic",
+                    "collective_type": "none",
+                    "source_port": "10001",
+                    "logical_bytes": "936",
+                    "physical_bytes": "936",
+                    "data_attempted_bytes": "936",
+                    "start_time_ns": "40",
+                    "end_time_ns": "540",
+                }
+            )
+            self.write_telemetry(telemetry, [self.valid_shed_flow(), background])
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\n"
+                "data_arrival,data,3,1500\n"
+                "trim_ftd_admission,data,2,150\n"
+                "trim_ftd_lasthop_admission,data,1,50\n"
+                "trim_ftd_egress_queue,data,1,1000\n",
+                encoding="utf-8",
+            )
+
+            health = summarize(telemetry, ns3_dir=ns3)["network_health"]
+
+        # 64 B of provenance plus 936 B of incast.
+        self.assertEqual(health["offered_physical_bytes"], 1_000)
+        self.assertEqual(health["trimmed_admission_bytes"], 200)
+        self.assertAlmostEqual(health["W"], 0.2)
+        self.assertAlmostEqual(health["wire_per_offered"], 1.5)
+        self.assertEqual(health["burst_drain_ns"], 500)
+
+    def test_network_health_without_transport_events_keeps_the_burst_drain(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+
+            health = summarize(telemetry)["network_health"]
+
+        self.assertEqual(health["status"], "not_available")
+        self.assertIsNone(health["burst_drain_ns"])
+        self.assertNotIn("W", health)
+
+    def test_dp_all_reduce_span_reduces_each_step_to_its_worst_collective(
+        self,
+    ) -> None:
+        def collective(
+            rank: int, step: int, node: int, start: int, end: int, domain: str = "dp"
+        ) -> dict[str, str]:
+            return {
+                "rank": str(rank),
+                "parallelism_domain": domain,
+                "collective_type": "all_reduce",
+                "training_step": str(step),
+                "workload_node_id": str(node),
+                "logical_bytes": "1024",
+                "start_time_ns": str(start),
+                "end_time_ns": str(end),
+            }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            telemetry = Path(temporary_directory) / "telemetry"
+            self.write_telemetry(
+                telemetry,
+                self.valid_shed_flow(),
+                collectives=[
+                    collective(0, 18, 1, 100, 400),
+                    collective(1, 18, 1, 150, 900),
+                    collective(0, 18, 2, 100, 300),
+                    collective(0, 19, 3, 1_000, 1_400),
+                    collective(0, 19, 4, 1_000, 1_100, domain="tp"),
+                ],
+            )
+
+            spans = summarize(telemetry)["collective_completion"][
+                "dp_all_reduce_span_ns_by_training_step"
+            ]
+
+        # Step 18 keeps its worst node (800 ns), not node 2's 200 ns; the TP
+        # collective at step 19 never enters the DP table.
+        self.assertEqual(spans, {"18": 800, "19": 400})
+
     def test_summary_reports_data_loss_without_control_injection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

@@ -247,6 +247,35 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
             self.assertEqual(policy["microburst"]["trigger_step"], 3)
 
+    def test_profile_name_does_not_change_the_selection_inputs(self) -> None:
+        """Two profiles differing only by name must stay a matched pair.
+
+        ``run_id`` is provenance; the simulator draws its selection stream
+        from the remaining fields, so renaming a profile must move nothing
+        that ``evaluate_shedding`` reads.
+        """
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        renamed = dict(document, name=f"{document['name']}_renamed")
+        policies = []
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            for index, variant in enumerate((document, renamed)):
+                profile_path = root / f"profile_{index}.json"
+                profile_path.write_text(json.dumps(variant), encoding="utf-8")
+                output = root / f"experiment_{index}"
+                materialize(profile_path, output)
+                policies.append(
+                    json.loads(
+                        (output / "experiment.json").read_text(encoding="utf-8")
+                    )
+                )
+
+        self.assertEqual(policies[0]["run_id"], document["name"])
+        self.assertEqual(policies[1]["run_id"], renamed["name"])
+        for policy in policies:
+            del policy["run_id"]
+        self.assertEqual(policies[0], policies[1])
+
     def test_microburst_trigger_step_must_land_inside_the_run(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))
         document["microburst_trigger_step"] = document["steps"] + 1

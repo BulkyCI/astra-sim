@@ -7,14 +7,24 @@ import argparse
 import json
 import math
 import shutil
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Final
 
 try:
-    from .generate import dp_fan_in, load_profile, resolve_selection_policy
+    from .generate import (
+        REPOSITORY_ROOT,
+        dp_fan_in,
+        load_profile,
+        resolve_selection_policy,
+    )
     from .run import fixed_p_low_baseline, run_experiment
 except ImportError:
-    from generate import dp_fan_in, load_profile, resolve_selection_policy
+    from generate import (
+        REPOSITORY_ROOT,
+        dp_fan_in,
+        load_profile,
+        resolve_selection_policy,
+    )
     from run import fixed_p_low_baseline, run_experiment
 
 
@@ -63,13 +73,21 @@ T_CRITICAL_95 = {
 }
 
 
-def _metric(summary: dict[str, Any], path: tuple[str, ...]) -> int:
+def _metric(
+    summary: dict[str, Any], path: tuple[str, ...], *, ratio: bool = False
+) -> int | float:
     value: Any = summary
     for key in path:
         if not isinstance(value, dict) or key not in value:
             raise ValueError(f"summary is missing comparison metric {'/'.join(path)}")
         value = value[key]
-    if isinstance(value, bool) or not isinstance(value, int):
+    if isinstance(value, bool):
+        raise ValueError(f"comparison metric {'/'.join(path)} must be a number")
+    if ratio:
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"comparison metric {'/'.join(path)} must be a number")
+        return float(value)
+    if not isinstance(value, int):
         raise ValueError(f"comparison metric {'/'.join(path)} must be an integer")
     return value
 
@@ -104,6 +122,7 @@ METRICS = {
         "physical_bytes",
     ),
     "total_physical_bytes": ("physical_traffic_bytes", "total", "physical_bytes"),
+    "W": ("network_health", "W"),
 }
 
 BYTE_METRICS = {
@@ -111,6 +130,33 @@ BYTE_METRICS = {
     "dp_all_reduce_physical_bytes",
     "total_physical_bytes",
 }
+# Dimensionless metrics: they carry no nanoseconds and no bytes, and a zero
+# baseline means the fabric has no such events rather than a division by zero.
+RATIO_METRICS = {"W"}
+
+BURST_STEP_SPAN_METRIC = "dp_all_reduce_span_burst_step_ns"
+AFTERMATH_STEP_SPAN_METRIC = "dp_all_reduce_span_aftermath_step_ns"
+_DP_SPAN_BY_STEP: Final = (
+    "collective_completion",
+    "dp_all_reduce_span_ns_by_training_step",
+)
+
+
+def comparison_metrics(burst_step: int | None, aftermath_step: int | None) -> dict[
+    str, tuple[str, ...]
+]:
+    """Metric paths for one profile: the fixed set plus its congestion episode.
+
+    The burst step is the profile's ``microburst_trigger_step`` and the
+    aftermath step is the next one, which a run ending at the burst does not
+    have. Both are omitted for a profile with no incast.
+    """
+    metrics = dict(METRICS)
+    if burst_step is not None:
+        metrics[BURST_STEP_SPAN_METRIC] = (*_DP_SPAN_BY_STEP, str(burst_step))
+    if aftermath_step is not None:
+        metrics[AFTERMATH_STEP_SPAN_METRIC] = (*_DP_SPAN_BY_STEP, str(aftermath_step))
+    return metrics
 
 # One terse sentence per metric codeword, rendered as a report appendix so a
 # reader can decode every table row without leaving the page.
@@ -145,28 +191,52 @@ METRIC_GLOSSARY = {
         "Physical wire bytes of all offered traffic, foreground plus "
         "background."
     ),
+    "W": (
+        "Trimmed-on-admission payload bytes per offered byte, the "
+        "pre-registered network-health signal of the best-effort fabric. "
+        "Dimensionless; a lower value is a healthier fabric."
+    ),
+    BURST_STEP_SPAN_METRIC: (
+        "Worst DP All-Reduce all-rank span at the microburst trigger step: "
+        "how long the incast held the collective it landed on."
+    ),
+    AFTERMATH_STEP_SPAN_METRIC: (
+        "Worst DP All-Reduce all-rank span at the step after the trigger: "
+        "the queue backlog the burst left behind."
+    ),
 }
-assert METRIC_GLOSSARY.keys() == METRICS.keys(), (
+assert METRIC_GLOSSARY.keys() == comparison_metrics(1, 2).keys(), (
     "every comparison metric needs exactly one glossary sentence"
 )
 
 
 def compare_summaries(
-    baseline: dict[str, Any], policy: dict[str, Any]
+    baseline: dict[str, Any],
+    policy: dict[str, Any],
+    metrics: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, dict[str, float | int]]:
     """Produce positive reductions when the policy is faster than baseline."""
     comparisons: dict[str, dict[str, float | int]] = {}
-    for name, path in METRICS.items():
-        baseline_value = _metric(baseline, path)
-        policy_value = _metric(policy, path)
-        if baseline_value == 0:
-            raise ValueError(f"comparison baseline metric {name} must be nonzero")
+    for name, path in (METRICS if metrics is None else metrics).items():
+        ratio = name in RATIO_METRICS
+        baseline_value = _metric(baseline, path, ratio=ratio)
+        policy_value = _metric(policy, path, ratio=ratio)
         reduction = baseline_value - policy_value
+        if baseline_value == 0:
+            # Both arms share the fabric, so a ratio the baseline never
+            # observed the policy cannot observe either; the relative
+            # reduction is zero, not undefined. Any other zero baseline is a
+            # broken run.
+            if not ratio or reduction != 0:
+                raise ValueError(f"comparison baseline metric {name} must be nonzero")
+            reduction_percent = 0.0
+        else:
+            reduction_percent = reduction * 100 / baseline_value
         comparisons[name] = {
             "baseline_ns": baseline_value,
             "policy_ns": policy_value,
             "reduction_ns": reduction,
-            "reduction_percent": reduction * 100 / baseline_value,
+            "reduction_percent": reduction_percent,
         }
     return comparisons
 
@@ -208,8 +278,13 @@ def aggregate_comparisons(
         raise ValueError(
             f"comparison seeds must all record {metrics_field} or none of them"
         )
+    names = list(per_seed[0][metrics_field])
+    if any(list(seed[metrics_field]) != names for seed in per_seed):
+        raise ValueError(
+            f"comparison seeds must record the same {metrics_field} names"
+        )
     aggregate: dict[str, dict[str, float | int | list[float] | None]] = {}
-    for metric in METRICS:
+    for metric in names:
         entries = [seed[metrics_field][metric] for seed in per_seed]
         baseline_values = [float(entry["baseline_ns"]) for entry in entries]
         policy_values = [float(entry["policy_ns"]) for entry in entries]
@@ -370,6 +445,10 @@ def _format_duration_ns(value: float) -> str:
     return f"{value / 1_000_000:.2f} ms"
 
 
+def _format_ratio(value: float) -> str:
+    return f"{value:.4f}"
+
+
 def _format_bytes(value: float) -> str:
     units = ("B", "KiB", "MiB", "GiB", "TiB")
     for unit in units:
@@ -402,7 +481,12 @@ def _metric_table(
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for metric, values in aggregate.items():
-        format_value = _format_bytes if metric in BYTE_METRICS else _format_duration_ns
+        if metric in RATIO_METRICS:
+            format_value = _format_ratio
+        elif metric in BYTE_METRICS:
+            format_value = _format_bytes
+        else:
+            format_value = _format_duration_ns
         ci = values["reduction_ci95_ns"]
         ci_text = (
             f"[{format_value(ci[0])}, {format_value(ci[1])}]"
@@ -442,6 +526,10 @@ def _coordinate_lines(comparison: dict[str, Any]) -> list[str]:
         (
             "Microburst source count",
             comparison.get("microburst_source_count", "not recorded"),
+        ),
+        (
+            "Microburst trigger step",
+            comparison.get("microburst_trigger_step", "not recorded"),
         ),
         (
             "Fixed-low baseline selection",
@@ -605,6 +693,38 @@ def _read_comparison(path: Path) -> dict[str, Any]:
     return value
 
 
+# Profiles live in exactly one directory, and everything from it down is
+# common to every checkout of the repository.
+_PROFILE_DIRECTORY: Final = ("experiments", "ring_3d", "profiles")
+
+
+def repository_relative_profile(profile: Path) -> str:
+    """Record a profile the way every checkout sees it, not this workspace.
+
+    CI gives each seed of a sweep its own workspace, so an absolute path makes
+    the artifacts of one experiment look like artifacts of several.
+    """
+    resolved = profile.resolve()
+    try:
+        return resolved.relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def profile_identity(profile: str) -> str:
+    """Reduce a recorded profile path to its checkout-independent tail.
+
+    Artifacts written against another checkout root still carry that root; a
+    path outside the profile directory keeps the form it was recorded in.
+    """
+    parts = PurePosixPath(profile).parts
+    width = len(_PROFILE_DIRECTORY)
+    for index in range(len(parts) - width + 1):
+        if parts[index : index + width] == _PROFILE_DIRECTORY:
+            return PurePosixPath(*parts[index:]).as_posix()
+    return profile
+
+
 def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, Any]:
     """Combine independently executed one-seed comparisons without rerunning ns-3.
 
@@ -626,9 +746,10 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
         artifact_profile = comparison.get("profile")
         if not isinstance(artifact_profile, str) or not artifact_profile:
             raise ValueError(f"comparison artifact {path} has no profile")
+        identity = profile_identity(artifact_profile)
         if profile is None:
-            profile = artifact_profile
-        elif artifact_profile != profile:
+            profile = identity
+        elif identity != profile:
             raise ValueError("comparison artifacts must use the same profile")
 
         artifact_policy = comparison.get("selection_policy")
@@ -701,6 +822,7 @@ def aggregate_comparison_artifacts(comparison_paths: list[Path]) -> dict[str, An
         "dp_all_reduce_implementation": first.get("dp_all_reduce_implementation"),
         "dp_fan_in": first.get("dp_fan_in"),
         "microburst_source_count": first.get("microburst_source_count"),
+        "microburst_trigger_step": first.get("microburst_trigger_step"),
         "seeds": sorted(seeds),
         "congestion_required": require_congestion,
         "finite_buffer_data_drop_required": require_finite_buffer_drop,
@@ -750,6 +872,17 @@ def run_comparison(
     if p_low is not None:
         baseline_p_low = p_low
         baseline_p_high = p_low
+    burst_step = (
+        profile_model.microburst_trigger_step
+        if profile_model.microburst_enabled
+        else None
+    )
+    aftermath_step = (
+        burst_step + 1
+        if burst_step is not None and burst_step < profile_model.steps
+        else None
+    )
+    metrics = comparison_metrics(burst_step, aftermath_step)
 
     per_seed: list[dict[str, Any]] = []
     for seed in seeds:
@@ -840,7 +973,9 @@ def run_comparison(
                 },
                 "congestion": congestion,
                 "metrics": compare_summaries(
-                    summaries["fixed_p_low_baseline"], summaries["dblp_policy"]
+                    summaries["fixed_p_low_baseline"],
+                    summaries["dblp_policy"],
+                    metrics,
                 ),
                 # The relief an unbounded permissive policy takes over the
                 # conservative control: the ceiling the phase-aware policy is
@@ -848,6 +983,7 @@ def run_comparison(
                 "headroom_metrics": compare_summaries(
                     summaries["fixed_p_low_baseline"],
                     summaries["fixed_p_high_baseline"],
+                    metrics,
                 ),
             }
         )
@@ -856,7 +992,7 @@ def run_comparison(
         return {"arm": only_arm, "seeds": seeds}
 
     comparison = {
-        "profile": profile.resolve().as_posix(),
+        "profile": repository_relative_profile(profile),
         "selection_policy": {
             "semantics": "logical_admission_selection",
             "baseline": {"p_low": baseline_p_low, "p_high": baseline_p_high},
@@ -873,6 +1009,7 @@ def run_comparison(
             if profile_model.microburst_enabled
             else 0
         ),
+        "microburst_trigger_step": burst_step,
         "seeds": seeds,
         "congestion_required": require_congestion_signals,
         "finite_buffer_data_drop_required": require_finite_buffer_data_drops,

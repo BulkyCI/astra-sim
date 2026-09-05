@@ -51,7 +51,8 @@ struct MicroburstFlow {
 struct ExperimentConfig {
     bool enabled = false;
     uint64_t seed = 0;
-    uint64_t run_hash = 0;
+    // Provenance only. The selection hash excludes it so two profiles that
+    // differ only by name draw the same selection stream and stay matched.
     std::string run_id = "default";
     uint16_t default_priority_group = 3;
     uint16_t provenance_priority_group = 1;
@@ -300,15 +301,6 @@ inline void validate_priority_group(uint16_t priority_group,
     }
 }
 
-inline uint64_t stable_string_hash(const std::string& value) {
-    uint64_t hash = 1469598103934665603ULL;
-    for (const unsigned char character : value) {
-        hash ^= character;
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
-
 inline uint64_t mix_hash(uint64_t value) {
     value += 0x9e3779b97f4a7c15ULL;
     value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
@@ -325,7 +317,6 @@ inline uint64_t stable_operation_hash(const AstraSim::sim_request& request,
                                       int dst,
                                       int tag) {
     uint64_t hash = experiment_config.seed;
-    hash_combine(hash, experiment_config.run_hash);
     hash_combine(hash, request.operation.training_step);
     hash_combine(hash, request.operation.workload_node_id);
     hash_combine(hash, request.operation.message_sequence);
@@ -561,7 +552,6 @@ inline void configure_experiment(const std::string& configuration_path,
         }
         experiment_config.run_id = root.at("run_id").get<std::string>();
     }
-    experiment_config.run_hash = stable_string_hash(experiment_config.run_id);
 
     if (experiment_config.enabled) {
         if (!root.contains("eligibility") ||

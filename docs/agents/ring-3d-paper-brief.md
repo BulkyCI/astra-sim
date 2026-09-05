@@ -5,10 +5,9 @@ concepts needed to make sound ASTRA-sim decisions; it is not a substitute for
 the source paper when citing an exact measurement, configuration, or accuracy
 result.
 
-> **Source boundary:** this paper-specific brief is based on the research
-> summary supplied with this task. The referenced paper archive was not mounted
-> as a readable workspace file, so exact quotations, page numbers, and values
-> not stated here remain pending primary-source verification.
+> **Source boundary:** for exact quotations, page numbers, and per-value
+> citations, use [dblp-paper-detailed-read.md](dblp-paper-detailed-read.md),
+> a page-cited read of the full paper. This brief is the compact form.
 
 ## Thesis and mechanism
 

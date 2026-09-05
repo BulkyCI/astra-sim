@@ -94,7 +94,8 @@ except the anchor:
 | 16-rank anchor, 16 seeds (2:1 Clos) | 8.68-10.37 | 18.6-21.6x | 3.0-3.5 B | Storm: every byte re-carried nine to ten times |
 
 Two things about this table matter before any policy result. The 32-rank
-"healthy" rail fabric is not healthy under go-back-N: W is 2.2 with the
+"healthy" rail fabric is not healthy under go-back-N with no sender
+congestion control: W is 2.2 with the
 burst switched off entirely (burst0), because the direct2 DP fan-in plus
 ECMP collisions congest it on their own, and the seven-source burst only
 raises W to 3.0. And the one arm that runs selective repair on the worst
@@ -200,7 +201,8 @@ cross-dose ordering are noise-limited until the grid is rerun matched [O4].
   tolerance is a lever on W, and where W is near zero there is nothing to
   pull.
 - The unhealthiness in every family with a result is produced by go-back-N
-  recovery, which the programme's own selective-repair mode removes [O6].
+  recovery with no sender congestion control, which the programme's own
+  selective-repair mode removes [O6].
   That is a condition on every number here and belongs in the same sentence
   as the result. It is not a mismatch with anyone's paper; both recovery
   modes are ours, and the roadmap already treats selective repair as the
@@ -238,8 +240,9 @@ and "mean reduction 50 % anomaly".
 
 Increasing the incast was the burst-source sweep and the dose grid. More
 burst sources gave less health improvement, not more (8.9, 4.1, 2.9, 0.8 %
-makespan at 0, 2, 4, 7 sources), because under go-back-N the fabric is
-already at W 2.2 with no burst at all and the burst is a perturbation on
+makespan at 0, 2, 4, 7 sources), because under go-back-N with no sender
+congestion control the fabric is already at W 2.2 with no burst at all and
+the burst is a perturbation on
 top; raising the dose instead bought steady-state health and sold the tail.
 The suggestion assumed the incast was the unhealthiness. The counters say
 the recovery algorithm is.
@@ -257,13 +260,14 @@ estimand this design cannot resolve, not an anomaly of the mechanism [O8].
    signal in any regime or wave; it measures ECMP timing at this scale
    [O8]. Health (W) and the per-step span are the estimands that carry
    information, and the protocol does not name them.
-2. Every health result is conditional on go-back-N recovery, and there is
-   no selective-repair arm in any family that has a burst [O6].
+2. Every health result is conditional on go-back-N recovery with no sender
+   congestion control, and there is no selective-repair arm in any family
+   that has a burst [O6].
 3. The wave has no true negative control. burst0, which the matrix calls
    one, is a Knee fabric at W 2.23 with no burst; the protocol's
    `no_incast_8.json` did not run [O9]. The "supported policy benefit"
-   verdict is conditional on it and on go-back-N and should say so in the
-   same sentence [O5].
+   verdict is conditional on it and on go-back-N with no sender congestion
+   control and should say so in the same sentence [O5].
 4. The dose grid and the burst4 pair are unmatched across profiles because
    `run_id` enters the selection hash (`ExperimentConfig.hh`); a one-line
    fix, but the grid's cross-dose readings are noise-limited until rerun
@@ -296,7 +300,8 @@ completed [O11].
 None of these is a flaw in the harness or the statistics. They are the
 same gap seen from five sides: the wave established that phase-aware tolerance improves steady-state
 health in proportion to what it sheds and compresses the episode's worst
-collective by about 15 %, under go-back-N, and it has not yet tested the
+collective by about 15 %, under go-back-N with no sender congestion
+control, and it has not yet tested the
 lossy-transport half, taking the loss when the network signals it.
 
 ## How to frame the contribution
@@ -311,8 +316,9 @@ The framing the data supports is a health study: what Accordion-style
 phase-adaptive tolerance does to a trimming fabric, measured in the
 fabric's own currency. Its findings are already in hand. A single
 hop-independent ratio, W, places any fabric in one of three regimes and
-predicts whether tolerance has anything to improve. Under go-back-N the
-tolerance improves steady-state health in proportion to what it sheds
+predicts whether tolerance has anything to improve. Under go-back-N with
+no sender congestion control the tolerance improves steady-state health in
+proportion to what it sheds
 while the fabric is congested, with a 79x marginal amplification, and
 makespan follows W at 13 ms per million trims. The safety bound costs about half of the available health and buys tail
 protection. The tail result is the one worth leading with: the worst
@@ -359,31 +365,14 @@ the argument that makes the second necessary rather than incremental.
 
 ## The decisive experiment
 
-One wave, designed around the objections rather than around more seeds.
-
-- Fabric: the 32-rank 1:1 rail fabric with the 7-source step-18 burst,
-  under selective repair, so W starts near zero and the only unhealthiness
-  is the episode itself [O3, O6].
-- Arms, matched and nested as now: no tolerance; admission-time tolerance
-  at the current bound; recovery-domain tolerance at the same byte budget.
-  The third arm is the intervention O2 asks for, fixing shed bytes and
-  varying where the loss is taken.
-- Estimands, pre-registered: W and span of the burst step and of the
-  aftermath step, then whole-window W and makespan. Per-rank p99 over the whole window is demoted to a diagnostic [O8];
-  operation-span p99 stays, since it is the episode's worst collective.
-- Control: `no_incast_8.json` in the same wave [O9].
-- Seeds: pi chunks 17 onward, eight per arm; the Knee's seed spread is
-  unknown and eight is the minimum that yields a CI.
-- Harness before the wave: `run_id` out of the selection hash or shared per
-  family, the aggregate profile check by relative path, and W printed next
-  to the trim counts in every report.
-
-If the recovery-domain arm makes the episode healthier under selective
-repair with a CI that clears zero, the programme has both halves of DBLP on
-its own transport. If it does not, the health study's conclusion stands as
-the finding: bounded loss has no purchase on a fabric that repairs
-selectively, and the phase signal belongs in scheduling, which is where the
-origin paper's own future-work section already points.
+This section is superseded. The selective-repair canary (`llama3_70b_64_sr2x`)
+ran before the wave planned here and made the planned 32-rank comparison
+null by construction: on that fabric W is already near zero under selective
+repair, so there is no unhealthiness left for a recovery-domain arm to
+relieve. See [next-steps-after-run-117.md](next-steps-after-run-117.md) for
+the canary's numbers and the revised order of work: a regime map across
+congestion control and oversubscription settings, run before any
+recovery-domain build.
 
 ## Integrity of the record
 

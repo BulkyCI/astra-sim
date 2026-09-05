@@ -46,10 +46,7 @@ only; a queue pair's rate is set to link rate at creation and changed only
 inside those handlers, and the trim-as-congestion-signal path
 (`RecoverTrimmedQueue`, `cnp_received_mlx`) fires only for mode 1. So no
 sender in any wave has ever slowed down: each queue pair blasts at 400 Gb/s
-inside a static window, is trimmed, and repairs. (The experiment README
-speaks of DCQCN pacing the fabric; the README has not tracked the code for
-some time and should not be read as the record. The generator and the
-handlers are.)
+inside a static window, is trimmed, and repairs.
 
 This matters twice. It is faithful to the origin paper by accident, whose
 transport was UDP blasting with TCP control. It is not UEC, which mandates
@@ -57,6 +54,15 @@ sender congestion control, and the programme's transport is UEC by the July
 decision. The go-back-N storm is the textbook collapse of a CC-less window
 transport on a lossy link, and it is the regime in which every positive
 number to date was measured.
+
+UEC's own congestion control, NSCC, is window-based, not rate-based; DCQCN
+with trims mapped to CNPs is a legitimate first sender-reactive arm but is
+not UEC behaviour. Turning it on requires dropping the last-hop CNP guard
+at `rdma-hw.cc:635` (correct only when RCCC, which we don't have, is
+enabled) and rescaling `RATE_AI`/`RATE_HAI`/`MIN_RATE` off their 100G-era
+literals for 400 Gb/s links, per the UEC transport brief. The spec's
+fire-and-forget primitive is UUD, not RUDI: RUDI still repairs everything
+it just drops ordering and duplicate suppression.
 
 ### The decisive experiment as planned is null by construction
 

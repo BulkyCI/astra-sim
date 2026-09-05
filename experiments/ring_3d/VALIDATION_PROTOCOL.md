@@ -20,6 +20,21 @@ residual-loss tolerance comparison.
 3. **Per-step DP span at the congestion episode**: the step-18 (burst) and step-19 (aftermath) all-rank spans in excess of the steps-4-17 median, per seed.
 4. **Simulated makespan**: maximum rank completion time.
 
+For a profile whose `selection_policy.domain` is `recovery`, add two estimands
+and one arm. **W'** is `(trimmed - forgiven) / offered`, the trimmed bytes the
+transport still had to repair; **forgiven bytes** is what buying that cost.
+The comparison runs four arms per seed instead of three: fixed-low,
+phase-aware admission, recovery domain at the same `p_low`/`p_high`, and
+fixed-high. The recovery arm differs from the admission policy arm in exactly
+one input, so the pair estimates when the budget is spent, not how large it is.
+Report the recovery arm's relief and the admission arm's relief against the
+same fixed-low control, side by side.
+
+W' is comparable with W only inside one run. Across the two domains the
+denominators differ, because admission shedding removes whole payloads from the
+wire while forgiveness only releases packets a switch already trimmed, so
+neither W ordering is expected in either direction.
+
 DP All-Reduce per-rank P99 completion latency is retired as a primary estimand: across every wave measured so far its paired confidence interval spans zero, because it resolves ECMP path-timing noise rather than the policy effect. Retain it only as a transport diagnostic, alongside all-QP FCT and physical-byte reduction relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. The comparison must not use a P99 of only admitted foreground QPs: selection changes that population and makes it a treatment-conditioned estimand.
 
 Positive paired reductions favor the policy. The report must include the mean, all sixteen paired values, and a two-sided 95% t confidence interval. A confidence interval containing zero is inconclusive, not evidence of a benefit or a regression.
@@ -68,6 +83,27 @@ recovery work, retransmitted bytes, and any `trim_retry_exhausted` outcome must
 remain separately auditable. Trimming and `network.data_loss` are independent:
 their counts must not be combined into one loss rate.
 
+For a profile in the recovery domain, the run must additionally satisfy the
+budget law, and a violation invalidates the arm rather than moving a number:
+
+- `forgiveness.ledger_law` in `summary.json` reports `verified`, re-derived
+  from the flow rows and the run's own CLR mask as
+  `shed + forgiven <= p(step) * eligible` per receiving rank and step;
+- no forgiven byte appears on a critical step, on a provenance-control flow, or
+  on a background-microburst flow;
+- every flow reports `completed`, and `delivered_bytes` equals `physical_bytes`
+  minus `forgiven_bytes` on every row;
+- two runs at the same seed produce byte-identical `flow_events.csv`;
+- under `network.congestion_control.mode: dcqcn`, the rate cuts taken lie
+  between the pulled trim count and that count plus the forgiven range count,
+  so a forgiven trim costs the sender what a pulled one would have.
+
+`experiments/ring_3d/forgiveness_smoke.sh` runs all of these on an 8-rank
+profile, together with an S5 race fixture whose retransmission timeout sits an
+order below the round trip, so retransmitted data races the forgiveness that
+made it redundant. The fixture requires completion, no forward-progress
+failure, and no re-credit of a forgiven range by a duplicate.
+
 Failures are reported as invalid or unavailable data; they are never silently replaced by a QP-envelope proxy.
 
 ## Conditions
@@ -104,6 +140,8 @@ six-hour job for setup, reporting, and artifacts.
 | Fixed-high headroom arm | Every matched comparison, both phases at the permissive 10% bound including critical steps | Bound the relief an unbounded policy would take, so the phase-aware result reads as captured headroom rather than an unanchored gain | Runs inside every comparison seed; its CLR exposure is deliberate and never a policy configuration. Report relief and headroom side by side. |
 | Healthy-fabric episodic condition | `profiles/llama3_70b_32_direct.json`, $DP=4$ `direct2` (two-flow window) on a healthy 1:1 rail fabric | Bound the achievable benefit when steady-state load fits the fabric and congestion is purely episodic (microburst incast plus ECMP collisions) | One fixed-seed pair with the best-effort congestion gate; a near-zero relief here is expected and calibrates the degraded conditions rather than refuting the thesis. Run #110 showed the unwindowed `direct` form collapses this fabric organically ($\sim 1.2\times10^8$ trims with the burst disabled), which is why the window is part of the condition's definition. |
 | Degraded-fabric concurrency sweep | `profiles/llama3_70b_64_direct{1,2,4,}.json`, $DP=8$ with windows $\{1,2,4,7\}$ on a 1:1 fabric degraded by two failed spines (4:3 live) | Measure congestion and policy relief against DP transfer concurrency with the fabric held at the knee that spine failure produces | One fixed-seed pair per point under the best-effort congestion gate; treat the first `direct2` arm as the completion canary before trusting the matrix. In symmetric all-to-all a sender's NIC divides across its window, so the swept count changes flow structure and collision statistics rather than aggregate receiver load; the pure receiver-overload axis remains the microburst source count below. `fan_in_sweep.py` renders pressure and relief against the swept concurrency. |
+| Regime map | `profiles/regime_64_{none,dcqcn}_{direct2,direct7}_{2to1,4to1}.json`, eight single arms at 64 ranks under selective repair | Characterize where bounded loss could still have purchase: congestion control, DP fan-in, and oversubscription swept at once | One fixed-seed characterization arm per point, both selection probabilities at the strict bound, so the run is the fixed-low arm and no comparison is built. Estimands: W, burst drain over its serialization floor, DP span at the burst and aftermath steps, trimmed-to-untrimmed DP flow median ratio, retransmission-timeout count, rate-cut count. Decision rule in [next steps after run #117](../../docs/agents/next-steps-after-run-117.md): the programme has an operating region if some point shows W at or above 0.5, or a burst-plus-aftermath excess of at least 20% of the window, with a repair-driven rather than CC-driven tail. |
+| Recovery-domain forgiveness | `profiles/llama3_70b_32_direct_forgive.json` with `profiles/no_incast_8_forgive.json` as its negative control | Measure what spending the budget after the trim buys over spending it at admission | Four matched arms per seed. Do not place the decisive wave here until the regime map names an operating point; on a healthy fabric this profile is a mechanism check, not a result. The no-incast control must forgive nothing, because nothing should be trimmed. |
 | Historical Phase-1 native reference | `profiles/dblp_phase1_effnet_64dp.json`, one structural run with the imported four-step CLR mask | Reproduce the old 64-rank, 186-round communication-only trace shape through the native packet/RDMA path and verify zero-recovery transport at 5.999M queue pairs | One fixed-seed structural run; no microburst, packet loss, or congestion gate. It is not a DBLP residual-loss or accuracy result, and it is not a policy comparison. |
 | 100B Clos topology study | `profiles/model_100b_256_clos.json`, one two-step 256-card structural policy run with the shared step-two incast | Characterize the supplied 100B TP/PP/DP workload on a 16-leaf × 16-spine Clos | Publish the full Markdown report and raw telemetry; interpret as topology/workload characterization, not a policy comparison. |
 | 100B physical-ring topology study | `profiles/model_100b_256_ring.json`, the identical two-step workload and incast schedule | Characterize the same workload on the host-attached 256-switch bidirectional ring | Publish the full Markdown report and raw telemetry; do not confuse physical Ring routing with the logical Ring collective or claim a policy comparison. |

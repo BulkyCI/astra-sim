@@ -23,16 +23,63 @@ experiments/ring_3d/generate.py
 ExperimentConfig.hh
   |- validates JSON and parses integer thresholds
   |- validates static CLR mask
+  |- sizes the ForgivenessLedger from scale.ranks x scale.steps
   `- deterministically selects eligible requests
         |
         v
 entry.h::send_flow()
   |- selected: 64-byte protected provenance-control QP
-  `- admitted: original foreground payload QP
+  |- admitted: original foreground payload QP
+  `- registers eligible bytes for the receiving rank and step
         |
         v
 flow_events.csv + collective_events.csv
 ```
+
+## Recovery domain
+
+`selection_policy.domain: recovery` moves the same budget from admission to
+recovery. `evaluate_shedding()` then never sheds, so the eligible population is
+identical to the admission arm's and the two are matched; instead ns-3 asks the
+frontend what to do with each range a switch trimmed.
+
+```text
+switch trims a data packet (UEC 1.0.3 section 4.1)
+        |
+        v
+RdmaHw::ReceiveTrim -> ReceiveTrimmedData          [Forgiveness attribute on]
+  |- range settled (received or already forgiven): ACK, no charge
+  |- range pulled: repeat the PULL at the same priority
+  `- range unknown: ask the verdict callback
+        |
+        v
+entry.h::recovery_verdict()   resolves (src, dst, source_port) in the registry
+        |
+        v
+ExperimentConfig.hh::evaluate_forgiveness()
+  |- ineligible, unknown step, closed ledger, or exhausted budget -> Pull
+  |     (PullPriority instead when the step is critical)
+  `- inside budget -> charge the ledger, count the flow's bytes, Forgive
+        |
+        v
+RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
+the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
+```
+
+The ledger is dense over (receiving rank, step). Its law is
+`shed + forgiven <= p(step) * eligible`, with `p` the strict CLR threshold on a
+critical step and the permissive one otherwise. Both terms only grow: a range
+charged once is never refunded, and a duplicate arriving later takes the
+existing old-sequence branch. A step closes when its rank writes its DP
+All-Reduce `collective_events` row, after which the step can only be pulled.
+
+The transport is semantics-blind. It supplies a five-tuple, a sequence, and a
+length, and learns a verdict; it never reads a step, a phase label, or a
+budget. `Forgiveness` requires `SelectiveRetransmission`, because a forgiven
+range is absorbed as an accepted out-of-order range, and `RdmaHw::Setup`
+aborts otherwise. The generator asserts both that and ftd trimming in
+`experiment.json`, and `setup_ns3_simulation` checks the assertion against the
+transport ns-3 actually built.
 
 ## Eligibility and deterministic selection
 
@@ -105,6 +152,9 @@ fields are:
 | `terminal_outcome` / `failure_reason` | Explicit transport terminal state; failures invalidate primary latency analysis |
 | `timeouts` / `cnp_received` | Retransmission-timeout firings that rescheduled data, and rate cuts taken. `cnp_received` is zero unless the profile sets `network.congestion_control.mode: dcqcn` |
 | `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
+| `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
+| `priority_pulls` | Repairs the receiver asked for ahead of the rest, on a critical step whose budget was exhausted |
+| `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |
 
 `source_port` identifies a live five-tuple, not a flow. ns-3 owns only the
 range `[10000, 65535]` per ordered host pair, so the bridge returns a port to

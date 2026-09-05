@@ -172,3 +172,35 @@ forgiveness needs zero sender change and one bit on the reverse path.
    the recovery arm: yes, the law sums them, and the recovery arm sheds
    nothing at admission, so the whole budget is available to forgiveness.
 3. Priority pulls cross-QP in the egress queue: v1, after a pace A/B.
+
+## 8. Resolved differently during the build (2026-09-05)
+
+- `m_pending_cnp` is set for every forgiven trim, not only non-last-hop
+  ones. Section 6 removes the last-hop guard from the pulled path, so
+  keeping `|= !lastHop` here would make forgiving cheaper than pulling
+  and break the CC neutrality section 2 asks for.
+- `m_pulled_ranges` carries `{end, priority}` rather than a bare end
+  offset. The transition table requires a repeated trim to repeat the
+  same PULL priority, which an end offset cannot remember.
+- `physical_bytes` keeps counting forgiven bytes as offered. It is joined
+  against `fct.txt` by a pre-registered validity check and it denominates
+  W. A new `delivered_bytes` column, offered minus forgiven, is what
+  excludes them; nothing reported as delivered includes a forgiven byte.
+- W' below the admission arm's W is not a property of the mechanism and
+  is not asserted. Measured on `forgiveness_smoke_8`: recovery W 0.172525
+  and W' 0.171595 over 84410368 offered bytes, admission W 0.169469 over
+  79238080. Admission shedding removes whole payloads from the wire, so
+  the two ratios have different denominators and do not order in either
+  direction. The gate asserts W' below W inside the recovery run and
+  reports the admission arm's W beside it.
+- The receiver's forgiveness state is declared one commit before it is
+  used, so the queue-pair layout changes once and the fork's pace A/B
+  reads as behaviour rather than struct growth.
+
+Pace A/B, `llama3_70b_32_direct`, same machine and build recipe, one
+process each. Before (superproject 63ef7c2, submodule cdfa53e):
+`wall_ms_delta` 80976 ms at `simulated_time_ns` 20000000 and 81408 ms at
+30000000. After: 83219 and 83442, repeated at 84448 and 83178.
+`events_delta` is identical to the byte at both checkpoints (9187465 and
+9182473), so the cost is per event, not extra work: 2.5% to 3.0% against
+a 1.5% run-to-run spread.

@@ -58,6 +58,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `network.fabric` | Switch buffer and flow-control regime | Absent (32 MB, PFC on) | Requires `buffer_size_mb`, `pfc_enabled`, `data_queue_bytes`; optional `headroom_factor`, `trimmed_queue_bytes`. Mandatory when trimming is enabled, and must be identical across every arm of a comparison |
 | `network.packet_trimming` | Optional UEC 1.0.3 section 4.1 packet trimming | Absent | Requires `mode: "ftd"` (UET-conformant) or `"bts"` (research-only); optional `trimmed_queue` (default 2), `trimmed_queue_weight` (default 25), `min_trim_size_bytes` (default 24), and `last_hop_codepoint` (default `true`). Only switch admission or egress queue rejection can trigger it |
 | `network.congestion_control` | End-host sender reaction to congestion | Absent (`none`) | `mode: "none"` writes `CC_MODE 12`, where a queue pair blasts at link rate inside a static window and nothing slows it; `mode: "dcqcn"` writes `CC_MODE 1`, Mellanox DCQCN, the only implemented mode wired to trim notifications. Optional `rate_ai_fraction` (default 1/2000), `rate_hai_fraction` and `min_rate_fraction` (default 1/1000) are fractions of `link_rate`, so a profile keeps its aggressiveness at any link speed. DCQCN is not UEC's NSCC, which is window-based: name the mode in every result |
+| `selection_policy.domain` | Where the phase-aware budget is spent | Absent (`admission`) | `admission` substitutes whole payloads before they are offered. `recovery` offers everything and lets a switch-trimmed packet's bytes go, inside the same budget; it requires `network.transport_recovery.selective_repair` and `network.packet_trimming.mode: ftd` and is refused without them. It writes `semantics: recovery_forgiveness`, and `evaluate_shedding` never sheds in it, so the two domains cover the same eligible population |
 | `selection_policy` | Typed low/high logical-admission selection knobs | `p_low=0.005`, `p_high=0.1` | Profile, manifest, and `experiment.json` | Materialized selection probabilities |
 | `microburst_enabled` | Enables synthetic background flows | `true` | `false` is the no-incast control |
 | `microburst_bytes` | Per-flow offered background bytes | 128 MiB | Required even when disabled |
@@ -140,6 +141,24 @@ a naturally emitted framework burst or as packet loss.
   congestion-control-driven one.
 - `rto_fired` and `cnp_taken` in `transport_summary.csv` are host-transport
   reactions, not packets. They ride the control plane and carry zero bytes.
+  `trim_forgiven` is the receiver's answer to a switch's trim, not a second
+  conversion: it rides the data plane with the payload bytes it released, and
+  it is excluded from the packet-trimming conversion counts.
+- **W'** is `(trimmed - forgiven) / offered`: the trimmed bytes the transport
+  still had to repair. It is comparable with W only inside one run. Across
+  domains the denominators differ, because admission shedding takes whole
+  payloads off the wire while forgiveness only releases packets a switch
+  already trimmed.
+- `forgiven_bytes` are offered and undelivered. They stay inside
+  `physical_bytes`, which remains the offered figure that joins `fct.txt` and
+  denominates W; `delivered_bytes` is the figure that excludes them. A
+  forgiven byte is never described as delivered, and a forgiven range is never
+  described as a packet loss the policy caused: the switch trimmed it, and the
+  policy declined to ask for it again.
+- The **ledger law** is `shed + forgiven <= p(step) * eligible` per receiving
+  rank and step, with `p` the strict CLR threshold on a critical step. Both
+  terms only grow. `summary.json`'s `forgiveness.ledger_law` re-derives it from
+  the telemetry and the run's own CLR mask; `violated` invalidates the arm.
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use
   `transport_summary.csv` to distinguish those cases.

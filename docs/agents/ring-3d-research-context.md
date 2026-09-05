@@ -9,7 +9,7 @@ original paper or a code-path guide. Read documents in this order:
 2. [DBLP known flaws](ring-3d-known-flaws.md): evidence-labeled baseline,
   transport, PFC, topology, and CLR validity threats.
 3. [Loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md): adopted
-  future transport contract and implementation evidence gates.
+  transport contract and implementation evidence gates.
 4. [ASTRA-sim pivot](ring-3d-astra-pivot.md): which concepts current Ring-3D
   models, abstracts, or does not model; it selects no remedy.
 5. [Ring-3D glossary](../../experiments/ring_3d/GLOSSARY.md): exact current
@@ -38,45 +38,52 @@ accuracy, or perplexity; it cannot substantiate those claims.
 
 ## Current Ring-3D condition
 
-The CI-scale 70B-class profile is a **16-rank gradient-bucket
-microbenchmark**, not a full Llama/Megatron/DeepSpeed replay:
+The flagship comparison profiles (`llama3_70b_*`) are **70B-class
+gradient-bucket microbenchmarks** over 16, 32, or 64 ranks, not a full
+Llama/Megatron/DeepSpeed replay:
 
-- TP=8, PP=1, DP=2; three simulated steps; a two-leaf, four-spine 400 Gb/s
-  Clos; and one representative 1 GiB typed DP All-Reduce bucket per rank per
-  step.
-- Seven 128 MiB background RDMA flows target rank 8 at zero start-offset
-  spacing when the first step-2 DP All-Reduce is issued. This is a synchronized
-  incast stressor with 0.875 GiB total offered background data.
-- Link error injection is currently zero. The microburst is competing reliable
-  RDMA background traffic, not a packet-loss impairment.
+- TP=8, one representative 1 GiB typed DP All-Reduce bucket per rank per step,
+  a 20-step communication window overlapped with 5.4 ms compute per node, and
+  a rail-optimised Clos (2:1 or 4:1, depending on the profile).
+- Seven 128 MiB background RDMA flows target a downlink rank to create a
+  synchronized incast stressor.
+- The fabric is UEC-shaped best-effort: PFC is off, packet trimming
+  forward-to-destination replaces a congested packet's payload at the switch,
+  and TC_med (the trimmed-header class) is capped at a 25% link share. Every
+  result to date recovers with go-back-N (no sender congestion control);
+  `llama3_70b_64_sr2x` instead enables `transport_recovery.selective_repair`.
+  See [the loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md) for
+  the full transport contract.
 - A flow has a configured byte size and start offset, but no configured fixed
   lifetime. Its observed completion time is determined by simulated queueing,
-  PFC, congestion control, and RDMA recovery. `bytes / link_rate` is only an
-  uncongested serialization lower bound.
+  trimming, recovery, and (for a profile that leaves `pfc_enabled` at its
+  default `true`) PFC. `bytes / link_rate` is only an uncongested
+  serialization lower bound.
 
 See [experiments/ring_3d/README.md](../../experiments/ring_3d/README.md) and
 [experiments/ring_3d/VALIDATION_PROTOCOL.md](../../experiments/ring_3d/VALIDATION_PROTOCOL.md)
-for executable setup and predeclared estimands.
+for executable setup and predeclared estimands, and
+[the run #117 wave readout](run-117-wave-readout.md) for the current measured
+result.
 
 ## Current CLR proxy
 
-CLR is exogenous to ASTRA-sim. The generator currently emits a static,
-seeded, immutable mask before a run, with an early-training exponential decay
-and optional Gaussian epoch-boundary spikes:
+CLR is exogenous to ASTRA-sim; the simulator reads a precomputed mask and does
+not sample CLR state at runtime. Every flagship comparison profile sets
+`clr_schedule` to the pinned explicit critical-step list `[1, 2, 3, 20]` (see
+[CLR schedule evidence](clr-schedule-evidence.md) for the literature behind
+that choice). A profile that omits `clr_schedule` instead falls back to the
+generator's seeded decay/spike proxy:
 
 $$
 P(\mathrm{CLR}\mid t)=\min\left(1,e^{-\lambda t}+
 \sum_k A\exp\left(-\frac{(t-kT)^2}{2\sigma^2}\right)\right).
 $$
 
-The simulator reads that mask; it does not sample CLR state at runtime. This
-replaces a uniform runtime model, but the current three-step profile is too
-short to validate an empirical early-training distribution. A stronger study
-uses a mask derived from real gradient-norm traces. If traces are unavailable,
-the decay/spike schedule is a sensitivity assumption: test early-heavy,
-uniform, late-heavy, and misclassified masks with matched seeds.
+Neither form is simulator-derived gradient behavior; both are explicit phase
+proxies. A stronger study uses a mask derived from real gradient-norm traces.
 
-Never describe this proxy as simulator-derived gradient behavior.
+Never describe either proxy as simulator-derived gradient behavior.
 
 ## Current policy semantics
 
@@ -87,12 +94,13 @@ priority group 1; its completion resolves the original logical sender and
 receiver. Telemetry records logical and physical bytes separately.
 
 Therefore the current policy is **phase-aware logical admission suppression**.
-Call its thresholds selection probabilities, for example
-$s_\mathrm{CLR}=0$ and $s_\mathrm{stable}=0.1$ in the 70B-class condition:
+Call its thresholds selection probabilities: $s_\mathrm{CLR}=0.005$ and
+$s_\mathrm{stable}=0.1$ in the flagship condition. Each comparison runs three
+matched arms per seed:
 
-- Current fixed-low baseline: both selection probabilities are 0.5%.
-- Current policy: CLR selection probability is 0.5% and stable-step selection
-  probability is 10%.
+- Fixed-low: selection probability 0.5% on every step.
+- Policy: 0.5% on the critical steps `[1, 2, 3, 20]`, 10% elsewhere.
+- Fixed-high: selection probability 10% on every step.
 - These values are whole-payload selection probabilities, not packet-loss rates
   or DBLP residual-loss tolerances $P_\mathrm{low}$ and
   $P_\mathrm{high}$.
@@ -108,7 +116,7 @@ Use distinct terms and fields for:
 
 | Quantity | Meaning | Current status |
 | --- | --- | --- |
-| $q$ | Data-plane packet-loss probability during a network impairment | $q=0$; not modeled in Ring-3D runs |
+| $q$ | An explicitly configured data-plane packet-loss probability | Not configured on the flagship fabric; trimming instead produces real, congestion-driven data loss that is not a stated $q$ |
 | $D$ | Duration of the packet-loss window or sender injection window | No loss window; background-flow completion is observed, not configured |
 | $P$ | Residual missing-data tolerance at which a DBLP round stops recovery | Not modeled; current values are admission-selection probabilities |
 
@@ -119,36 +127,24 @@ from these terms to current profile/configuration fields.
 
 ## Bundled backend: what it can and cannot support now
 
-The ns-3 backend contains a static `ERROR_RATE_PER_LINK` and a per-topology
-link error-rate field. It attaches a packet-level independent Bernoulli
-`RateErrorModel` to QBB receivers. RDMA detects received sequence gaps and
-uses ACK/NACK-driven resend from the last acknowledgement.
+The ns-3 backend implements the
+[loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md)'s contract:
+packets are classified before an impairment applies, control traffic
+(ACK/NACK/PFC/CNP) bypasses the configured data-loss model, and packet
+trimming forward-to-destination models congestion-induced loss on the
+best-effort fabric. Recovery is go-back-N with an RTO backstop, or range-based
+selective repair with out-of-order acceptance when a profile sets
+`transport_recovery.selective_repair`. It still does not model packet
+spraying, reorder buffering beyond the accepted out-of-order ranges,
+placeholder bytes, approximate completion, or `DSCP_TRIMMABLE_RTX`. See the
+[implementation-gap audit](loss-tolerant-rdma-audit.md) for the verified
+detail and remaining gaps.
 
-This is not yet a safe high-loss DBLP model:
-
-- the receive error model runs before traffic-class handling, so it can drop
-  data, ACK, NACK, CNP, and PFC packets;
-- loss is static, not a directed time-bounded window tied to a workload event;
-- sender-side retransmission timeouts are absent, so a lost tail packet,
-  acknowledgement, or NACK can stall progress;
-- recovery is gap/NACK based rather than a per-chunk receiver bitmap and
-  selective retransmission;
-- current experiment telemetry records requested QP bytes, not explicit
-  retransmission bytes or a residual-loss fraction.
-
-Do not enable $q=60\%-90\%$ by changing one global setting and report the
-result as DBLP. That can produce artifacts or liveness failures unrelated to
-the intended paper mechanism.
-
-## Adopted loss-tolerant transport direction
-
-Future packet-loss research must follow the
-[loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md): classify packets
-before impairment, place named control packets in a separate high-priority
-class with zero configured impairment loss, and apply loss only to explicitly
-scoped data traffic. This is an adopted requirement, not a statement that the
-current backend satisfies it. Current Ring-3D remains the lossless-incast
-ablation described above.
+Do not enable a DBLP-scale $q$ of 60-90% by changing one global setting and
+report the result as DBLP; the modeled mechanism is congestion-driven
+trimming, not an injected Bernoulli loss probability, and an unvalidated
+change can produce artifacts or liveness failures unrelated to the intended
+mechanism.
 
 ## Unresolved research questions
 
@@ -177,11 +173,14 @@ by itself an answer to any of them.
 
 - Match workload trace, physical topology, microburst/loss schedule, policy
   selection seed, ns-3 RNG seed/run, and CLR mask within every pair.
-- Use native DP All-Reduce issue-to-completion P99 and all-rank-span P99 as
-  primary latency estimands; use per-QP FCT only as a transport diagnostic.
+- Use operation-span P99 (the episode's worst collective) and W (trimmed-payload
+  bytes divided by offered bytes, from `transport_summary.csv`) as the primary
+  estimands. Per-rank P99 is retired: its confidence interval spans zero in
+  every wave measured so far. Use per-QP FCT only as a transport diagnostic.
 - Gate congested runs on auditable raw signals: background/loss activity,
-  nonzero queueing, completed PFC intervals where relevant, rank completion,
-  and complete telemetry joins.
+  nonzero queueing, trim/rejection counts on the best-effort fabric, completed
+  PFC intervals on a lossless profile, rank completion, and complete telemetry
+  joins.
 - Retain exact profiles, generated ET traces, masks, experiment JSON, network
   configuration, execution controls, raw outputs, and reports.
 - State invalid/unavailable outcomes instead of replacing them with proxy

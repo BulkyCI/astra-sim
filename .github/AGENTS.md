@@ -67,13 +67,13 @@ Consequences to keep in mind when editing:
   `LD_LIBRARY_PATH`. A container-based or relocated job would need that export
   to keep working.
 - Evaluations now start after the build instead of alongside it. That trades a
-  fixed front-loaded delay for six fewer builds — deliberate, since an
+  fixed front-loaded delay for six fewer builds. Deliberate, since an
   evaluation runs for hours.
 
 ## Compiler-cache trust boundary
 
-`actions/native-build` owns the entire cache lifecycle — restore, configure,
-build, save — so no caller can restore an entry without the matching save
+`actions/native-build` owns the entire cache lifecycle (restore, configure,
+build, save), so no caller can restore an entry without the matching save
 policy. Two properties keep it safe:
 
 - **Only a push to `main` publishes an entry.** The predicate has exactly one
@@ -90,8 +90,8 @@ policy. Two properties keep it safe:
   stale, foreign, or corrupted entry can only ever cause a miss.
 
 The cache key is derived from git's own object names for the paths that decide
-compilation — `astra-sim`, `build`, `extern`, the toolchain script, and the
-action itself — plus the resolved compiler versions. Cache identity is therefore
+compilation (`astra-sim`, `build`, `extern`, the toolchain script, and the
+action itself) plus the resolved compiler versions. Cache identity is therefore
 a function of the build inputs: two commits with identical native sources share
 one entry, and an entry is published only on an exact-key miss, so the 10 GB
 repository quota holds one entry per distinct build input rather than one per
@@ -103,14 +103,14 @@ Bump `cache-version` to invalidate everything.
 
 The `ledger` job is the run's identity provider. It evaluates the release tag
 once, opens the issue and the release, and emits both as job outputs. Nothing
-downstream recomputes either one — they travel as opaque values.
+downstream recomputes either one; they travel as opaque values.
 
 That single evaluation site is what makes a partial re-run safe:
 
 | Action | `ledger` re-runs? | Tag | Result |
 | --- | --- | --- | --- |
-| Re-run **failed** jobs | no — output reused | unchanged | assets land in the original release |
-| Re-run **all** jobs | yes — `run_attempt` incremented | new | a new, immutable release |
+| Re-run **failed** jobs | no, output reused | unchanged | assets land in the original release |
+| Re-run **all** jobs | yes, `run_attempt` incremented | new | a new, immutable release |
 
 Both halves are documented behaviour: "any outputs for any successful jobs in
 the previous workflow run will be used for the re-run"
@@ -135,7 +135,7 @@ Every bundle is therefore published twice: to Actions, browsable and expiring,
 and to the run's release, permanent.
 
 The tag is `blake2b(digest_size=20, person=b"astra-sim-run")` over
-`repository \0 sha \0 run_id \0 run_attempt`, base32-encoded and lowercased —
+`repository \0 sha \0 run_id \0 run_attempt`, base32-encoded and lowercased,
 32 characters from `a-z2-7`. Three things about that are deliberate:
 
 - **`person`, not a topic prefix.** Domain separation belongs in the hash, so a
@@ -170,7 +170,7 @@ on it, and a closing job proves the two agree.
 - `scripts/ci_ledger/model.py` is pure and total: chunking, markers, the
   reconciliation plan, and the derived index. Test it directly.
 - `scripts/ci_ledger/gh.py` is the only effect. It shells out to `gh`, which is
-  preinstalled on runners and owns auth, pagination, and host resolution — the
+  preinstalled on runners and owns auth, pagination, and host resolution; the
   ledger implements none of that itself.
 - `scripts/ci_ledger/cli.py` interprets a plan; it makes no decisions.
 
@@ -189,7 +189,7 @@ Every comment carries a self-describing marker:
 ```
 
 The key is the section's stable identity, so republishing reconciles in place
-instead of appending — a re-run converges rather than duplicating. The digest is
+instead of appending; a re-run converges rather than duplicating. The digest is
 the sha256 of the exact report the job wrote, which is the same file the
 adjacent `upload-artifact` step ships; the comment and the artifact are the same
 bytes by construction, not by a later comparison.
@@ -219,14 +219,14 @@ archive    contents: write    downloads the bundle, tars it, uploads to the
            issues:   write    release, publishes the ledger section (~2 min)
 ```
 
-Every job that executes experiment code — `native-build`, `native-integration`,
-`aggregate-llama3-evaluation`, and `evaluate` — holds no write scope at all.
+Every job that executes experiment code (`native-build`, `native-integration`,
+`aggregate-llama3-evaluation`, and `evaluate`) holds no write scope at all.
 All outward-facing effects live in short sink jobs that run only `gh` and `tar`
 and never execute anything from the artifact they unpack, so a malicious bundle
 cannot reach the token. `contents: write` in particular can push commits and
 move refs, which is why it must never sit in a six-hour simulator job.
 
-The caller jobs for `ns3-evaluation.yml` declare `contents: write` — that is a
+The caller jobs for `ns3-evaluation.yml` declare `contents: write`; that is a
 **ceiling for the called workflow, not a grant to the simulator**. Permissions
 "can only be maintained or reduced — not elevated — throughout the chain"
 ([Reusing workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)),

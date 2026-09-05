@@ -46,12 +46,12 @@ does not establish a universal industry adoption claim, a fixed GPU-scale limit,
 or an exact UEC/Falcon behavior in this simulator. Any paper, specification, or
 hardware claim must cite and verify its primary source separately.
 
-The repository-level motivation is verified: current Ring-3D studies lossless
-RDMA incast/PFC pressure with $q=0$, whereas the DBLP research hypothesis
-requires an explicit data-loss impairment. The current global receive error
-model drops packets before traffic-class handling, so it cannot express
-“data-loss adjustable, control-loss zero.” See
-[the current backend boundary](ring-3d-research-context.md#bundled-backend-what-it-can-and-cannot-support-now).
+The repository-level motivation was verified at decision time: Ring-3D then
+studied only lossless RDMA incast/PFC pressure with $q=0$, whereas the DBLP
+research hypothesis requires an explicit data-loss impairment, and the global
+receive error model dropped packets before traffic-class handling, so it could
+not express "data-loss adjustable, control-loss zero." That gap has since been
+closed; see [the current backend boundary](ring-3d-research-context.md).
 
 ## Target transport contract
 
@@ -87,18 +87,21 @@ Trimmed packets ride TC_med, a distinct traffic class from both TC_low data and
 TC_high control, and they are re-admitted against that queue's threshold, so
 they can still be dropped. TC_med is drained ahead of data but is limited to a
 configured share of the link (default 25%), so a trimmed-header flood cannot
-starve payload. In `ftd` mode — the specified behavior — the trimmed
+starve payload. In `ftd` mode (the specified behavior), the trimmed
 packet reaches the destination, which returns a `UET_TRIMMED` NACK. `bts` mode
 returns the notification directly to the sender; UEC 1.0.3 section 4.1
 explicitly excludes back-to-sender from the specification, so it is research
 only. Both paths require recovery before cumulative-ACK completion, and RTO
 remains the backstop when a trimmed packet is itself lost.
 
-The model uses bounded go-back-$N$ repair and treats a non-last-hop trim as
-congestion evidence where the configured control algorithm supports that signal;
-a last-hop trim drives repair only. It does not model selective retransmission,
-packet spraying, reorder buffering, placeholder bytes, approximate completion,
-or the optional `DSCP_TRIMMABLE_RTX` codepoint.
+The default recovery is bounded go-back-$N$ repair, and a non-last-hop trim is
+treated as congestion evidence where the configured control algorithm supports
+that signal; a last-hop trim drives repair only. A profile can instead set
+`transport_recovery.selective_repair` to enable range-based selective repair
+with out-of-order acceptance (`SELECTIVE_RETRANSMISSION` in ns-3); this is not
+a SACK bitmap, and it is off by default. Neither mode models packet spraying,
+reorder buffering beyond the accepted out-of-order ranges, placeholder bytes,
+approximate completion, or the optional `DSCP_TRIMMABLE_RTX` codepoint.
 Configured `network.data_loss` remains an independent receive-side impairment;
 its counts must never be merged with congestion-triggered trimming.
 
@@ -131,10 +134,11 @@ in this decision run successfully:
   analyzer summaries, and reports
   retain recovery counters and terminal outcomes.
 
-This is not selective retransmission, a reorder-buffer transport, per-packet
-spraying, or an implementation of UET/Falcon behavior. The legacy global
-`ERROR_RATE_PER_LINK` and per-topology error rate are rejected to avoid a
-compatibility path that violates classification-before-loss semantics.
+This is not a full reorder-buffer transport, per-packet spraying, or an
+implementation of UET/Falcon behavior; range-based selective repair is
+implemented and opt-in, as described above, not a SACK bitmap. The legacy
+global `ERROR_RATE_PER_LINK` and per-topology error rate are rejected to avoid
+a compatibility path that violates classification-before-loss semantics.
 
 ## Pre-implementation gap record
 
@@ -177,16 +181,20 @@ This decision enables research questions such as:
 This decision does **not** establish:
 
 - equivalence to UET, Falcon, RoCEv2, NCCL, or any physical NIC;
-- correctness of a future selective-retransmission or packet-spraying design;
+- correctness of the implemented selective-repair mode or of a future
+  packet-spraying design;
 - preservation of optimizer/error-feedback semantics or model quality;
 - that PFC is obsolete, that all modern fabrics are lossy, or that a control
   priority class eliminates all control-plane latency; or
 - a DBLP bounded-loss claim without separately modeling and measuring its
   residual-delivery semantics.
 
-Existing 70B-class Ring-3D results remain a lossless incast plus logical
-payload-substitution ablation. They must continue to state $q=0$ and must not
-be relabeled as a loss-tolerant transport result.
+A profile that leaves `pfc_enabled` at its default (`true`) remains a lossless
+incast plus logical payload-substitution ablation and must continue to state
+$q=0$. The flagship comparison profiles instead run on the best-effort
+UEC-shaped fabric with packet trimming forward-to-destination, real data loss,
+and go-back-N recovery (selective repair where enabled); see
+[the research context](ring-3d-research-context.md) for the current condition.
 
 ## Research requirements for future use
 

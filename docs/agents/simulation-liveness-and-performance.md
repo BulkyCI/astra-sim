@@ -16,9 +16,9 @@ process does not. Never raise a budget until the failure is classified.
 
 | Class | Checkpoint signature | Correct response |
 | --- | --- | --- |
-| Livelock | Simulated time races far past the workload's plausible duration; `completed_qps` frozen; `active_qps` small and constant; near-empty event cadence | Fix the loop; the forward-progress deadline should have fired — if it did not, the loop found a new budget-exempt path |
+| Livelock | Simulated time races far past the workload's plausible duration; `completed_qps` frozen; `active_qps` small and constant; near-empty event cadence | Fix the loop; the forward-progress deadline should have fired. If it did not, the loop found a new budget-exempt path |
 | Performance regression | Wall clock per 10 ms of simulated time far above the historical pace for the same phase, with `events_delta` normal; progress counters advance on schedule | Bisect the binary, not the budget; compare `wall_ms_delta` at equal `simulated_time_ns` across runs |
-| Oversized workload | Steady pace matching history, but pace × remaining simulated work exceeds the guard | Re-derive the arithmetic; shrink, split, or re-gate the workload — a budget that cannot fit the six-hour hosted ceiling is a design error, not a tuning knob |
+| Oversized workload | Steady pace matching history, but pace × remaining simulated work exceeds the guard | Re-derive the arithmetic; shrink, split, or re-gate the workload. A budget that cannot fit the six-hour hosted ceiling is a design error, not a tuning knob |
 
 Evidence that separates the classes without rebuilding anything:
 
@@ -51,7 +51,7 @@ cost:
   evaluation profile uses. Functionally correct, invisible to every test,
   ~93× wall slowdown in CI.
 - Container walks and mutations need a cheap emptiness guard before entry
-  even when the container is "almost always empty" — the guard is one
+  even when the container is "almost always empty": the guard is one
   comparison; the walk is a function call, iterator setup, and potential
   mutation per invocation, multiplied by the scan width of `GetNextQindex`.
 - Feature-flag guards protect semantics, not cost. Code behind
@@ -59,7 +59,7 @@ cost:
   objects, per-call map checks) when the flag is off; measure the flag-off
   path, not just the flag-on path.
 - Correctness tests cannot catch a 90× slowdown. Any change to a hot-path
-  file needs a pace measurement — one liveness checkpoint interval of the
+  file needs a pace measurement: one liveness checkpoint interval of the
   flagship profile against the previous binary is sufficient and takes
   minutes locally.
 
@@ -109,9 +109,9 @@ slow step was a fact the process took to its grave.
 
 Static cost estimation was wrong by ~50× in the August incident; two
 same-machine builds differing by one commit settled in an hour what a day of
-log forensics could not. The full verified procedure — from a bare-bones
+log forensics could not. The full verified procedure, from a bare-bones
 Ubuntu machine with no root and no preinstalled protobuf/boost/MPI to a
-running binary, with the entire toolchain ephemeral under `/tmp` — is
+running binary, with the entire toolchain ephemeral under `/tmp`, is
 [rootless ephemeral build](rootless-ephemeral-build.md). The A/B itself:
 build, measure one or two liveness checkpoints against a materialized
 profile, check out the comparison submodule commit in place, rebuild

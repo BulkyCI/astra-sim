@@ -15,13 +15,13 @@ paper term in a profile, report, or code symbol.
 | `selection_policy.p_high` | Logical-payload selection probability outside CLR; **not paper $P_\mathrm{high}$ residual loss** | 10% | Profile and generated `experiment.json` | `decision`, `decision_hash` |
 | $q$ | Packet-loss probability for `network.data_loss` data-plane impairment | 0 unless a profile explicitly enables `network.data_loss` | `network.data_loss.probability` | `transport_summary.csv` injected data drops |
 | $D$ | Duration of the configured data-loss window | Unset unless a profile explicitly enables `network.data_loss` | `network.data_loss.start_ns`, `.duration_ns` | `manifest.json`, `network_config.txt` |
-| Packet trimming (UEC 1.0.3 section 4.1) | A switch that fails buffer admission truncates a DSCP_TRIMMABLE packet to `MIN_TRIM_SIZE`, remarks it DSCP_TRIMMED, and forwards it on TC_med; its payload is not delivered | Disabled unless a profile enables it | `network.packet_trimming.mode` | Trim conversions, recovery controls, and terminal flow telemetry |
-| FTD | Trim-and-forward-to-destination. This is the UEC 1.0.3 behavior: the trimmed packet reaches the destination, which returns a UET_TRIMMED NACK without accepting payload bytes | Disabled | `network.packet_trimming.mode: "ftd"` | `trim_ftd_*` event and flow counters |
+| Packet trimming (UEC 1.0.3 section 4.1) | A switch that fails buffer admission truncates a DSCP_TRIMMABLE packet to `MIN_TRIM_SIZE`, remarks it DSCP_TRIMMED, and forwards it on TC_med; its payload is not delivered | Enabled (`ftd`) on the flagship comparison profiles; disabled on a profile that omits it | `network.packet_trimming.mode` | Trim conversions, recovery controls, and terminal flow telemetry |
+| FTD | Trim-and-forward-to-destination. This is the UEC 1.0.3 behavior: the trimmed packet reaches the destination, which returns a UET_TRIMMED NACK without accepting payload bytes | Enabled on the flagship comparison profiles | `network.packet_trimming.mode: "ftd"` | `trim_ftd_*` event and flow counters |
 | BTS | Back-to-sender notification. UEC 1.0.3 section 4.1 explicitly excludes this ("Sending a trimmed packet back to the source ... is not part of this specification"); it models FastLane/P802.1Qdw and is research-only | Disabled | `network.packet_trimming.mode: "bts"` | `trim_bts_*` event and flow counters |
 | DSCP_TRIMMED_LAST_HOP | Codepoint set when the trimming switch is the destination's own leaf. The source repairs the loss but does not treat it as a path or NSCC congestion signal | Enabled with trimming | `network.packet_trimming.last_hop_codepoint` | `trim_*_lasthop_*` events, `trim_lasthop_notifications` |
-| Best-effort fabric | PFC disabled, zero headroom, shallow buffers. The only regime where trimming is meaningful (UEC 1.0.3 section 3.6.4.5) | Off unless `network.fabric` sets it | `network.fabric.pfc_enabled: false` | `switch_admission_drop`, `switch_trimmed_queue_drop` |
+| Best-effort fabric | PFC disabled, zero headroom, shallow buffers. The only regime where trimming is meaningful (UEC 1.0.3 section 3.6.4.5) | On for the flagship comparison profiles (`pfc_enabled: false`); a profile that omits `network.fabric` keeps PFC on (lossless) | `network.fabric.pfc_enabled: false` | `switch_admission_drop`, `switch_trimmed_queue_drop` |
 | PFC headroom | Buffer reserved to absorb packets in flight when a PAUSE is sent. Without PFC nothing drains it, so it becomes buffer that must fill before anything drops | 0 when PFC is off | `network.fabric.headroom_factor` | Effective drop threshold |
-| Egress drop threshold | Per-queue byte bound on an egress queue, the `queue_trimmable.drop_threshold` / `queue_trimmed.drop_threshold` of UEC 1.0.3 section 4.1 | Unbounded unless set | `network.fabric.data_queue_bytes`, `.trimmed_queue_bytes` | Admission drops and trim conversions |
+| Egress drop threshold | Per-queue byte bound on an egress queue, the `queue_trimmable.drop_threshold` / `queue_trimmed.drop_threshold` of UEC 1.0.3 section 4.1 | 4 MiB data / 1 MiB trimmed on the flagship comparison profiles; unbounded on a profile that omits it | `network.fabric.data_queue_bytes`, `.trimmed_queue_bytes` | Admission drops and trim conversions |
 | TC_med | Egress tier for DSCP_TRIMMED, drained below TC_high control (queue 0) and ahead of the round-robin TC_low data queues, but capped at its configured bandwidth share | Queue 2 at 25% | `network.packet_trimming.trimmed_queue`, `.trimmed_queue_weight` | `switch_trimmed_queue_drop` |
 | `trimmed_queue_weight` | Percent of egress bandwidth TC_med may take while TC_low has traffic. UEC 1.0.3 section 4.1 recommends WDRR at 25% and caps fair-queueing at 50%, because an unrestricted trimmed class can cause congestion collapse. 100 restores strict priority | 25 | `network.packet_trimming.trimmed_queue_weight` | Trim conversions versus data goodput |
 | control plane | ACK (`0xFC`), NACK (`0xFD`), congestion notification (`0xFF`), PFC (`0xFE`), and named protocol/recovery control | No configured packet impairment in a lossless profile | Parsed before the QBB data-loss model; generated profiles set strict ACK/NACK priority at hosts and switches | Control attempts/delivery plus queue/drop totals in `transport_summary.csv` (per-packet rows in the `transport_events.csv.zst.NNN` segments; concatenate and decompress to reconstruct the stream) |
@@ -52,7 +52,8 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `network` | Typed Clos/ring topology and packet settings | 400 Gb/s Clos | Network schema is validated in `topology.py` |
 | `network.queue_monitor_interval_ns` | Positive periodic queue-sampling interval | 10,000 ns | Prevents observability work from scaling with every packet event |
 | `network.data_loss` | Optional independent physical data-only receive impairment | Absent | Requires probability, time window, scope, and RNG stream; separate from logical selection thresholds and packet trimming |
-| `network.transport_recovery` | Required bounded go-back-$N$ recovery budget when physical loss or trimming is enabled | Absent | Requires positive retransmission timeout and retry budget; terminal exhaustion is recorded as a failure |
+| `network.transport_recovery` | Required bounded recovery budget when physical loss or trimming is enabled | Absent | Requires positive retransmission timeout and retry budget; terminal exhaustion is recorded as a failure |
+| `network.transport_recovery.selective_repair` | Switches recovery from go-back-$N$ to range-based selective repair with out-of-order acceptance (`SELECTIVE_RETRANSMISSION` in ns-3); not a SACK bitmap | `false` (go-back-$N$) | `network.transport_recovery.selective_repair` | `transport_summary.csv` W, retransmitted-byte counts |
 | `network.transport_recovery.no_progress_timeout_ns` | Forward-progress deadline: fail a queue pair whose cumulative acknowledgement has not advanced for this simulated interval | `5000000000` | Liveness bound for recovery loops sustained by budget-exempt signals (NACKs, trim notifications); failure reason `no_forward_progress` |
 | `network.fabric` | Switch buffer and flow-control regime | Absent (32 MB, PFC on) | Requires `buffer_size_mb`, `pfc_enabled`, `data_queue_bytes`; optional `headroom_factor`, `trimmed_queue_bytes`. Mandatory when trimming is enabled, and must be identical across every arm of a comparison |
 | `network.packet_trimming` | Optional UEC 1.0.3 section 4.1 packet trimming | Absent | Requires `mode: "ftd"` (UET-conformant) or `"bts"` (research-only); optional `trimmed_queue` (default 2), `trimmed_queue_weight` (default 25), `min_trim_size_bytes` (default 24), and `last_hop_codepoint` (default `true`). Only switch admission or egress queue rejection can trigger it |
@@ -62,7 +63,7 @@ Profiles are strict JSON input validated by `generate.py`; unknown fields fail.
 | `microburst_flow_count` | Background source count | 7 | Must leave a destination rank |
 | `microburst_destination_rank` | Shared background destination | 8 | Creates an incast |
 | `microburst_offset_spacing_ns` | Flow start staggering | 0 | Zero means simultaneous scheduling |
-| `model.gradient_accumulation_steps` | Accumulation microbatches represented by the 70B sampled layer window | 8 | The generator emits the sampled TP pattern for each accumulation microbatch; it does not replay every model layer |
+| `model.gradient_accumulation_steps` | Accumulation microbatches represented by the 70B sampled layer window | 2 | The generator emits the sampled TP pattern for each accumulation microbatch; it does not replay every model layer |
 | `model` | Structural or bounded event-window metadata | 70B BF16/FP16 sample | Validated against trace shape |
 | `workload.kind: "sequential_dp_all_reduce"` | Communication-only trace with one chained DP All-Reduce per step | 64-rank Phase-1 reference | Requires $TP=PP=1$, zero compute/TP/PP bytes, and no model metadata |
 
@@ -113,15 +114,18 @@ a naturally emitted framework burst or as packet loss.
   default queue 2), not the TC_high control queue, and it obeys that queue's
   admission thresholds. TC_med is drained ahead of data but is limited to
   `trimmed_queue_weight` percent of the link while data is queued, so trimmed
-  traffic cannot starve payload — the congestion-collapse guard of UEC 1.0.3
+  traffic cannot starve payload: the congestion-collapse guard of UEC 1.0.3
   section 4.1. Per UEC 1.0.3 section 4.1 there is no guarantee a
   trimmed packet is delivered; `switch_trimmed_queue_drop` records the cases
   where it is not, and the RTO remains the backstop.
 - A trimmed packet is not a successful data packet, and completion still
-  requires ACK-backed delivery after go-back-$N$ repair. The transport model
-  still does not implement selective retransmission, packet spraying, reorder
-  buffers, or the optional `DSCP_TRIMMABLE_RTX` codepoint for retransmitted
-  data (UEC 1.0.3 section 3.6.4.7.1 marks that codepoint OPTIONAL).
+  requires ACK-backed delivery after repair. The default repair is go-back-$N$;
+  a profile can instead set `network.transport_recovery.selective_repair` for
+  range-based repair with out-of-order acceptance (this is not a SACK bitmap).
+  Neither mode implements packet spraying, reorder buffering beyond the
+  accepted out-of-order ranges, or the optional `DSCP_TRIMMABLE_RTX` codepoint
+  for retransmitted data (UEC 1.0.3 section 3.6.4.7.1 marks that codepoint
+  OPTIONAL).
 - Configured control-impaired loss is always zero, but controls can still be
   delayed or dropped by modeled queue/admission behavior; use
   `transport_summary.csv` to distinguish those cases.

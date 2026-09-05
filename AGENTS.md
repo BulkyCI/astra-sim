@@ -7,7 +7,7 @@
   or the system interpreter.
 - Read the closest `AGENTS.md` before changing files in that subtree.
 - Before committing, read and follow
-  [`.github/skills/git-commits/SKILL.md`](.github/skills/git-commits/SKILL.md).
+  [`.github/skills/git-commit/SKILL.md`](.github/skills/git-commit/SKILL.md).
   It defines this repository's required Conventional Commit message format.
 
 ## Verification

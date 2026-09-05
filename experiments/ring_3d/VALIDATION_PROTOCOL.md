@@ -15,11 +15,12 @@ probabilities to `p_low`; the phase-aware policy uses `p_low` in CLR and
 `p_high` outside CLR. This remains a logical-selection proxy, not a DBLP
 residual-loss tolerance comparison.
 
-1. **DP All-Reduce per-rank P99 completion latency**: native collective completion minus native collective issue for every DP All-Reduce rank event.
-2. **DP All-Reduce all-rank-span P99**: $\max(end)-\min(start)$ for each `(training_step, workload_node_id)` population across ranks.
-3. **Simulated makespan**: maximum rank completion time.
+1. **W**: trimmed-payload bytes divided by offered bytes, from `transport_summary.csv`. The primary health signal on the best-effort fabric.
+2. **DP All-Reduce all-rank-span P99** (operation-span P99, the episode's worst collective): $\max(end)-\min(start)$ for each `(training_step, workload_node_id)` population across ranks.
+3. **Per-step DP span at the congestion episode**: the step-18 (burst) and step-19 (aftermath) all-rank spans in excess of the steps-4-17 median, per seed.
+4. **Simulated makespan**: maximum rank completion time.
 
-The comparison also records all-QP FCT only as a transport diagnostic and physical-byte reduction relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. It must not use a P99 of only admitted foreground QPs: selection changes that population and makes it a treatment-conditioned estimand.
+DP All-Reduce per-rank P99 completion latency is retired as a primary estimand: across every wave measured so far its paired confidence interval spans zero, because it resolves ECMP path-timing noise rather than the policy effect. Retain it only as a transport diagnostic, alongside all-QP FCT and physical-byte reduction relative to foreground logical operations, DP All-Reduce traffic, and total offered traffic. The comparison must not use a P99 of only admitted foreground QPs: selection changes that population and makes it a treatment-conditioned estimand.
 
 Positive paired reductions favor the policy. The report must include the mean, all sixteen paired values, and a two-sided 95% t confidence interval. A confidence interval containing zero is inconclusive, not evidence of a benefit or a regression.
 
@@ -33,7 +34,7 @@ A run is eligible for the primary analysis only if all checks pass:
      primary estimands;
 - every transport telemetry row joins one ns-3 FCT row by `(src, dst, source_port)`, including physical bytes, start time, and duration;
 - every native collective row has nonnegative duration and no duplicate `(domain, collective type, step, workload node, rank)` completion;
-- the incast condition records at least one PFC pause/resume interval and a nonzero queue peak;
+- the incast condition records a nonzero queue peak and the fabric's buffer-pressure signature (a completed PFC pause/resume interval on a lossless profile, or a nonzero trim/rejection count on a best-effort profile);
 - the no-incast negative control has no synthetic background-microburst rows and reports its PFC/queue state explicitly;
 - selected traffic is exclusively DP CollectivePayload All-Reduce provenance control, with nonzero physical provenance bytes.
 
@@ -60,8 +61,8 @@ For a profile that enables `network.packet_trimming`, the run must retain
 the transport telemetry (`transport_summary.csv` plus
 `transport_events.csv.zst.NNN`), identify FTD or BTS mode, and show at least one trim
 conversion caused by switch admission or egress-queue rejection. Each trim
-conversion represents undelivered original payload bytes—not compact data
-delivery—and completed QPs must show repair traffic and ACK-backed completion.
+conversion represents undelivered original payload bytes, not compact data
+delivery, and completed QPs must show repair traffic and ACK-backed completion.
 The conversion, recovery-control delivery or natural control drop, sender
 recovery work, retransmitted bytes, and any `trim_retry_exhausted` outcome must
 remain separately auditable. Trimming and `network.data_loss` are independent:
@@ -74,7 +75,7 @@ Failures are reported as invalid or unavailable data; they are never silently re
 Run every primary condition with the sixteen fixed paired seeds currently used by `compare.py`: consecutive 8-digit chunks of pi (31415926, 53589793, ...), taken in order with none screened or discarded, so the seed set is pre-registered rather than picked. Sixteen paired seeds shrink the paired-delta standard error to ~sigma/4 against the +/-3-4% ECMP path-collision noise floor that dominates p99 metrics.
 The historical Phase-1 native reference is the declared exception: it is one
 fixed-seed structural transport-scaling/reproducibility run, not a multi-seed
-primary policy result — its role is zero-recovery verification at scale, which
+primary policy result; its role is zero-recovery verification at scale, which
 any single arm provides, and its measured 2.75-hour arm makes a three-arm
 comparison arithmetically impossible inside the six-hour job ceiling. The
 always-on CI Llama condition schedules the sixteen matched comparisons

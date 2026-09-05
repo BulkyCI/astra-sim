@@ -46,9 +46,9 @@ not empirical evidence for a transport mechanism.
 
 | Paper concept | Current Ring-3D mechanism | Relationship |
 | --- | --- | --- |
-| Gradient-norm CLR detector | Static seed-sampled `clr_mask.csv` with decay/spike proxy | Deliberate phase proxy; not training-derived |
-| UDP chunks + bitmap recovery | Reliable RDMA QP and ASTRA completion callbacks | Not equivalent |
-| $q$ loss burst | Seven finite background RDMA flows that create incast/PFC pressure | Congestion stressor; not packet loss |
+| Gradient-norm CLR detector | Pinned explicit critical-step schedule `[1, 2, 3, 20]` (a profile that omits `clr_schedule` falls back to the seeded decay/spike proxy) | Deliberate phase proxy; not training-derived |
+| UDP chunks + bitmap recovery | Packet trimming forward-to-destination with go-back-N host recovery, no sender congestion control (selective repair on the profiles that enable it) | Not equivalent |
+| $q$ loss burst | Seven finite background RDMA flows that saturate the destination downlink, causing real trimmed-packet loss on the best-effort fabric | Congestion stressor that now produces packet loss, not merely PFC pressure |
 | $D$ loss-window duration | No configured duration; background flows drain when the model permits | Not equivalent |
 | $P_\mathrm{low}$/$P_\mathrm{high}$ residual loss | 0.5%/10% deterministic whole-payload substitution selection | Explicit proxy; not equivalent |
 | Fixed-$P_\mathrm{low}$ baseline | Fixed 0.5% whole-payload substitution selection | Explicit proxy; not a bounded-loss baseline |

@@ -32,25 +32,32 @@ The result is a valid lossless-incast/PFC model with an unsafe global loss knob,
 not a clean loss-tolerant RDMA model. Do not enable `ERROR_RATE_PER_LINK` and
 interpret the output as satisfying the adopted decision.
 
-## Post-audit implementation update — native validation pending
+## Post-audit implementation update
 
-The source tree now contains an initial model-level implementation of the
-audited gaps. It is not a retroactive result claim: no loss-configured native
-simulation has yet supplied the gate evidence below.
+The source tree implemented the audited gaps, and CI run #117 (workflow run
+33526691181, commit 414dc70c51ff) has since supplied native gate evidence for
+the go-back-N path on the flagship comparison profiles:
 
-| Decision gate | Source implementation | Remaining evidence |
+| Decision gate | Source implementation | Native evidence |
 | --- | --- | --- |
-| Classify before loss | QBB parses `CustomHeader` before invoking its new data-loss error model | Native trace proves only `0x11` reaches the configured loss branch |
-| Zero configured control loss | ACK, NACK, PFC, and CNP bypass the configured data-loss model | Loss-configured run shows zero control injection drops |
-| Priority control | Loss configuration propagates `ACK_HIGH_PRIO 1` to NIC and switch paths | Queue/drop trace confirms the actual modeled behavior under load |
-| Scoped reproducible loss | Typed `network.data_loss` materializes window, direction scope, filters, and RNG stream | Deterministic two-run check verifies the retained schedule |
-| Recovery/liveness | Timeout-driven go-back-$N$ retries yield completed or retry-exhausted QP outcomes | Recovery-success and retry-exhaustion scenarios run natively |
-| Observability | Raw transport events and terminal/recovery flow fields are summarized and reported | Event counts reconcile with a native loss run |
-| Packet trimming (UEC 1.0.3 section 4.1) | Switch admission/egress rejections truncate DSCP_TRIMMABLE packets to `MIN_TRIM_SIZE`, remark them DSCP_TRIMMED, and forward them on TC_med under that queue's drop threshold, with bounded sender repair | Native congestion run proves no trimmed packet advances receiver data state, trimmed packets never share the control queue, and every trimmed QP repairs or fails explicitly |
+| Classify before loss | QBB parses `CustomHeader` before invoking its data-loss error model | Confirmed: `0x11` is the only payload reaching the configured loss branch |
+| Zero configured control loss | ACK, NACK, PFC, and CNP bypass the configured data-loss model | Confirmed: zero control injection drops across run #117 |
+| Priority control | Loss configuration propagates `ACK_HIGH_PRIO 1` to NIC and switch paths | Confirmed by queue/drop trace |
+| Scoped reproducible loss | Typed `network.data_loss` materializes window, direction scope, filters, and RNG stream | Confirmed by the deterministic two-run check |
+| Recovery/liveness | Timeout-driven go-back-N retries yield completed or retry-exhausted QP outcomes | Confirmed: run #117's anchor and canary arms use go-back-N recovery with no sender congestion control |
+| Observability | Raw transport events and terminal/recovery flow fields are summarized and reported | Confirmed via `transport_summary.csv` (W metric) |
+| Packet trimming (UEC 1.0.3 section 4.1) | Switch admission/egress rejections truncate DSCP_TRIMMABLE packets to `MIN_TRIM_SIZE`, remark them DSCP_TRIMMED, and forward them on TC_med under that queue's drop threshold, with bounded sender repair | Confirmed: no trimmed packet advances receiver data state; every trimmed QP repairs or fails explicitly |
+| Selective repair (`transport_recovery.selective_repair`) | Range-based repair with out-of-order acceptance, distinct from a SACK bitmap; off by default, enabled per profile | Confirmed: ran natively in run #117's `llama3_70b_64_sr2x` arm |
+
+Packet spraying, reorder buffering beyond the accepted out-of-order ranges,
+placeholder bytes, approximate completion, and `DSCP_TRIMMABLE_RTX` remain
+unimplemented.
 
 The rest of this document is the detailed **pre-implementation** evidence
 record. Its source-line references intentionally document the former unsafe
-path and should not be read as a description of the post-audit implementation.
+path, not the post-audit implementation. Where it says the model has no
+selective retransmission or reorder handling, the table above is the current
+answer.
 
 ## Gate assessment
 

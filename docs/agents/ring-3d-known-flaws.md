@@ -15,9 +15,8 @@ evidence.
 
 ### Evidence labels
 
-- **Source-reported:** described in the available paper summary or prior review;
-  primary-paper verification remains pending because the attached archive is not
-  readable in this workspace.
+- **Paper-verified:** confirmed against the full paper text in
+  [dblp-paper-detailed-read.md](dblp-paper-detailed-read.md), page-cited.
 - **Repository-verified:** established by current ASTRA-sim code or checked-in
   experiment documentation.
 - **Critical hypothesis:** a technically grounded failure path that requires a
@@ -25,16 +24,17 @@ evidence.
 
 ## 1. Naive baseline and missing communication-computation overlap
 
-**Status: source-reported validity threat.** The original evaluation is reported
-to use a centralized, strictly synchronous stop-and-wait schedule in which
-communication begins only after the full backward pass. This differs from
-modern DDP/FSDP-style bucketed execution, where gradient communication can
+**Status: paper-verified validity threat** (dblp-paper-detailed-read.md D13,
+p.12 Algorithm 4). The paper's own worker loop is fully synchronous and
+blocking: forward/backward pass, then blocking send, then blocking receive,
+then parameter update, with no computation/communication overlap. This differs
+from modern DDP/FSDP-style bucketed execution, where gradient communication can
 progress while later backward computation continues. The consequence is a
 baseline confound: an end-to-end benefit measured with no overlap can include
 network time that a production execution would hide. The reported 24.8% average
-training-time reduction must therefore not be quoted here as a modern-framework
-speedup or used to calibrate ASTRA-sim without checking the original benchmark
-schedule and timing decomposition.
+training-time reduction (p.1-2) must therefore not be quoted here as a
+modern-framework speedup or used to calibrate ASTRA-sim without checking the
+original benchmark schedule and timing decomposition.
 
 Current Ring-3D traces are also communication-focused workload abstractions.
 They must not be described as evidence that an end-to-end training-time benefit
@@ -43,14 +43,15 @@ that overlap and distinguishes exposed communication time from hidden time.
 
 ## 2. Opaque transport loss and the double-lossy-layer risk
 
-**Status: source-reported behavior plus critical application-semantics threat.**
-The supplied review states that DBLP discards delayed UDP gradient packets
-without exposing the exact missing-coordinate or missing-chunk mask to the
-optimizer. If correct, this creates a second uncontrolled lossy layer when
-combined with application-level compression or sparsification that maintains an
-error-feedback residual. The optimizer's residual state would not know which
-network-delivery updates failed to arrive, so it cannot be assumed to satisfy
-the assumptions of the compression/error-feedback method.
+**Status: paper-verified behavior plus critical application-semantics threat**
+(dblp-paper-detailed-read.md A5, p.12 Algorithm 2). DBLP zero-fills unreceived
+chunks and passes no masking metadata to the optimizer beyond that; the paper
+never mentions error feedback or interplay with compression. This creates a
+second uncontrolled lossy layer when combined with application-level
+compression or sparsification that maintains an error-feedback residual. The
+optimizer's residual state would not know which network-delivery updates
+failed to arrive, so it cannot be assumed to satisfy the assumptions of the
+compression/error-feedback method.
 
 This is not merely an accounting issue. It is a semantic gap between a
 transport-level “round complete at residual loss bound” and the optimizer's
@@ -75,23 +76,30 @@ The current Ring-3D provenance-control QP is a modeled 64-byte reliable flow;
 it is not evidence that the paper's TCP control traffic avoids starvation on a
 commodity FIFO fabric.
 
-## 4. Lossless-fabric mismatch: RoCEv2, PFC, and head-of-line blocking
+## 4. Lossless-fabric mismatch, and the best-effort fabric's own gap
 
-**Status: repository-verified model mismatch plus critical external-validity
-threat.** The bundled ns-3 backend and current Ring-3D condition model reliable
-RDMA with queue/PFC observability. The 70B-class incast uses zero configured
-link-error injection, so its primary pressure signal is queue buildup and PFC,
-not data-packet loss. This differs from a DBLP mechanism that makes a decision
-in response to recoverable data loss.
+**Status: repository-verified model mismatch; evidence scope depends on the
+profile.** A profile that leaves `pfc_enabled` at its default (`true`, e.g.
+`smoke_8.json`, `model_100b_256_clos.json`) models reliable RDMA with PFC: its
+primary pressure signal is queue buildup and pause propagation, not
+data-packet loss. That differs from a DBLP mechanism that reacts to
+recoverable data loss, and on such a profile a buffer-pressure episode pauses
+traffic and can create head-of-line blocking rather than the data drops a
+loss-tolerance protocol assumes.
 
-On a PFC-enabled fabric, a buffer-pressure episode can pause traffic and create
-head-of-line blocking rather than produce the data drops assumed by a
-loss-tolerance protocol. Whether loss is absent, displaced, or still present is
-a fabric- and configuration-specific question. Therefore no current result may
-claim that DBLP tolerance prevents PFC tail latency, that DBLP is incompatible
-with all RoCEv2 deployments, or that a lossless-fabric result validates a
-lossy-Ethernet protocol. Those are distinct mechanisms requiring explicit
-modeling and evidence.
+The flagship comparison profiles (`llama3_70b_*`, `uec_trim_ftd_8`,
+`besteffort_baseline_8`, `bts_trim_8`) set `pfc_enabled: false` and model a
+UEC-shaped best-effort fabric instead: packet trimming forward-to-destination
+removes a congested packet's payload at the switch, and the host recovers with
+go-back-N retransmission and no sender congestion control (see
+[loss-tolerant RDMA decision](loss-tolerant-rdma-decision.md)). Real data loss
+occurs on this fabric, but the recovery model is whole-window go-back-N, not
+DBLP's own per-chunk bitmap, and no run models optimizer state, error
+feedback, or accuracy. Therefore no current result may claim that DBLP
+tolerance prevents PFC tail latency, that DBLP is incompatible with all
+RoCEv2 deployments, or that a best-effort-fabric result validates DBLP's own
+transport mechanism. Those are distinct mechanisms requiring explicit modeling
+and evidence.
 
 **Decision boundary:** the project now requires a loss-tolerant RDMA simulation
 path with independent data/control treatment. That direction does not resolve
@@ -102,13 +110,13 @@ it.
 
 ## 5. Scale, topology, and collective-algorithm external validity
 
-**Status: source-reported external-validity threat.** The supplied review
-describes the original evaluation as a three-worker/one-server centralized
-All-Reduce prototype using small models such as GPT-2-S. That hub-and-spoke
-configuration centralizes pressure at a server NIC and does not establish
-behavior for decentralized ring or tree collectives. It also does not establish
-behavior for a large leaf-spine fabric, a physical switch ring, or NCCL-style
-collective scheduling.
+**Status: paper-verified external-validity threat** (dblp-paper-detailed-read.md
+A4, p.4). The original evaluation is a three-worker/one-server centralized
+All-Reduce prototype using models up to GPT-2-S (125M parameters). That
+hub-and-spoke configuration centralizes pressure at a server NIC and does not
+establish behavior for decentralized ring or tree collectives. It also does not
+establish behavior for a large leaf-spine fabric, a physical switch ring, or
+NCCL-style collective scheduling.
 
 Modern large-model execution introduces TP, PP, and DP traffic with different
 semantics and dependencies. A lost DP contribution, a tensor-parallel shard,
@@ -120,11 +128,14 @@ workload, logical collective, physical fabric, and traffic domain.
 
 ## 6. CLR observability, detector cost, and proxy validity
 
-**Status: source-reported and repository-verified limitation.** The paper
-summary describes CLR as a relative gradient L2-norm-drop detector. Current
-Ring-3D has no gradients and instead consumes a static seeded decay/spike CLR
-mask. Its mask is an explicit phase proxy, not a measurement of a model's
-learning state. With only three simulated steps in the 70B-class profile, it
+**Status: paper-verified and repository-verified limitation** (dblp-paper-
+detailed-read.md B6, p.3-4, Eq. 1 and Algorithm 3). The paper detects CLR from
+a relative gradient L2-norm drop, checked once per epoch, not continuously.
+Current Ring-3D has no gradients. The flagship comparison profiles instead
+consume the pinned explicit critical-step schedule `[1, 2, 3, 20]` (see
+[CLR schedule evidence](clr-schedule-evidence.md)); a profile that omits
+`clr_schedule` falls back to the seeded decay/spike proxy. Either form is an
+explicit phase proxy, not a measurement of a model's learning state, and
 cannot support claims about the distribution, latency, cost, or prediction
 quality of a real-time CLR detector.
 

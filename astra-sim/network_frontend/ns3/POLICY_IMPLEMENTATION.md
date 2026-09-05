@@ -106,8 +106,8 @@ range `[10000, 65535]` per ordered host pair, so the bridge returns a port to
 that pair once its queue pair terminates and reuses it later in the run. Join
 flow telemetry against `fct.txt` on `(src, dst, source_port, start_time_ns)`.
 
-Reuse is audited, not assumed. A run that models no loss mechanism — no data
-loss, no timeout recovery, no trimming, PFC on — has nothing that can drop,
+Reuse is audited, not assumed. A run that models no loss mechanism (no data
+loss, no timeout recovery, no trimming, PFC on) has nothing that can drop,
 reorder, or resend a packet, so `retransmitted_bytes` and `recovery_events`
 must be zero across every flow. A nonzero counter means a packet reached a
 queue pair it does not belong to, which is what a source port reused while a
@@ -156,7 +156,7 @@ The three traffic classes required by section 4.1.4.1 are realized in the
 egress scheduler: queue 0 is TC_high, `packet_trimming.trimmed_queue`
 (default 2) is TC_med, and data priority groups 1 and 3 are TC_low. TC_med is
 drained ahead of TC_low but is capped at `trimmed_queue_weight` percent of the
-egress bandwidth while TC_low has traffic — the WDRR guard section 4.1
+egress bandwidth while TC_low has traffic: the WDRR guard section 4.1
 recommends at 25%, since an unrestricted trimmed class can drive congestion
 collapse. Setting the weight to 100 restores strict priority.
 A trimmed packet is re-admitted as a new DSCP_TRIMMED arrival, so a congested
@@ -175,7 +175,7 @@ anything can drop.
 
 `data_queue_bytes` and `trimmed_queue_bytes` are the `queue_trimmable` and
 `queue_trimmed` drop thresholds of the section 4.1 pseudocode, enforced by
-`SwitchMmu::CheckEgressAdmission`. Before this they did not exist — the egress
+`SwitchMmu::CheckEgressAdmission`. Before this they did not exist; the egress
 check was a stub returning true, so the only drop path was the shared ingress
 pool and no per-queue threshold was expressible.
 
@@ -187,7 +187,7 @@ also requires `network.transport_recovery`.
 `min_trim_size_bytes` (default 24, per Table 4-1 for UET over UDP/IP) is the
 retained IP payload. The trimmed packet is never larger than the original, and a
 packet whose payload is already at or below that bound is dropped instead of
-trimmed — a MAY in section 4.1. The UDP length field is not rewritten, so the
+trimmed (a MAY in section 4.1). The UDP length field is not rewritten, so the
 destination still learns how many payload bytes were discarded.
 
 ### Destination and source behavior
@@ -196,7 +196,9 @@ destination still learns how many payload bytes were discarded.
 dispatch, so it never reaches `ReceiverCheckSeq()`, never advances receiver
 state, and never establishes flow state. The destination replies with a
 `UET_TRIMMED` / `UET_TRIMMED_LASTHOP` NACK on the control class (Table 3-61),
-and the sender repairs from its cumulative ACK point. A last-hop trim triggers
+and the sender repairs from its cumulative ACK point (go-back-$N$) by default,
+or retransmits only the reported byte ranges when the profile sets
+`network.transport_recovery.selective_repair`. A last-hop trim triggers
 repair but is not fed to the congestion-control algorithm, because no alternate
 path avoids destination incast. Completion still requires all original bytes to
 be ACKed; a trim never substitutes for data.
@@ -206,8 +208,11 @@ section 4.1 explicitly excludes that behavior from the specification, so it is a
 research-only mode; the loader marks it `uec_conformant: false` and the ns-3
 config validator warns. Only `mode: "ftd"` is UET trimming.
 
-This remains a bounded go-back-$N$ repair model. It does not implement selective
-retransmission, packet spraying, reorder buffering, or the optional
-`DSCP_TRIMMABLE_RTX` codepoint for retransmitted data. Raw trim events and
-sender trim counters stay separate from the independent receive-side
-`network.data_loss` impairment.
+The default repair model is bounded go-back-$N$. Setting
+`network.transport_recovery.selective_repair` switches to range-based repair
+(`SELECTIVE_RETRANSMISSION` in ns-3) with out-of-order acceptance; this is not
+a SACK bitmap. Neither mode implements packet spraying, reorder buffering
+beyond the accepted out-of-order ranges, or the optional `DSCP_TRIMMABLE_RTX`
+codepoint for retransmitted data. Raw trim events and sender trim counters
+stay separate from the independent receive-side `network.data_loss`
+impairment.

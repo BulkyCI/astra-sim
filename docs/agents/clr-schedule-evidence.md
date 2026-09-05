@@ -11,7 +11,7 @@ the deciding weight; vision-era work is the concept's origin story.
 
 The DBLP bounded-loss transport paper (arXiv:2605.01989) is **the system
 this project evaluates**. Its findings about phase-dependent drop
-tolerance — early drops harmful, mid/late drops free — are the
+tolerance (early drops harmful, mid/late drops free) are the
 **hypothesis under test** and are excluded from this evidence base by
 construction: a schedule justified by the claim it is designed to test
 would be circular. Every verdict below rests on sources independent of
@@ -24,13 +24,13 @@ The compression literature phases its aggressiveness but uses error
 accumulation; the pure-loss literature (OptiReduce, NSDI 2025: accuracy
 survives "up to 1% of gradient loss") reports a flat, phase-independent
 tolerance. The permissive body of this schedule is therefore a prior
-consistent with independent perturbation-sensitivity evidence — and the
+consistent with independent perturbation-sensitivity evidence. The
 comparison experiment itself is what tests whether phase-varying pure-drop
 tolerance holds.
 
 ## Verdicts that shaped the schedule
 
-**Early training is fragile to gradient-information loss — SUPPORTED
+**Early training is fragile to gradient-information loss: SUPPORTED
 (independently of the system under test).**
 - Deep Gradient Compression (arXiv:1712.01887): compression warm-up over
   ~2.4% of the run ("4 epochs out of 164"); "In the early stages of
@@ -47,20 +47,20 @@ tolerance holds.
   Information rises then decays), perturbation windows spanning ~5–30% of
   the run, damage from early deficits permanent.
 
-**LR warmup alone is tiny — SUPPORTED.** Llama 3: 8,000 of 1,200,000 steps
+**LR warmup alone is tiny: SUPPORTED.** Llama 3: 8,000 of 1,200,000 steps
 (~0.7%); DeepSeek-V3: 2K steps; OLMo 2: 2,000 steps; GLM-130B: 0.5% of
 samples. Warmup marks the highest-risk launch but is far narrower than the
 information-loss fragility window above; the schedule protects the wider
 window.
 
-**Epoch boundaries do not exist in ~1-epoch LLM pretraining — SUPPORTED.**
+**Epoch boundaries do not exist in ~1-epoch LLM pretraining: SUPPORTED.**
 LLaMA: "each token is used only once during training" (most sources);
 Chinchilla: "trained on less than an epoch of data"; GPT-3 per-dataset
 epoch counts around or below 1. The sampled schedule's epoch-spike term
 therefore names an event with no referent in the modeled workload and was
 removed rather than quantized.
 
-**Mid-run instability exists but is positionally unschedulable — MIXED.**
+**Mid-run instability exists but is positionally unschedulable: MIXED.**
 PaLM: ~20 spikes "at highly irregular intervals, sometimes happening late
 into training," caused by "specific data batches with a particular model
 parameter state"; OLMo 2: spike frequency grows with gradient norm over
@@ -71,7 +71,7 @@ corruption damage as a function of run position (fault-injection work,
 arXiv:2604.00726, varies rate, not position). Hence no mid-run critical
 steps.
 
-**The decay/annealing tail matters at sub-frontier scale — MODERATE.**
+**The decay/annealing tail matters at sub-frontier scale: MODERATE.**
 MiniCPM (arXiv:2404.06395): in the WSD decay stage "the loss experiences a
 significant rapid decline"; OLMo 2 midtraining on curated data: +10.6
 average points at 7B; Llama 3: annealing gains "negligible" at 405B.
@@ -79,16 +79,16 @@ Independent second reason: a documented late-run gradient-norm blow-up
 (arXiv:2506.02285) from the weight-decay x LR-schedule interaction. For a
 70B-class modeled workload the tail hedge is justified; at frontier scale
 it would be droppable. Step 20 is that hedge, and this is the schedule's
-weakest-evidenced element — stated as such.
+weakest-evidenced element, stated as such.
 
-**Late tolerance to lost gradient contributions — INDIRECT SUPPORT.**
+**Late tolerance to lost gradient contributions: INDIRECT SUPPORT.**
 Gradient noise scale / critical batch size grows and plateaus as loss
 falls (McCandlish arXiv:1812.06162; AI2 2025 critical-batch-size revisit;
 DeepSeek-V3 ramps batch 3072 → 15360), consistent with shed traffic being
 cheaper late; no source tests the shedding framing directly.
 
 **Caveats on generality.** Staleness-type errors run opposite in phase
-(ABS, arXiv:2301.08895: staleness-tolerant early, fragile late) — this
+(ABS, arXiv:2301.08895: staleness-tolerant early, fragile late); this
 schedule governs *drop*-type errors only. A deliberate LR reset can reopen
 a sensitivity window late in training (arXiv:2510.09687), so criticality
 is partly schedule-triggered; the static mask is an abstraction over runs

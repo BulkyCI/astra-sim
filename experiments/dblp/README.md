@@ -64,7 +64,7 @@ expectation:
 The first checked-in profile is a deterministic liveness fixture. It injects
 all in-scope data packets and expects bounded retry exhaustion, while requiring
 at least one injected data drop and zero natural buffer drops. It proves only
-classification, bounded terminal failure, and one-source accounting—not paper
+classification, bounded terminal failure, and one-source accounting, not paper
 reproduction or training accuracy.
 
 ## Run

@@ -4,8 +4,8 @@ Verified procedure for compiling and running `AstraSimNetwork` starting from
 a bare-bones Ubuntu 24.04 machine: no root, no sudo password, and nothing
 guaranteed beyond a gcc toolchain, a system `python3`, `git`, `curl`, and
 `tar`/`bzip2`. No `apt` package is required at any step. Whatever the build
-needs and the machine lacks — CPython 3.11, uv, protobuf, boost, OpenMPI,
-zlib, cmake, ninja, ccache, possibly the C++ compiler itself — is installed
+needs and the machine lacks (CPython 3.11, uv, protobuf, boost, OpenMPI,
+zlib, cmake, ninja, ccache, possibly the C++ compiler itself) is installed
 under `/tmp`, so the added toolchain is temporary by design: nothing
 survives a reboot, nothing touches `$HOME`, and the repository tree keeps
 only its normal `build/` outputs.
@@ -16,18 +16,18 @@ verified path, with the failures preserved as gotchas.
 
 ## 0. Detect before installing
 
-Tools already on the machine are preferred — but only where mixing is safe.
+Tools already on the machine are preferred, but only where mixing is safe.
 The dependencies split into two classes with different rules:
 
-- **ABI-neutral drivers** — `cmake`, `ninja`, `ccache`, `git`, `curl`,
+- **ABI-neutral drivers**: `cmake`, `ninja`, `ccache`, `git`, `curl`,
   `tar`. These never link into the binary; use any system copy that exists
   and install only the missing ones via micromamba. The verified incident
   build drove system cmake/ninja against conda compilers and libraries.
-- **The ABI-coupled unit** — `libprotobuf`+`protoc`, boost, OpenMPI, zlib,
+- **The ABI-coupled unit**: `libprotobuf`+`protoc`, boost, OpenMPI, zlib,
   and the C++ compiler that links against them. Resolve this set as a
   single unit, never piecewise. If the machine has the full system unit
   (`protoc`, `libprotobuf-dev`, `libboost-dev`,
-  `libboost-program-options-dev`, `libopenmpi-dev`, zlib and zstd headers —
+  `libboost-program-options-dev`, `libopenmpi-dev`, zlib and zstd headers,
   i.e. what `.github/workflows/setup.sh` installs in CI), build with the
   system compiler and skip micromamba for all of them. If any member is missing,
   take the whole unit from conda-forge, including the conda compiler:
@@ -57,7 +57,7 @@ echo "neutral to install:${NEUTRAL:- none}; ABI unit: $UNIT"
 
 Skip this step entirely only when `UNIT=system` and `$NEUTRAL` is empty.
 Pick a scratch root in `/tmp` (`$SCRATCH` below). Detect the architecture
-first — micromamba downloads are arch-specific and the wrong one fails with
+first; micromamba downloads are arch-specific and the wrong one fails with
 `Exec format error`:
 
 ```sh
@@ -84,21 +84,21 @@ fi
 
 Why each conda-unit pin exists:
 
-- `libprotobuf=3.21.12` — conda-forge's default protobuf is the abseil-era
+- `libprotobuf=3.21.12`: conda-forge's default protobuf is the abseil-era
   35.x line; the repository's CMake uses module-mode `find_package(Protobuf)`
   (the apt-era path) and chakra's `protoio` includes
   `google/protobuf/io/gzip_stream.h`. 3.21.12 is the last pre-abseil line
   and matches the Ubuntu CI toolchain's API. The spec `protobuf=3.21` does
   not resolve on conda-forge; pin `libprotobuf` and let it pull the matching
   `protoc`.
-- `zlib` — `gzip_stream.h` includes `zlib.h`; without it the build dies at
+- `zlib`: `gzip_stream.h` includes `zlib.h`; without it the build dies at
   ~90% in `protoio.cc`.
-- `zstd` — `scratch/common.h` compresses the raw transport-event stream at
+- `zstd`: `scratch/common.h` compresses the raw transport-event stream at
   runtime (`#include <zstd.h>`, linked via the scratch CMakeLists).
-- `$GXX` — the conda cross-named compiler (`<arch>-conda-linux-gnu-g++`)
+- `$GXX`: the conda cross-named compiler (`<arch>-conda-linux-gnu-g++`)
   keeps libstdc++ consistent with the conda-built protobuf/boost binaries;
   with the conda unit, the system gcc is left unused.
-- `ccache` (when missing) — makes the second build of any A/B a
+- `ccache` (when missing): makes the second build of any A/B a
   minutes-long relink.
 
 ## 2. Create the ephemeral project Python environment
@@ -114,8 +114,8 @@ already exists before creating one:
    machine where `./utils/setup.sh` has run.
 2. Otherwise, bootstrap an ephemeral uv environment. Read the exact uv
    version bound from `required-version` in `pyproject.toml` (verified:
-   0.11.28 against the `>=0.11.28,<0.12` bound; a newer uv — including a
-   system-installed one — refuses the project outright, so check any
+   0.11.28 against the `>=0.11.28,<0.12` bound; a newer uv, including a
+   system-installed one, refuses the project outright, so check any
    existing `uv` on `PATH` against the bound before installing):
 
 ```sh
@@ -174,7 +174,7 @@ protoc "$PROTO_DIR/et_def.proto" --proto_path "$PROTO_DIR" --cpp_out "$PROTO_DIR
 
 If the working tree ever received an unpacked CI `native-runtime` artifact
 (or any build from another machine), ninja's dependency graph records
-absolute paths from that machine — the symptom is
+absolute paths from that machine; the symptom is
 `ninja: error: '/lib/x86_64-linux-gnu/libc.so.6' ... missing and no known
 rule to make it`. Remove both directories unconditionally before the first
 configure; a fresh configure is cheap:
@@ -264,7 +264,7 @@ otherwise identical builds.
   Pin `libprotobuf=3.21.12` up front.
 - Missing `zlib` fails at ~90% of the build inside protobuf's
   `gzip_stream.h`, not in project code.
-- The `ns3` CLI is incompatible with Python ≥3.12 argparse — this includes
+- The `ns3` CLI is incompatible with Python ≥3.12 argparse; this includes
   Ubuntu 24.04's system `python3` and conda's current Python. Only the uv
   3.11 environment from step 2 is known-good.
 - A uv newer than the `required-version` bound in `pyproject.toml` refuses
@@ -279,12 +279,12 @@ otherwise identical builds.
   (delete it; `UV_UNMANAGED_INSTALL` does not work in this installer
   version). After any session, verify with
   `ls -d ~/micromamba ~/.mamba ~/.local/share/mamba ~/.config/uv` and check
-  timestamps before deleting — a pre-existing `~/.local/share/uv` belongs
+  timestamps before deleting; a pre-existing `~/.local/share/uv` belongs
   to the machine's owner, not to this procedure.
 - Stale `cmake-cache`/`build` directories from another machine poison
   ninja with foreign absolute paths; delete both before first configure.
 - The scratch `AstraSim` objects compile with `-O0` appended after `-O3` by
-  ns-3's scratch machinery. This is identical in CI — do not chase it as a
+  ns-3's scratch machinery. This is identical in CI; do not chase it as a
   local anomaly, and do not compare absolute pace against CI runners, only
   A/B ratios on the same machine.
 - `sudo`/`apt` are unavailable on this class of machine; nothing in this

@@ -13,7 +13,7 @@ jobs per comparison:
 1. `provision` (GitHub-hosted, ~1 min) mints a single-job JIT runner config
    with a one-hour GitHub App installation token, then pipes it over SSH to
    the cluster. The SSH key is bound to a forced command
-   (`accept-runner.sh`) that can only submit one SLURM runner job — a
+   (`accept-runner.sh`) that can only submit one SLURM runner job; a
    leaked key gets no shell. The runner is labeled with the run id, so
    concurrent experiments can never swap runners.
 2. `Cluster comparison` waits for that runner, downloads the run's
@@ -25,14 +25,14 @@ jobs per comparison:
    and each node selects its level from `/proc/cpuinfo`. Bundles travel
    as run artifacts and are archived permanently on the run's release.
 
-Job scratch lives in the cluster's sanctioned network scratch — the newest
+Job scratch lives in the cluster's sanctioned network scratch: the newest
 `/scratch/scratch-space/expires-<date>` directory, whose expiry always
-exceeds the job walltime — never in quota'd NFS home, the small `/var/tmp`
+exceeds the job walltime, never in quota'd NFS home, the small `/var/tmp`
 partition, or RAM-billed tmpfs `/tmp` (each of which has caused a distinct
 fleet failure; the sbatch script probes them only as fallbacks).
 
-The JIT runner deregisters itself and exits when its one job ends —
-completed, failed, or cancelled — which ends the SLURM job and returns the
+The JIT runner deregisters itself and exits when its one job ends
+(completed, failed, or cancelled), which ends the SLURM job and returns the
 allocation. A 30-minute idle guard in `runner-job.sbatch` covers the
 cancelled-while-queued case; `#SBATCH --time` is the absolute backstop.
 Write-scoped jobs (`archive`, ledger) stay on GitHub-hosted runners: the
@@ -73,7 +73,7 @@ bash ci/dcs/setup.sh          # control-plane scripts into ~/astra-ci
 
 Generate a dedicated key pair (`ssh-keygen -t ed25519 -f astra-ci -N ''`)
 and add the public half to `~/.ssh/authorized_keys` exactly as `setup.sh`
-prints — with the forced command and `restrict`.
+prints, with the forced command and `restrict`.
 
 ## GitHub configuration (once)
 
@@ -99,7 +99,7 @@ path produced before the pivot.
 ## Verifying the lifecycle contract
 
 The provision job logs the SLURM job id and `squeue` shows the runner job.
-Cancelling an Actions job mid-run must end its SLURM job within a minute —
+Cancelling an Actions job mid-run must end its SLURM job within a minute;
 that is the lifecycle contract working; a runner whose job never arrives
 tears itself down after the 30-minute idle guard.
 
@@ -110,15 +110,15 @@ jobs live under one `astra-sim/<slurm job id>` parent per scratch base, so
 a full wave presents as a single directory. Three mechanisms compose: the
 mid-run segment hasher (`.github/scripts/segment_hasher.py`) folds each
 sealed raw-log segment's uncompressed content into the arm's stream
-digest and deletes it as the sim runs — nothing raw is ever uploaded; the
+digest and deletes it as the sim runs (nothing raw is ever uploaded); the
 attestation carries the hashes, and results reach GitHub through the
 scratch outbox (`ci/dcs/outbox.sh`) collected by a freshly tokened
 courier job, because runner tokens stop refreshing after 24 hours; the
 job's EXIT trap removes its own tree
 (and the shared parent, when it is the last job out) whenever the job ends
 for any reason that lets bash run; and every new job reaps orphaned
-sibling trees whose SLURM job id no longer exists — the backstop for node
-crashes and kills that outrun the trap. The non-numeric `store` and
+sibling trees whose SLURM job id no longer exists (the backstop for node
+crashes and kills that outrun the trap). The non-numeric `store` and
 `outbox` siblings are exempt from the reaper by construction; orphaned
 outboxes die with their scratch generation. Only the control-plane files under
 `~/astra-ci` (job logs, jitconfig staging) live outside scratch, and

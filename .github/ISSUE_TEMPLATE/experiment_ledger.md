@@ -12,7 +12,7 @@ assignees: ''
 
 > Permanent record of one experiment. Actions logs and artifacts expire; this
 > issue does not. CI opens this issue automatically for every push and manual
-> dispatch — file one by hand only for a run performed outside CI.
+> dispatch; file one by hand only for a run performed outside CI.
 
 | Field | Value |
 | --- | --- |

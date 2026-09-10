@@ -132,9 +132,9 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     worked on 4 nodes with hand-injected loss."
 
   Card 02, "A lossy fabric":
-    "Injected loss does not reproduce fabric behavior. We disabled PFC in
-    the lossless ns-3 RDMA backend and added UEC packet trimming with
-    selective repeat at 64 ranks."
+    "Injected loss does not reproduce fabric behavior. The ns-3 backend
+    ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
+    and added selective repeat at 64 ranks."
 
   Card 03, "A harness that survives a day":
     "A paired comparison takes a day, so our harness provisions ephemeral

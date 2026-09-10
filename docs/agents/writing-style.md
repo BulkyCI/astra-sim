@@ -135,8 +135,14 @@ new scope.
 
 | drafted | his |
 | --- | --- |
-| "Thirteen seeds beat the baseline" | "Thirteen of 16 seeds beat the baseline" |
+| "Thirteen seeds beat the baseline" | "13/16 seeds beat the baseline" |
 | "16 seeds, go-back-N" in a timeline after the result stated the sample size | "go-back-N seed study" |
+
+## 12. Use digits for slide-visible quantities.
+
+Counts, denominators, thresholds, and multipliers must scan as numbers.
+Use `13/16`, `4 nodes`, `0.5`, and `8x`; use an article instead when the
+singular count is not data.
 
 ## Smaller habits, single instances each
 
@@ -149,6 +155,7 @@ new scope.
   two-part title.
 - No em dash or en dash appears anywhere in his writing.
 - Repeat a number when it scopes the local claim; otherwise omit it.
+- Use digits for visible quantities; use an article when the number is not data.
 
 ## Checklist before anything ships under his name
 

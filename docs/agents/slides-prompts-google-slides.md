@@ -129,7 +129,7 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
 
   Card 01, "DBLP under injected loss":
     "DBLP combines Accordion's phase awareness with lossy transport. It
-    worked on four nodes with hand-injected loss."
+    worked on 4 nodes with hand-injected loss."
 
   Card 02, "Lossy fabric":
     "Injected loss does not capture fabric behavior. The ns-3 backend is
@@ -137,7 +137,7 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     selective repeat."
 
   Card 03, "Experimental harness":
-    "One paired comparison takes a day. Our harness provisions ephemeral
+    "A paired comparison takes a day. Our harness provisions ephemeral
     GitHub Actions runners on DCS and archives results."
 
   Card 04, "Result":
@@ -191,8 +191,8 @@ bold 20px label and a 16px sublabel:
   8 Sep  "run #122"  /  "loss-budget sweep"
 
 CLOSING LINE:
-  "One paired comparison takes a day, and a full run takes several
-  days. We made 184 commits and ran four cluster jobs across 180
+  "A paired comparison takes a day, and a full run takes several
+  days. We made 184 commits and ran 4 cluster jobs across 180
   configurations."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
@@ -209,7 +209,7 @@ SLIDE 4 of 8
 The main result. The chart is the slide.
 
 HEADLINE, 34px bold:
-  "Thirteen of 16 seeds beat the baseline"
+  "13/16 seeds beat the baseline"
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
@@ -252,7 +252,7 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
   "reduction in the slowest all-reduce, CI [5, 302] ms" at 16px
 
 CLOSING LINE:
-  "On the four seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
+  "On the 4 seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
   all-reduce by 434 to 716 ms; the remaining seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
@@ -310,11 +310,11 @@ DATA, ms saved / trims prevented in millions / GB discarded:
 THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
   "Each seed discards about 2 GB, which predicts nothing."
   "The slope is 11.9 ms per million trims prevented."
-  "The policy regresses on the three seeds where it adds trims."
+  "The policy regresses on the 3 seeds where it adds trims."
 
 CLOSING LINE:
   "With go-back-N, discarding 1.98 GiB of gradient removes 156 GiB from the
-  wire because one trimmed packet rewinds a whole window."
+  wire because a trimmed packet rewinds a whole window."
 
 SPEAKER NOTE: "This is what makes the result an explanation rather than a
 percentage, and it is what told us where the gain would not appear, which
@@ -345,7 +345,7 @@ nobody has to guess which number belongs to which:
       "go-back-N 2.2 to 10.4    selective repeat 0.02"
   "Retransmitted bytes / offered byte"               54x to 312x
       "go-back-N 7 to 25    selective repeat 0.08 to 0.13"
-  "Time to clear a seven-sender burst"               15x to  78x
+  "Time to clear a 7-sender burst"                   15x to  78x
       "go-back-N 423 to 1798 ms    selective repeat 23 to 29 ms"
   "All-reduce time, burst step"                      12x to  53x
       "go-back-N 205 to 935 ms    selective repeat 17.6 ms"
@@ -361,9 +361,9 @@ RIGHT THIRD: an ink panel with paper text:
   "Across 64 ranks with selective repeat, we varied congestion control,
   fan-in, and spine oversubscription. We set the criteria before the run."
   a 1px paper-30 divider
-  "We required switches to trim at least half a byte per byte sent. The
+  "We required switches to trim at least 0.5 bytes per byte sent. The
   most congested configuration reached 0.24."
-  "We required the burst to take at least a fifth of training time. The
+  "We required the burst to take at least 20 % of training time. The
   most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
@@ -391,7 +391,7 @@ at 34px bold on its own line above 20px body text.
 
   "24 %"
   "With selective repeat, DCQCN adds 24 % to the 20-step run on the
-  most congested configuration while reducing trimming eightfold. Rate
+  most congested configuration while reducing trimming 8x. Rate
   reductions create the slowdown rather than repair."
 
   "10.4 to 10.9 %"
@@ -404,7 +404,7 @@ at 34px bold on its own line above 20px body text.
   sender drop at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
-label reading "PRELIMINARY: THREE SEEDS, ONE FABRIC, ONE CONGESTION
+label reading "PRELIMINARY: 3 SEEDS, 1 FABRIC, 1 CONGESTION
 CONTROLLER". Horizontal axis "Gradient bytes discarded (% of all
 data-parallel bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
 recovered (%)", ticks at 0, 3, 6, 9, 12, 15 and 18. Shade the band from
@@ -441,7 +441,7 @@ SLIDE 8 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "We closed two July questions and scoped the other two"
+  "We closed 2 July questions and scoped the other 2"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card carries a monospace number at
@@ -451,7 +451,7 @@ reading either "CLOSED" or "SCOPED".
 
   Card 01, chip "SCOPED", question "Sparsification":
     "We model pure drop without error feedback, separately from
-    compression. Mixing the two creates a second uncontrolled lossy layer."
+    compression. Mixing them creates a second uncontrolled lossy layer."
 
   Card 02, chip "CLOSED", question "Compute and transport interleaving":
     "Chakra traces show 5.4 ms of compute per node overlapping the run, so
@@ -464,11 +464,11 @@ reading either "CLOSED" or "SCOPED".
 
   Card 04, chip "CLOSED", question "Centralized traffic versus ring traffic":
     "Fan-in multiplies switch trimming 2.7x, while spine oversubscription
-    multiplies it 5.5x. Seven-to-one fan-in models hub-and-spoke pressure
+    multiplies it 5.5x. A 7:1 fan-in models hub-and-spoke pressure
     at one NIC and is the most congested configuration."
 
 CLOSING LINE:
-  "Two questions are closed by construction; the other two require
+  "2 questions are closed by construction; the other 2 require
   hardware that a simulator cannot provide."
 
 ===============================================================

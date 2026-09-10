@@ -74,6 +74,12 @@ RULES FOR EVERY SLIDE
    beside its own line or bar.
 8. Slide numbers bottom right, 14px, ink at 30%, on slides 2 through 8
    only.
+9. The audience did not run these experiments. Every axis, series name and
+   label must be readable without that context, so name the quantity in
+   plain words and give its units. Where a chart shows a large multiplier,
+   put one sentence beneath it saying in words what the multiplier means.
+   Do not use the words trim ratio, arm, cell, span, window, episode,
+   regime or drain as labels without saying what they are.
 
 ===============================================================
 SLIDE 1 of 8
@@ -97,7 +103,7 @@ BOTTOM LEFT, 20px, three tight lines:
 BOTTOM RIGHT, a horizontal strip of three statistics, each a figure above
 a label, 58px bold figure and 16px label, 58px apart:
   "3.91 %"  above  "shorter training window"
-  "153 ms"  above  "off the episode's worst all-reduce"
+  "153 ms"  above  "off the slowest all-reduce in the run"
   "0.93"    above  "correlation with trims prevented"
 
 Nothing else. No logo, no decorative rule.
@@ -134,8 +140,9 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
 
   Card 03, "Make the experiment survivable":
     "A single comparison occupies the cluster for most of a day. A month
-    went into the harness, matched arms, sixteen seeds and permanent
-    artifacts before any result was worth reading."
+    went into the harness: paired runs that share one random stream,
+    sixteen fixed seeds, and archived results, before any number was
+    worth reading."
 
   Card 04, "What the fabric said":
     "Training time fell 3.91 % across sixteen seeds. The saving tracks
@@ -144,8 +151,9 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
 
   Card 05, "What the idea should become":
     "FORGIVE is what DBLP looks like once the fabric runs congestion
-    control. The receiver decides, the budget is a ledger, and the
-    exemption revokes itself."
+    control. The receiver decides what to give up on, the loss budget is
+    counted in bytes rather than rolled as a probability, and a sender's
+    exemption ends the moment the receiver refuses it."
 
 CLOSING LINE, centred beneath the row:
   "We built each piece because the idea could not be tested without it."
@@ -168,7 +176,7 @@ ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
   "Build the instrument"            20 Jul to 11 Aug
   "Make it an experiment platform"   9 Aug to  1 Sep
-  "Map the regime"                   1 Sep to  7 Sep
+  "Sweep the fabric"                 1 Sep to  7 Sep
   "FORGIVE"                          5 Sep to  9 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
@@ -178,16 +186,16 @@ above, joined by 1px ink-30 leader lines:
    4 Aug  "add trimming to UEC 1.0.3"
    6 Aug  "selective repeat"
    9 Aug  "SLURM cluster runners"
-  17 Aug  "pin critical-step schedule"
+  17 Aug  "fix the protected-step schedule"
   22 Aug  "sixteen seeds"
    5 Sep  "add DCQCN and forgiveness"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
    1 Sep  "run #117"  /  "16 seeds, go-back-N"
-   6 Sep  "run #120"  /  "8-cell regime map"
+   6 Sep  "run #120"  /  "8 fabric configurations"
    7 Sep  "run #121"  /  "FORGIVE"
-   8 Sep  "run #122"  /  "budget sweep"
+   8 Sep  "run #122"  /  "loss-budget sweep"
 
 CLOSING LINE:
   "One comparison occupies the cluster for most of a day and a full run
@@ -212,8 +220,9 @@ HEADLINE, 34px bold:
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
-training window in milliseconds, with ticks at 6500, 6700, 6900, 7100,
-7300, 7500, 7700 and 7850, gridlines ink-12. Each row: an ink-30 filled
+training window in milliseconds, labelled "Time to finish 20 training
+steps (ms)", with ticks at 6500, 6700, 6900, 7100, 7300, 7500, 7700 and
+7850, gridlines ink-12. Each row: an ink-30 filled
 circle at the baseline value and an ink-100 filled circle at the policy
 value, joined by a 3px line. On the three rows where the policy is worse,
 draw the joining line in ink-55 instead. Seed labels at 16px on the left,
@@ -238,25 +247,25 @@ DATA, seed / baseline ms / policy ms / relief %:
   70679821  6634.4  7128.8   -7.45
 
 DIRECT LABELS beside the first row, no legend box:
-  ink-30 circle    "Baseline"  /  "0.5 % loss on every step"
-  ink-100 circle   "Policy"    /  "0.5 % on steps 1, 2, 3, 20 and 10 % elsewhere"
+  ink-30 circle    "Baseline"  /  "discards 0.5 % of gradient messages on every step"
+  ink-100 circle   "Policy"    /  "discards 0.5 % on steps 1, 2, 3 and 20, and 10 % on the rest"
 
 RIGHT THIRD: an ink panel, 24px radius, paper text:
-  section label  "PAIRED, N = 16"
+  section label  "SIXTEEN SEEDS, PAIRED"
   "3.91 %" at 58px bold
   "shorter training window, 95 % CI [1.13, 6.68] %" at 16px
   a 1px paper-30 divider
   "153 ms" at 58px bold
-  "off the worst all-reduce of the episode, CI [5, 302] ms" at 16px
+  "off the slowest all-reduce in the run, CI [5, 302] ms" at 16px
 
 CLOSING LINE:
-  "On the four seeds whose worst all-reduce exceeds 1.3 s, the policy
-  cuts that collective by 434 to 716 ms. The mild seeds barely move."
+  "On the four seeds whose slowest all-reduce exceeds 1.3 s, the policy
+  cuts that all-reduce by 434 to 716 ms. The mild seeds barely move."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
-Arms are matched off one random selection stream, so the messages the
-baseline suppresses are exactly the ones the policy considers. Quote the
-worst all-reduce as 153 ms, never as a percentage."
+The two runs share one random stream, so the messages the baseline drops
+are exactly the ones the policy considers. Quote the slowest all-reduce
+as 153 ms, never as a percentage."
 
 ===============================================================
 SLIDE 5 of 8
@@ -268,17 +277,22 @@ label.
 HEADLINE, 34px bold, two sentences:
   "Trims prevented predict the saving. Bytes discarded predict nothing."
 
-SHARED VERTICAL AXIS, labelled "Milliseconds saved on window", ticks at
+GLOSS LINE directly beneath the headline, 16px, ink at 55%:
+  "A trim is a switch throwing away a packet's payload and forwarding
+  only its header, which is how this fabric reports congestion."
+
+SHARED VERTICAL AXIS, labelled "Milliseconds saved on the 20-step run",
+ticks at
 -600, -300, 0, 300, 600 and 900, gridlines ink-12, a heavier ink-30 line
 at zero.
 
-LEFT PANEL, titled "Packet trims prevented by the policy". Marks in
+LEFT PANEL, titled "Against packet trims the policy prevented". Marks in
 ink-100 with a dashed ink-55 least-squares line. Horizontal axis "Packet
 trims prevented (millions)", ticks at -40, -20, 0, 20, 40, 60 and 80.
 Place "r = 0.93" at 58px bold inside the panel, upper left, with generous
 space around it.
 
-RIGHT PANEL, titled "Against gradient bytes discarded". Marks in ink-55,
+RIGHT PANEL, titled "Against gradient bytes the policy discarded". Marks in ink-55,
 no fit line. Horizontal axis "Gradient bytes discarded (GB)", ticks at
 1.85, 1.95, 2.05, 2.15, 2.25, 2.35 and 2.45. Place "r = -0.01" at 58px
 bold inside the panel, upper left.
@@ -326,40 +340,48 @@ HEADLINE, 34px bold:
   "The gain comes from go-back-N, and selective repeat removes it"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
-across the left two thirds, titled "Cost ratio, go-back-N over selective
-repeat". One bar per metric, ink-100 fill, drawn as a range from its low
-value to its high value, with the low and high multiplier printed at the
-bar's two ends. Gridlines at 1x, 10x, 100x and 1000x in ink-12, labelled
-at 16px.
+across the left two thirds, titled "How much more work go-back-N does
+than selective repeat, on the same workload and the same burst". One bar
+per measure, ink-100 fill, drawn as a range from its low value to its
+high value, with the low and high multiplier printed at the bar's two
+ends. Gridlines at 1x, 10x, 100x and 1000x in ink-12, labelled at 16px.
 
-Metric labels on the left at 16px, with the underlying pair in ink-55 at
-14px on a second line:
-  "trim ratio"                      110x to 520x
-      "2.2 to 10.4 against 0.02"
-  "retransmitted per offered byte"   54x to 312x
-      "7x to 25x against 0.08x to 0.13x"
-  "burst drain time"                 15x to  78x
-      "423 to 1798 ms against 23 to 29 ms"
-  "all-reduce span, burst step"      12x to  53x
-      "205 to 935 ms against 17.6 ms"
-  "20-step window"                  3.7x to 5.6x
-      "4503 to 6795 ms against 1210 ms"
+Measure names on the left at 16px, with the two underlying values in
+ink-55 at 14px on a second line. Each second line names both schemes, so
+nobody has to guess which number belongs to which:
+
+  "Bytes trimmed by switches, per byte sent"        110x to 520x
+      "go-back-N 2.2 to 10.4    selective repeat 0.02"
+  "Bytes re-sent after loss, per byte sent"          54x to 312x
+      "go-back-N 7 to 25    selective repeat 0.08 to 0.13"
+  "Time to clear the seven-sender burst"             15x to  78x
+      "go-back-N 423 to 1798 ms    selective repeat 23 to 29 ms"
+  "All-reduce time at the burst step"                12x to  53x
+      "go-back-N 205 to 935 ms    selective repeat 17.6 ms"
+  "Time to finish 20 training steps"                3.7x to 5.6x
+      "go-back-N 4503 to 6795 ms    selective repeat 1210 ms"
+
+READING LINE directly beneath the chart, 16px, ink at 55%:
+  "Read the top bar as: for the same twenty steps of training, go-back-N
+  pushes 110 to 520 times more trimmed bytes through the switches than
+  selective repeat does."
 
 RIGHT THIRD: an ink panel with paper text:
-  section label  "WE MAPPED THE REGIME"
-  "8 cells" at 34px bold
-  "Across 64 ranks with selective repeat, we varied congestion control,
-  fan-in and oversubscription under a rule written before the run."
+  section label  "THEN WE SWEPT THE FABRIC"
+  "8 configurations" at 34px bold
+  "At 64 ranks, all on selective repeat, we varied the congestion
+  controller, the number of senders converging on one receiver, and how
+  far the spine is oversubscribed. We wrote the pass mark before the run."
   a 1px paper-30 divider
-  section label  "TRIM RATIO RULE"
-  "The rule required 0.5. The worst cell reached 0.24."
-  section label  "BURST EXCESS RULE"
-  "The rule required 20 % of the window. The worst cell reached 0.62 %."
+  "We needed switches to trim at least half a byte for every byte sent.
+  The most congested configuration reached 0.24."
+  "We needed the burst to cost at least a fifth of total training time.
+  The most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
-  "Relief across our go-back-N arms is 3.9 to 11.1 %, while the
-  selective-repeat arm gains 0.78 %. Our literature review found every
-  bounded-loss result, ours included, measured on a transport that
+  "Across our go-back-N runs the policy saves 3.9 to 11.1 % of training
+  time. On selective repeat it saves 0.78 %. Our literature review found
+  every bounded-loss result, ours included, measured on a transport that
   recovers the way go-back-N does."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
@@ -382,47 +404,54 @@ at 34px bold on its own line above 20px body text.
 
   "24 %"
   "Once the transport repairs selectively, congestion control is what
-  costs time. DCQCN lengthens the training window by this much on the
-  worst cell of the map, while cutting packet trimming eightfold. The
-  rate cut creates the tail, not the repair."
+  costs time. On the most congested fabric we swept, DCQCN adds this much
+  to the twenty-step training time, while cutting the bytes switches trim
+  by a factor of eight. The slowdown comes from the sender being told to
+  slow down, not from repairing loss."
 
   "10.4 to 10.9 %"
-  "FORGIVE recovers this by letting the receiver forgive what the fabric
-  trimmed, and letting a flow with unspent budget ignore rate cuts until
-  the receiver refuses it. It spends 6.3 % of data-parallel bytes."
+  "FORGIVE gives that time back. The receiver gives up on what the
+  switches trimmed instead of asking for it again, and a sender with
+  budget left ignores slow-down signals until the receiver refuses. It
+  spends 6.3 % of all data-parallel bytes to do it."
 
   "4 to 5x"
-  "FORGIVE recovers that much more time per unit of gradient discarded
-  than sender-side shedding does, at every budget we tested."
+  "FORGIVE buys that much more time per percent of gradient given up than
+  dropping messages at the sender does, at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
-label reading "PRELIMINARY: THREE SEEDS, ONE CELL, ONE CONTROLLER".
-Horizontal axis "Gradient bytes discarded (%)", ticks at 0, 10, 20, 30,
-40 and 50. Vertical axis "Training time recovered (%)", ticks at 0, 3, 6,
-9, 12, 15 and 18. Shade the band from 0.7 % to 3.3 % in ink-12, labelled
-at 14px "tolerance range MLT reports (0.7 % to 3.3 %)". Draw a dashed
-ink-30 vertical line at 10 %, labelled "MLT at a quality target (10 %)".
+label reading "PRELIMINARY: THREE SEEDS, ONE FABRIC, ONE CONGESTION
+CONTROLLER". Horizontal axis "Gradient given up (% of all data-parallel
+bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
+recovered (%)", ticks at 0, 3, 6, 9, 12, 15 and 18. Shade the band from
+0.7 % to 3.3 % in ink-12, labelled at 14px "MLT (NSDI 2024) reports
+models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
+10 %, labelled "MLT's ceiling at a fixed quality target".
 
   Series A, ink-100, solid line with filled circles, labelled directly
   "FORGIVE", points as (x, y):
     (6.4, 10.6)   (8.5, 12.5)   (9.4, 13.3)   (9.2, 13.0)
 
   Series B, ink-55, solid line with hollow circles, labelled directly
-  "Sender-side shedding", points as (x, y):
+  "Dropping messages at the sender", points as (x, y):
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "The curve flattens above budget 0.2, and the loss stops near 9.3 %
-  because the fabric stops trimming before the budget runs out."
+  "Above a budget of 0.2 the curve flattens, and the gradient given up
+  stops rising near 9.3 %, because the fabric stops trimming before the
+  budget is spent."
 
-SPEAKER NOTE: "Present this as ongoing, not as a result. The design
-borrows from transports the field already trusts: the receiver drives
+SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
+as: further right means more gradient thrown away, higher means more
+training time back, so the better mechanism is the one that climbs
+fastest while staying left. The design borrows from transports the field
+already trusts: the receiver drives
 repair the way selective acknowledgement does, the budget is a ledger
 rather than a probability, and the exemption revokes itself on the
 receiver's first refusal, so it cannot outlive what justified it.
-Sender-side shedding only overtakes on time past a budget of about 0.45,
-where it is discarding a third of every gradient, and no published
-tolerance result reaches there."
+Dropping at the sender only overtakes on time past a budget of about
+0.45, where it is throwing away a third of every gradient, and no
+published tolerance result reaches there."
 
 ===============================================================
 SLIDE 8 of 8
@@ -451,9 +480,11 @@ reading either "CLOSED" or "SCOPED".
     the schedule from the CLR detection literature."
 
   Card 04, chip "CLOSED", question "Centralized against ring":
-    "We measured two axes. Fan-in and spine oversubscription set the trim
-    ratio, multiplying it 2.7x and 5.5x. Our fan-in 7 cell models
-    hub-and-spoke pressure at one NIC and is the worst on the map."
+    "We measured both. The number of senders converging on one receiver
+    multiplies how much switches trim by 2.7x, and spine
+    oversubscription by 5.5x. Seven senders onto one is our stand-in for
+    hub-and-spoke pressure at a single NIC, and it is the most congested
+    fabric we swept."
 
 CLOSING LINE:
   "Two are closed by construction. The other two need hardware a
@@ -487,10 +518,13 @@ experiment took a month we had not planned for; and FORGIVE is the
 design that idea turns into once you accept that a real fabric runs
 congestion control.
 
-Context, in case a caption needs it: the numbers come from four cluster
+Context, in case a caption needs it. The numbers come from four cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto
-cluster, between 1 and 8 September 2026. An arm is one simulated
-configuration; arms sharing a seed and a random selection stream are
-compared against each other. The trim ratio is trimmed payload bytes
-divided by offered bytes. The training window is wall-clock time for 20
-training steps.
+cluster, between 1 and 8 September 2026. Each result is a pair of
+simulated runs that share a seed and a random stream, so their times can
+be subtracted. Trimming is a switch discarding a packet's payload and
+forwarding its header, which is how this fabric signals congestion.
+Go-back-N makes a sender re-send everything from the lost packet onward;
+selective repeat re-sends only what was lost. The audience did not run
+any of this, so prefer a plain description over the project's shorthand
+in anything visible on a slide.

@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1080" height="600" fill="white"/>
+<text x="20" y="26" font-size="15" font-weight="bold">Sixteen seeds, matched arms: what phase-aware bounded loss buys on a go-back-N fabric</text>
+<text x="20" y="46" font-size="11" fill="#4b5563">16 ranks, 2:1 rail-optimised Clos, UEC packet trimming, PFC off, no sender congestion control. Seeds are eight-digit chunks of pi, fixed before the wave.</text>
+<line x1="338.5" y1="78" x2="338.5" y2="348" stroke="#f3f4f6"/>
+<text x="338.51851851851853" y="72" text-anchor="middle" font-size="10" fill="#6b7280">6600</text>
+<line x1="415.6" y1="78" x2="415.6" y2="348" stroke="#f3f4f6"/>
+<text x="415.55555555555554" y="72" text-anchor="middle" font-size="10" fill="#6b7280">6800</text>
+<line x1="492.6" y1="78" x2="492.6" y2="348" stroke="#f3f4f6"/>
+<text x="492.5925925925926" y="72" text-anchor="middle" font-size="10" fill="#6b7280">7000</text>
+<line x1="569.6" y1="78" x2="569.6" y2="348" stroke="#f3f4f6"/>
+<text x="569.6296296296296" y="72" text-anchor="middle" font-size="10" fill="#6b7280">7200</text>
+<line x1="646.7" y1="78" x2="646.7" y2="348" stroke="#f3f4f6"/>
+<text x="646.6666666666667" y="72" text-anchor="middle" font-size="10" fill="#6b7280">7400</text>
+<line x1="723.7" y1="78" x2="723.7" y2="348" stroke="#f3f4f6"/>
+<text x="723.7037037037037" y="72" text-anchor="middle" font-size="10" fill="#6b7280">7600</text>
+<line x1="800.7" y1="78" x2="800.7" y2="348" stroke="#f3f4f6"/>
+<text x="800.7407407407408" y="72" text-anchor="middle" font-size="10" fill="#6b7280">7800</text>
+<text x="560.0" y="54" text-anchor="middle" font-size="11.5">20-step training window, ms</text>
+<text x="286" y="98" text-anchor="end" font-size="10" fill="#4b5563">53589793</text>
+<line x1="695.4" y1="94" x2="356.5" y2="94" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="695.4" cy="94" r="3.6" fill="#9ca3af"/>
+<circle cx="356.5" cy="94" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="98" font-size="10.5" fill="#1d4ed8" font-weight="bold">+11.69 %</text>
+<text x="286" y="114" text-anchor="end" font-size="10" fill="#4b5563">16939937</text>
+<line x1="646.8" y1="110" x2="357.4" y2="110" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="646.8" cy="110" r="3.6" fill="#9ca3af"/>
+<circle cx="357.4" cy="110" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="114" font-size="10.5" fill="#1d4ed8" font-weight="bold">+10.15 %</text>
+<text x="286" y="130" text-anchor="end" font-size="10" fill="#4b5563">74944592</text>
+<line x1="771.1" y1="126" x2="494.1" y2="126" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="771.1" cy="126" r="3.6" fill="#9ca3af"/>
+<circle cx="494.1" cy="126" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="130" font-size="10.5" fill="#1d4ed8" font-weight="bold">+9.31 %</text>
+<text x="286" y="146" text-anchor="end" font-size="10" fill="#4b5563">62862089</text>
+<line x1="596.0" y1="142" x2="374.3" y2="142" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="596.0" cy="142" r="3.6" fill="#9ca3af"/>
+<circle cx="374.3" cy="142" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="146" font-size="10.5" fill="#1d4ed8" font-weight="bold">+7.92 %</text>
+<text x="286" y="162" text-anchor="end" font-size="10" fill="#4b5563">98628034</text>
+<line x1="652.4" y1="158" x2="438.3" y2="158" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="652.4" cy="158" r="3.6" fill="#9ca3af"/>
+<circle cx="438.3" cy="158" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="162" font-size="10.5" fill="#1d4ed8" font-weight="bold">+7.50 %</text>
+<text x="286" y="178" text-anchor="end" font-size="10" fill="#4b5563">48086513</text>
+<line x1="566.9" y1="174" x2="421.8" y2="174" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="566.9" cy="174" r="3.6" fill="#9ca3af"/>
+<circle cx="421.8" cy="174" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="178" font-size="10.5" fill="#1d4ed8" font-weight="bold">+5.23 %</text>
+<text x="286" y="194" text-anchor="end" font-size="10" fill="#4b5563">30781640</text>
+<line x1="490.8" y1="190" x2="381.0" y2="190" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="490.8" cy="190" r="3.6" fill="#9ca3af"/>
+<circle cx="381.0" cy="190" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="194" font-size="10.5" fill="#1d4ed8" font-weight="bold">+4.07 %</text>
+<text x="286" y="210" text-anchor="end" font-size="10" fill="#4b5563">23846264</text>
+<line x1="497.2" y1="206" x2="387.5" y2="206" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="497.2" cy="206" r="3.6" fill="#9ca3af"/>
+<circle cx="387.5" cy="206" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="210" font-size="10.5" fill="#1d4ed8" font-weight="bold">+4.06 %</text>
+<text x="286" y="226" text-anchor="end" font-size="10" fill="#4b5563">70938446</text>
+<line x1="637.6" y1="222" x2="526.3" y2="222" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="637.6" cy="222" r="3.6" fill="#9ca3af"/>
+<circle cx="526.3" cy="222" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="226" font-size="10.5" fill="#1d4ed8" font-weight="bold">+3.91 %</text>
+<text x="286" y="242" text-anchor="end" font-size="10" fill="#4b5563">82534211</text>
+<line x1="428.9" y1="238" x2="332.3" y2="238" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="428.9" cy="238" r="3.6" fill="#9ca3af"/>
+<circle cx="332.3" cy="238" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="242" font-size="10.5" fill="#1d4ed8" font-weight="bold">+3.67 %</text>
+<text x="286" y="258" text-anchor="end" font-size="10" fill="#4b5563">2884197</text>
+<line x1="621.1" y1="254" x2="520.1" y2="254" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="621.1" cy="254" r="3.6" fill="#9ca3af"/>
+<circle cx="520.1" cy="254" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="258" font-size="10.5" fill="#1d4ed8" font-weight="bold">+3.58 %</text>
+<text x="286" y="274" text-anchor="end" font-size="10" fill="#4b5563">28230664</text>
+<line x1="523.3" y1="270" x2="433.6" y2="270" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="523.3" cy="270" r="3.6" fill="#9ca3af"/>
+<circle cx="433.6" cy="270" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="274" font-size="10.5" fill="#1d4ed8" font-weight="bold">+3.29 %</text>
+<text x="286" y="290" text-anchor="end" font-size="10" fill="#4b5563">51058209</text>
+<line x1="437.5" y1="286" x2="373.9" y2="286" stroke="#1d4ed8" stroke-width="2.4"/>
+<circle cx="437.5" cy="286" r="3.6" fill="#9ca3af"/>
+<circle cx="373.9" cy="286" r="3.6" fill="#1d4ed8"/>
+<text x="836" y="290" font-size="10.5" fill="#1d4ed8" font-weight="bold">+2.41 %</text>
+<text x="286" y="306" text-anchor="end" font-size="10" fill="#4b5563">33832795</text>
+<line x1="443.3" y1="302" x2="480.9" y2="302" stroke="#b91c1c" stroke-width="2.4"/>
+<circle cx="443.3" cy="302" r="3.6" fill="#9ca3af"/>
+<circle cx="480.9" cy="302" r="3.6" fill="#b91c1c"/>
+<text x="836" y="306" font-size="10.5" fill="#b91c1c" font-weight="normal">-1.42 %</text>
+<text x="286" y="322" text-anchor="end" font-size="10" fill="#4b5563">31415926</text>
+<line x1="415.8" y1="318" x2="558.2" y2="318" stroke="#b91c1c" stroke-width="2.4"/>
+<circle cx="415.8" cy="318" r="3.6" fill="#9ca3af"/>
+<circle cx="558.2" cy="318" r="3.6" fill="#b91c1c"/>
+<text x="836" y="322" font-size="10.5" fill="#b91c1c" font-weight="normal">-5.44 %</text>
+<text x="286" y="338" text-anchor="end" font-size="10" fill="#4b5563">70679821</text>
+<line x1="351.8" y1="334" x2="542.2" y2="334" stroke="#b91c1c" stroke-width="2.4"/>
+<circle cx="351.8" cy="334" r="3.6" fill="#9ca3af"/>
+<circle cx="542.2" cy="334" r="3.6" fill="#b91c1c"/>
+<text x="836" y="338" font-size="10.5" fill="#b91c1c" font-weight="normal">-7.45 %</text>
+<circle cx="308" cy="368" r="3.6" fill="#9ca3af"/>
+<text x="320" y="372" font-size="11" fill="#4b5563">baseline: 0.5 % loss on every step</text>
+<circle cx="308" cy="386" r="3.6" fill="#1d4ed8"/>
+<text x="320" y="390" font-size="11" fill="#4b5563">phase-aware policy: 0.5 % on steps 1, 2, 3, 20 and 10 % elsewhere</text>
+<text x="836" y="372" font-size="10.5" fill="#4b5563">relief</text>
+<rect x="850" y="86" width="212" height="150" fill="#eff6ff" stroke="#bfdbfe"/>
+<text x="862" y="108" font-size="12" font-weight="bold">Paired result, n = 16</text>
+<text x="862" y="128" font-size="10.5" fill="#1e3a5f" font-weight="normal">training window</text>
+<text x="862" y="142" font-size="10.5" fill="#1e3a5f" font-weight="normal">  7145 ms to 6854 ms</text>
+<text x="862" y="156" font-size="10.5" fill="#1e3a5f" font-weight="bold">  3.91 %, 95 % CI [1.13, 6.68] %</text>
+<text x="862" y="170" font-size="10.5" fill="#1e3a5f" font-weight="normal"></text>
+<text x="862" y="184" font-size="10.5" fill="#1e3a5f" font-weight="normal">worst all-reduce of the episode</text>
+<text x="862" y="198" font-size="10.5" fill="#1e3a5f" font-weight="normal">  1026 ms to 873 ms</text>
+<text x="862" y="212" font-size="10.5" fill="#1e3a5f" font-weight="normal">  153 ms saved, CI [5, 302] ms</text>
+<text x="862" y="226" font-size="10.5" fill="#1e3a5f" font-weight="normal"></text>
+<text x="862" y="240" font-size="10.5" fill="#1e3a5f" font-weight="bold">13 of 16 seeds improve</text>
+<rect x="850" y="248" width="212" height="132" fill="#f9fafb" stroke="#e5e7eb"/>
+<text x="862" y="270" font-size="12" font-weight="bold">The dose is the lever</text>
+<text x="862" y="288" font-size="10.5" fill="#4b5563">Running 10 % on every step, with</text>
+<text x="862" y="302" font-size="10.5" fill="#4b5563">no phase protection at all, buys</text>
+<text x="862" y="316" font-size="10.5" fill="#4b5563">9.42 %, CI [7.03, 11.82] %.</text>
+<text x="862" y="330" font-size="10.5" fill="#4b5563"></text>
+<text x="862" y="344" font-size="10.5" fill="#4b5563">The phase bound gives up most of</text>
+<text x="862" y="358" font-size="10.5" fill="#4b5563">that. It costs 242 ms across steps</text>
+<text x="862" y="372" font-size="10.5" fill="#4b5563">1 to 3 and nothing at the tail.</text>
+</svg>

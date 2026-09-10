@@ -132,24 +132,24 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     worked on four nodes with hand-injected loss."
 
   Card 02, "Lossy fabric":
-    "Injected loss does not capture fabric behavior. The ns-3 backend is lossless
-    RDMA, so we turned PFC off and added UEC packet trimming and selective
-    repeat."
+    "Injected loss does not capture fabric behavior. The ns-3 backend is
+    lossless RDMA, so we disabled PFC and added UEC packet trimming and
+    selective repeat."
 
   Card 03, "Experimental harness":
-    "One paired comparison takes a day. We built a harness with
-    ephemeral GitHub Actions runners on DCS and archived the results."
+    "One paired comparison takes a day. Our harness provisions ephemeral
+    GitHub Actions runners on DCS and archives results."
 
   Card 04, "Result":
     "Training time fell 3.91 % across 16 seeds. Trims the policy
     prevented explain the saving, and the recovery scheme limits it."
 
   Card 05, "FORGIVE":
-    "FORGIVE adapts DBLP to congestion control. The receiver decides which
-    loss to accept, counts the budget in bytes, and revokes exemptions."
+    "FORGIVE adapts DBLP to congestion control. The receiver accepts loss,
+    counts the budget in bytes, and revokes sender exemptions."
 
 CLOSING LINE, centred beneath the row:
-  "Each addition was required to test DBLP."
+  "We added each component to test DBLP."
 
 SPEAKER NOTE: "Nothing here was exploratory. Each run had a decision rule
 written before it was dispatched, and the rule chose the next run."
@@ -178,22 +178,22 @@ above, joined by 1px ink-30 leader lines:
   27 Jul  "add UEC packet trimming"
    4 Aug  "add trimming to UEC 1.0.3"
    6 Aug  "add selective repeat"
-   9 Aug  "provision DCS GitHub Actions runners"
+  9 Aug  "provision DCS GitHub Actions runners"
   17 Aug  "pin the protected-step schedule"
   22 Aug  "choose seeds"
    5 Sep  "add DCQCN and FORGIVE"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
-  1 Sep  "run #117"  /  "seeds, go-back-N"
-  6 Sep  "run #120"  /  "8 configurations"
+  1 Sep  "run #117"  /  "go-back-N seed study"
+  6 Sep  "run #120"  /  "network sweep"
    7 Sep  "run #121"  /  "FORGIVE"
-  8 Sep  "run #122"  /  "budget sweep"
+  8 Sep  "run #122"  /  "loss-budget sweep"
 
 CLOSING LINE:
   "One paired comparison takes a day, and a full run takes several
-  days. We built DCS runners, made 184 commits, ran four cluster jobs, and
-  covered 180 configurations."
+  days. We made 184 commits and ran four cluster jobs across 180
+  configurations."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
@@ -209,7 +209,7 @@ SLIDE 4 of 8
 The main result. The chart is the slide.
 
 HEADLINE, 34px bold:
-  "Thirteen seeds improved on the baseline"
+  "Thirteen seeds beat the baseline"
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
@@ -244,7 +244,7 @@ DIRECT LABELS beside the first row, no legend box:
   ink-100 circle   "DBLP"  /  "0.5 % on steps 1, 2, 3, 20; 10 % elsewhere"
 
 RIGHT THIRD: an ink panel, 24px radius, paper text:
-  section label  "PAIRED SEEDS"
+  section label  "PAIRED RUNS"
   "3.91 %" at 58px bold
   "faster 20-step run, 95 % CI [1.13, 6.68] %" at 16px
   a 1px paper-30 divider
@@ -253,7 +253,7 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
 
 CLOSING LINE:
   "On the four seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
-  all-reduce by 434 to 716 ms; mild seeds barely change."
+  all-reduce by 434 to 716 ms; the remaining seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -278,14 +278,14 @@ ticks at
 -600, -300, 0, 300, 600 and 900, gridlines ink-12, a heavier ink-30 line
 at zero.
 
-LEFT PANEL, titled "Versus prevented trims". Marks in
+LEFT PANEL, titled "Savings versus prevented trims". Marks in
 ink-100 with a dashed ink-55 least-squares line. Horizontal axis "Packet
 trims prevented (millions)", ticks at -40, -20, 0, 20, 40, 60 and 80.
 Place "r = 0.93" at 58px bold inside the panel, upper left, with generous
 space around it.
 
-RIGHT PANEL, titled "Versus discarded gradient bytes". Marks in ink-55,
-no fit line. Horizontal axis "Discarded gradient (GB)", ticks at
+RIGHT PANEL, titled "Savings versus discarded gradient bytes". Marks in ink-55,
+no fit line. Horizontal axis "Discarded gradient bytes (GB)", ticks at
 1.85, 1.95, 2.05, 2.15, 2.25, 2.35 and 2.45. Place "r = -0.01" at 58px
 bold inside the panel, upper left.
 
@@ -358,7 +358,7 @@ READING LINE directly beneath the chart, 16px, ink at 55%:
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
   "8 configurations" at 34px bold
-  "All 64 ranks used selective repeat, and we swept congestion control,
+  "Across 64 ranks with selective repeat, we varied congestion control,
   fan-in, and spine oversubscription. We set the criteria before the run."
   a 1px paper-30 divider
   "We required switches to trim at least half a byte per byte sent. The
@@ -367,9 +367,9 @@ RIGHT THIRD: an ink panel with paper text:
   most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
-  "Relief across our go-back-N arms is 3.9 to 11.1 %, while the
-  selective-repeat arm gains 0.78 %. All bounded-loss results in our
-  review use go-back-N-like recovery."
+  "With go-back-N, relief is 3.9 to 11.1 %, while selective repeat gains
+  0.78 %. All bounded-loss results in our review use go-back-N-like
+  recovery."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
 selective repeat and Ultra Ethernet, so the finding that admission-time
@@ -390,12 +390,12 @@ LEFT HALF: three stacked statements, 22px apart, each with its key figure
 at 34px bold on its own line above 20px body text.
 
   "24 %"
-  "With selective repeat, DCQCN adds this much to the 20-step run on the
+  "With selective repeat, DCQCN adds 24 % to the 20-step run on the
   most congested configuration while reducing trimming eightfold. Rate
   reductions create the slowdown rather than repair."
 
   "10.4 to 10.9 %"
-  "FORGIVE recovers that time by letting the receiver accept trimmed loss
+  "FORGIVE recovers 10.4 to 10.9 % by letting the receiver accept trimmed loss
   and allowing senders with budget remaining to ignore rate reductions
   until the receiver refuses. It uses 6.3 % of data-parallel bytes."
 

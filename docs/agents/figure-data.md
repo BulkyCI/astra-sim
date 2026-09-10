@@ -1,5 +1,7 @@
 # Figure data and readings
 
+Prepared by Joe Fang, in collaboration with Zechen Ma.
+
 Every number behind the figures in the two September 2026 progress decks,
 in plain text, so the charts can be rebuilt in any tool. No styling here:
 each section gives what the chart shows, the axes and units, the data,
@@ -18,6 +20,16 @@ Sources are release bundles in `BulkyCI/astra-sim`: run #117
 ---
 
 ## 0. Setup facts every caption needs
+
+Vocabulary, so captions stay consistent. An *arm* is one simulated
+configuration. A *comparison* is a set of arms sharing a seed and a
+random selection stream, so their results can be subtracted. A *run* is
+one dispatch of many comparisons to the cluster, numbered #117, #120,
+#121, #122. A *cell* is one point of the eight-point fabric map. The two
+sender-side arms are both shedding: *phase-aware shedding* protects the
+critical steps, *unmasked shedding* does not. Quantities marked
+**derived** below were computed from measured counters under a stated
+assumption; everything else is read directly from a bundle.
 
 - Simulator: ASTRA-sim 2.0 with Chakra execution traces over a forked
   ns-3 RDMA backend. The simulator computes no gradients, so nothing here
@@ -68,7 +80,7 @@ Build events:
 | 2026-08-06 | selective repeat for trimmed and missing ranges; direct all-reduce to form an organic incast |
 | 2026-08-09 | heavy comparisons moved to just-in-time SLURM runners on the UofT DCS cluster |
 | 2026-08-17 | critical-step schedule `[1, 2, 3, 20]` pinned from literature independent of our own preprint |
-| 2026-08-22 | anchor family scaled to sixteen pi-derived seeds |
+| 2026-08-22 | the 16-rank configuration scaled to sixteen pi-derived seeds |
 | 2026-09-05 | DCQCN knob and rate-cut telemetry; receiver forgiveness verdict in the transport |
 | 2026-09-07 | congestion exemption for a forgiven flow |
 
@@ -76,10 +88,10 @@ Cluster waves:
 
 | Date | Run | Size | What it was |
 | --- | --- | --- | --- |
-| 2026-09-01 | #117 | 30 of 31 comparisons, about 90 arms | sixteen-seed anchor, sweeps, one selective-repeat control |
+| 2026-09-01 | #117 | 30 of 31 comparisons, about 90 arms | sixteen-seed 16-rank configuration, sweeps, one selective-repeat control |
 | 2026-09-06 | #120 | 8 cells | regime map |
 | 2026-09-07 | #121 | 6 comparisons, 24 arms | forgiveness with congestion exemption |
-| 2026-09-08 | #122 | 14 records, 56 arms | dose front and phase-mask ablation |
+| 2026-09-08 | #122 | 14 comparisons, 56 arms | loss-budget sweep and phase-mask ablation |
 
 Readings. Six weeks of the seven went into the instrument, because the
 backend ASTRA-sim ships with is lossless RoCEv2 and models none of the
@@ -117,9 +129,12 @@ pi, fixed before the wave.
 | 31415926 | 6800.6 | 7170.3 | -5.44 | 6762.8 | 0.56 |
 | 70679821 | 6634.4 | 7128.8 | -7.45 | 6459.2 | 2.64 |
 
-Aggregates, paired, Student t at 15 degrees of freedom:
+Aggregates, paired, Student t at 15 degrees of freedom. Level rows are
+means over seeds; relief rows are means over seeds of the per-seed
+difference or ratio, so a relief percentage will not equal the ratio of
+the two level rows above it:
 
-| estimand | mean | 95 % CI | verdict |
+| quantity | mean | 95 % CI | verdict |
 | --- | ---: | --- | --- |
 | training window, baseline | 7145.1 ms | | |
 | training window, policy | 6853.5 ms | | |
@@ -159,7 +174,7 @@ horizontal axis is trims avoided in millions, roughly -40 to 80. Panel B
 horizontal axis is data-parallel payload discarded in GB, roughly 1.85 to
 2.45.
 
-| seed | ms saved | trims avoided, millions | GB discarded | baseline W | policy W |
+| seed | ms saved | trims avoided, millions | GB discarded (10^9 bytes) | baseline W | policy W |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 53589793 | 880.0 | 76.17 | 2.19 | 10.37 | 8.73 |
 | 16939937 | 751.5 | 40.62 | 2.14 | 9.64 | 8.81 |
@@ -193,9 +208,12 @@ Readings.
   the saving is how many packet trims the discard prevented.
 - The three negative seeds are exactly the three where the policy *added*
   trims. Nothing else distinguishes them.
-- The one-line model that comes out of it: relief equals trims avoided
-  times the recovery scheme's amplification factor. It predicts the
-  selective-repeat control on the next chart correctly, at 79x and at 1x.
+- What comes out of it is a direction to look in, not a formula. The
+  saving is proportional to the trims a policy prevents, and what one
+  prevented trim is worth is set by the recovery scheme. Do not multiply
+  the two numbers together; they have different denominators, and the
+  product is meaningless. What the reasoning did do is correctly predict
+  that the selective-repeat arm on the next chart would show nothing.
 - Marginal amplification: the policy shed 1.98 GiB and the fabric
   re-carried 156 GiB less, so a discarded byte is worth about 79 bytes on
   the wire under this transport.
@@ -225,7 +243,7 @@ Per-family detail, fixed-low arms, one seed each:
 
 | family | recovery | fabric | W | window | span steps 4-17 | span step 18 | span step 19 | burst drain |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 16-rank anchor, seed 31415926 | go-back-N | 2:1 | 8.68 | 6795 ms | 246 ms | 935 ms | 294 ms | 423 to 933 ms |
+| 16-rank, seed 31415926 | go-back-N | 2:1 | 8.68 | 6795 ms | 246 ms | 935 ms | 294 ms | 423 to 933 ms |
 | 32-rank direct, burst 7 | go-back-N | 1:1 | 3.02 | 4503 ms | 110 ms | 451 ms | 1057 ms | 838 to 1497 ms |
 | 64-rank fan-in 7 | go-back-N | 4:3 | 2.58 | 5173 ms | 130 ms | 205 ms | 1330 ms | 809 to 1798 ms |
 | 64-rank selective repeat | selective | 2:1 | 0.02 | 1210 ms | 13.4 ms | 17.6 ms | 12.7 ms | 23 to 29 ms |
@@ -242,10 +260,11 @@ Readings.
   11.1 % under go-back-N and 0.78 % under selective repeat. This is the
   boundary of the run #117 result and it should be its own slide rather
   than a footnote.
-- Every published bounded-loss result sits on the left-hand side of this
-  chart: MLT and OptiReduce against TCP or UDP with millisecond timeouts,
-  our own May evaluation against its bitmap-and-probe rounds, deployed
-  RoCEv2 NICs on go-back-N.
+- Every bounded-loss result our literature reviews turned up sits on the
+  left-hand side of this chart: MLT and OptiReduce against TCP or UDP with
+  millisecond timeouts, our own May evaluation against its bitmap-and-probe
+  rounds. Classic RoCEv2 recovery is go-back-N and a large installed base
+  still runs it, though current NICs increasingly offer selective repeat.
 
 ---
 
@@ -332,11 +351,13 @@ Readings.
   sold, visible in a single row.
 - Context from the map: the same cell without congestion control runs in
   1367 ms, so DCQCN's bill here is about 320 ms and the exempt arm gives
-  back 225 of them.
+  back 225 of them. That comparison crosses two runs and the
+  no-congestion-control figure is a single seed, so quote it as a scale
+  rather than a measurement.
 
 ---
 
-## 7. The dose front, run #122
+## 7. The loss-budget sweep, run #122
 
 Chart: scatter with two connected series. Horizontal axis is gradient
 bytes lost as a share of all data-parallel bytes, 0 to 50 %. Vertical
@@ -387,8 +408,9 @@ lost:
 | 0.6 | 1.4 | 0.3 |
 | 0.4, mask off | 1.4 | 0.3 to 0.4 |
 
-Budget utilisation. The eligible share of DP bytes is 0.79, so the cap is
-79 x budget, in percent of DP bytes:
+Budget utilisation, **derived**. The eligible share of DP bytes is 0.79,
+read off the shedding arm whose loss is linear in the budget at that
+slope, so the cap is 79 x budget, in percent of DP bytes:
 
 | budget | cap | FORGIVE spends | utilisation |
 | ---: | ---: | ---: | ---: |
@@ -400,7 +422,7 @@ Budget utilisation. The eligible share of DP bytes is 0.79, so the cap is
 Readings.
 
 - The curve saturates above budget 0.2. Budget 0.1 already buys 80 % of
-  the gain at two thirds of the loss, so the headline dose should be 0.1,
+  the gain at two thirds of the loss, so the headline budget should be 0.1,
   not 0.4. That also puts the spent loss inside the range MLT profiles as
   tolerable.
 - Aimed loss self-limits; blind loss does not. Sender-side shedding
@@ -408,7 +430,7 @@ Readings.
   to do. FORGIVE converges to about 9.3 % and stops, because the fabric
   stops trimming.
 - Efficiency is a flat constant across the whole front: four to five
-  times, whatever the dose and whether or not the mask is on.
+  times, whatever the budget and whether or not the mask is on.
 - Shedding only overtakes on time past a budget of about 0.45, where it
   is discarding a third of every gradient. No published tolerance result
   reaches there.
@@ -506,7 +528,7 @@ B is rate achieved on the wire. Four bars each.
 All four arms owe the same 70.0 GB of all-reduce payload across the 16
 non-critical steps. Worst cell of the map, budget 0.1, seed 9550582.
 
-| arm | time for that payload | physical bytes moved | wire rate | peak switch queue |
+| arm | time for that payload | physical bytes moved (derived) | wire rate (derived) | peak switch queue |
 | --- | ---: | ---: | ---: | ---: |
 | baseline, 0.5 % everywhere | 588 ms | 152.3 GB | 259 GB/s | 4 194 316 B |
 | sender-side shedding at 0.1 | 537 ms | 137.8 GB | 257 GB/s | 4 194 316 B |
@@ -540,9 +562,9 @@ Readings.
   and congestion at an incast is set by how many senders arrive at once.
   Uniform shedding removes bytes from all seven senders and never removes
   a sender. Seven-to-one becomes 6.3-to-one.
-- The makespan arithmetic closes with no residue. The all-reduce is about
+- The window arithmetic closes with no residue. The all-reduce is about
   42 % of an 85 ms step and 16 of 20 steps are eligible, so shedding's
-  8.7 % span cut predicts 2.9 % of makespan against 3.1 % measured, and
+  8.7 % span cut predicts 2.9 % of the window against 3.1 % measured, and
   FORGIVE's 33 % predicts 11 % against 10.4 % measured.
 
 ---
@@ -602,9 +624,11 @@ Three numbered points beside it.
 
 Supporting fact for the design choice, worth a line on the slide: the ECN
 marking threshold is 800 KB at 400 Gb/s and the trim point is 4 MiB, so
-at least 74 % of notifications at the worst cell are ECN-marked rather
-than trim-caused, 13.5 million against 3.4 million. Suppressing only the
-notification our own forgiveness provoked would not move the window.
+most marks fire long before anything is trimmed. At the worst cell the
+run takes 13.5 million rate cuts and records 3.4 million trims, and since
+a trim can provoke at most one mark, at least 74 % of the marks are
+ECN-originated. Suppressing only the notification our own forgiveness
+provoked could not move the window.
 
 ---
 
@@ -616,7 +640,7 @@ Keep these out of the deck, and be ready to say why.
 | --- | --- |
 | per-rank p99 improvement | -4.9 % mean across sixteen seeds, CI [-19.6, +9.8]. Top three of 320 samples; one path collision moves it by half |
 | worst-collective relief as a percentage | 10.8 % mean, CI [-0.60, 22.20], spans zero. Report the 153 ms with CI [5, 302] instead |
-| the run #117 dose grid | ran unmatched, because the profile name entered the selection hash. Fixed in commit `63ef7c2`, not yet re-run |
+| the run #117 budget grid | ran unmatched, because the profile name entered the selection hash. Fixed in commit `63ef7c2`, not yet re-run |
 | `wire_per_offered` | hop-weighted, not bytes a receiver saw |
 | the 24.8 % from our own May preprint | measured with a fully blocking worker loop, so it includes network time a modern framework hides. It is our earlier number rather than a rival's, and nothing in this file is comparable with it |
 | single-seed sweeps, fan-in and burst-source counts | directional only, no error bars |

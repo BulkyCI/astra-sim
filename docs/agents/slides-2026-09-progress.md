@@ -2,12 +2,28 @@
 
 Progress review for Yashar Ganjali, 9 September 2026.
 
+Prepared by Joe Fang, in collaboration with Zechen Ma. The simulation
+platform, the four cluster runs and the analysis reported here are my
+work in this repository; the DBLP line of work they revise is joint.
+
 Work covered: fork of ASTRA-sim at commit `518bd51`, our first commit
 `f31d865` on 20 July 2026, 184 commits to 8 September, plus a fork of the
-bundled ns-3 RDMA backend. Four cluster evaluation waves, about 180 simulated
-arms in total.
+bundled ns-3 RDMA backend. Four cluster runs, about 180 simulated
+configurations in total.
 
 Slides are separated by rules. Figures are SVG in `figures/`.
+
+**Terms used throughout.** An *arm* is one simulated configuration; a
+*comparison* is a set of arms sharing a seed and a random selection
+stream so their results can be subtracted; a *run* is one dispatch of
+many comparisons to the cluster, numbered in the CI ledger as #117, #120
+and so on. A *cell* is one point of the eight-point fabric map. The *trim
+ratio* is trimmed payload bytes divided by offered bytes, written W in
+the artifacts. The *loss budget* is the fraction of eligible
+data-parallel bytes a policy is allowed to discard, written p_low on
+critical steps and p_high elsewhere. *Critical steps* are the protected
+ones, pinned to 1, 2, 3 and 20; *CLR* in the May preprint means the same
+thing. The *training window* is wall-clock time for all 20 steps.
 
 ---
 
@@ -16,18 +32,17 @@ Slides are separated by rules. Figures are SVG in `figures/`.
 This is the revision of our own DBLP work. The question we took on after
 the May preprint was whether its phase-aware bounded-loss result carries
 onto a fabric that looks like what large training jobs will actually run
-on. To ask that we had to build the
-fabric first, because the backend ASTRA-sim ships with models none of
-it.
+on. To ask that we had to build the fabric first, because the backend
+ASTRA-sim ships with models none of it.
 
 Three things came out of it, in this order.
 
 1. **A negative result we trust.** On a modern lossy fabric, where the
    transport repairs a loss with one selective retransmission rather than
    by rewinding a window, dropping gradient bytes before you send them
-   buys almost nothing. The relief we measured was an artefact of
-   go-back-N recovery, and the same class of confound sits under every
-   prior bounded-loss result we have been able to find.
+   buys almost nothing. The relief we measured was a property of
+   go-back-N recovery, and every bounded-loss result we were able to
+   find, ours included, was measured on a transport of that class.
 2. **The real cost on that fabric, measured.** Congestion control is what
    costs time. DCQCN cuts packet trimming by eight to ten times and pays
    18 to 24 % of training time for it.
@@ -35,13 +50,13 @@ Three things came out of it, in this order.
    receiver forgive what the fabric trimmed, and let a flow with an
    unspent loss budget ignore rate cuts until the receiver refuses it.
    At the worst cell of our map this recovers 10.4 to 10.9 % of training
-   time for 6.3 % of gradient bytes, against 2.4 to 3.3 % for blind
-   shedding at a comparable dose.
+   time for 6.3 % of gradient bytes, against 2.4 to 3.3 % for
+   sender-side shedding at the same budget.
 
 The interesting part is not the percentage. It is that loss aimed by the
-fabric's own trim signal is four to five times more efficient than loss
-aimed by a hash, at every dose we tested, and that it stops on its own
-when the congestion stops.
+fabric's own trim signal recovers four to five times more time per unit
+of gradient discarded than loss aimed by a hash, at every budget we
+tested, and that it stops on its own when the congestion stops.
 
 ---
 
@@ -95,7 +110,7 @@ about. Building it is most of what the first six weeks were.
 ![Timeline](figures/progress-timeline.svg)
 
 Four bands: build the instrument, make it a real experiment platform,
-map the regime, then FORGIVE. Red markers are cluster waves.
+map the regime, then FORGIVE. Red markers are cluster runs.
 
 ---
 
@@ -132,12 +147,12 @@ believable.
   random selection stream, so the messages the sender-side baseline
   suppresses are exactly the ones the receiver-side run may forgive.
   Nothing is compared across seeds.
-- **Sixteen seeds on the anchor**, drawn as eight-digit chunks of pi, so
-  the seed choice is not ours to nudge.
+- **Sixteen seeds** on the 16-rank configuration, drawn as eight-digit
+  chunks of pi, so the seed choice is not ours to nudge.
 - **The cluster.** Heavy comparisons run on just-in-time SLURM runners on
-  the UofT DCS cluster, minted per job. A wave is 20 to 56 arms, about
+  the UofT DCS cluster, minted per job. A run is 20 to 56 arms, about
   five hours each.
-- **Permanent artifacts.** Every wave writes a release bundle with
+- **Permanent artifacts.** Every run writes a release bundle with
   per-arm summaries, telemetry, the exact profile, and a provenance
   attestation. Every number in this deck can be recomputed from one.
 - **A pinned critical-step schedule**, `[1, 2, 3, 20]`, derived from
@@ -154,20 +169,30 @@ Three matched arms: tight baseline at p = 0.005 everywhere, the
 phase-aware policy at 0.005 on critical steps and 0.1 elsewhere, and a
 loose baseline at 0.1 everywhere.
 
-| Estimand | Baseline | Policy | Change | 95 % CI |
+Paired per seed, Student t at fifteen degrees of freedom. The baseline
+and policy columns are means over seeds of each level; the change column
+is the mean over seeds of each per-seed difference, so it does not equal
+the ratio of the two columns beside it.
+
+| quantity | baseline | policy | change | 95 % CI |
 | --- | ---: | ---: | ---: | --- |
-| makespan, 20 steps | 7145.1 ms | 6853.5 ms | 3.91 % | [1.13, 6.68] % |
-| worst all-reduce of the episode | 1026.0 ms | 872.7 ms | 14.9 % | [5.0, 301.7] ms |
-| loose baseline makespan | | | 9.42 % | [500, 863] ms |
+| training window, 20 steps | 7145.1 ms | 6853.5 ms | 291.7 ms, 3.91 % | [1.13, 6.68] % |
+| worst all-reduce of the episode | 1026.0 ms | 872.7 ms | 153.4 ms | [5.0, 301.7] ms |
+| loose baseline, 10 % on every step | 7145.1 ms | 6463.3 ms | 681.8 ms, 9.42 % | [7.03, 11.82] % |
+
+Report the second row in milliseconds and not as a percentage. The
+per-seed ratio averages 10.8 % with an interval of [-0.6, 22.2] %, which
+spans zero because the baseline varies so much by seed. The milliseconds
+are significant; the ratio is not.
 
 The phase bound is not free and not expensive: it costs 242 ms across
 steps 1 to 3, which is most of the policy's 292 ms gain, and costs
 nothing measurable at the tail.
 
 One more finding, which turned out to be the important one. Relief
-correlates 0.94 with the number of trims avoided, and not at all with
-the number of bytes shed. The policy shed 1.98 GiB and the fabric
-re-carried 156 GiB less.
+correlates 0.93 with the number of trims the policy prevented, at 11.9 ms
+per million, and -0.01 with the number of bytes it discarded. The policy
+discarded 1.98 GiB of gradient and the fabric re-carried 156 GiB less.
 
 ---
 
@@ -175,26 +200,30 @@ re-carried 156 GiB less.
 
 ![Recovery amplification](figures/recovery-amplification.svg)
 
-One arm in that wave ran selective repeat instead of go-back-N, on the
-same fabric with the same burst. The 79x amplification disappears.
+One arm in that run used selective repeat instead of go-back-N, on the
+same 20-step workload and the same seven-source burst, over a 2:1 fabric
+at 64 ranks. Its retransmitted-per-offered ratio is 0.08x to 0.13x
+against 7x to 25x in the go-back-N arms, and its trim ratio is 0.02
+against 2.2 to 10.4.
 
 Under go-back-N a single trimmed packet rewinds a whole window, and with
-no congestion control the queue is still full when the sender rewinds,
-so the re-sent bytes are trimmed again. Removing one gradient byte
-therefore removes about 79 bytes from the wire. Under selective repeat
-the same trim costs one repair packet and one round trip, so removing
-one gradient byte removes about one byte.
+no congestion control the queue is still full when the sender rewinds, so
+the re-sent bytes are trimmed again. Measured on the sixteen-seed
+configuration, discarding one gradient byte removed about 79 bytes from
+the wire. Under selective repeat a trim costs one repair packet and one
+round trip, so there is no window to re-carry and no comparable
+multiplier.
 
-Our headline relief fell from 3.9 to 11.1 % down to 0.78 % on the same
-fabric. The policy worked exactly as designed. There was simply nothing
-left for it to relieve.
+Relief across our go-back-N arms ran from 3.9 to 11.1 %. The
+selective-repeat arm buys 0.78 %. The policy worked exactly as designed.
+There was simply nothing left for it to relieve.
 
-We treat this as the finding, not the embarrassment. Every prior
-bounded-loss result we can find was measured against a transport whose
-recovery amplifies loss: MLT and OptiReduce against TCP or UDP with
+We treat this as the finding, not the embarrassment. Every bounded-loss
+result our literature reviews turned up was measured against a transport
+whose recovery amplifies loss: MLT and OptiReduce against TCP or UDP with
 millisecond timeouts, and our own May evaluation against its
-bitmap-and-probe rounds. It is the motivating negative result of the paper we want to
-write.
+bitmap-and-probe rounds. It is the motivating negative result of the
+paper we want to write.
 
 ---
 
@@ -234,10 +263,11 @@ DCQCN is the only large cost on the map.
 | 20-step window, worst fabric | 1367 ms | 1696 ms | 24 % longer |
 | bytes re-sent after trims | 24 % of offered | 3.7 % | 6.5x lower |
 | rate cuts per run | 0 | 13.5 million | |
-| retransmission timeouts | about 100 | 10 166 | 100x |
+| retransmission timeouts | about 100 | 10 166 | about 90x |
 
 This is a controller doing its job. It trades trimmed bytes for time,
-and on this fabric the exchange rate is one fifth of the training run.
+and across the four fabrics of the map the price is 18 to 24 % of the
+training run.
 
 It also told us where the time goes. Under DCQCN a trimmed flow takes
 four to seven times as long as an untrimmed one, against 1.7 to 2.7 times
@@ -259,11 +289,12 @@ until the receiver's first repair request re-arms it.
 
 One design decision is worth defending here. The exemption covers every
 congestion notification, not only the ones a trim caused. On this fabric
-the ECN marking threshold is 800 KB at 400G and the trim point is 4 MiB,
-so at least 74 % of the notifications at the worst cell are ECN-marked
-rather than trim-caused: 13.5 million against 3.4 million. Suppressing
-only the notification our own forgiveness provoked would not move the
-window at all.
+the ECN marking threshold is 800 KB at 400 Gb/s while the trim point is
+4 MiB, so most marks fire long before anything is trimmed. At the worst
+cell the run takes 13.5 million rate cuts and records 3.4 million trims,
+and since a trim can cause at most one mark, at least 74 % of the marks
+are ECN-originated. Suppressing only the notification our own
+forgiveness provoked could not move the window.
 
 The revocation rule is what keeps this honest. The exemption ends the
 moment the receiver refuses to forgive, which is the moment the budget
@@ -278,59 +309,66 @@ Worst cell of the map, three seeds, four matched arms each.
 
 | run | training time | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | bytes re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tight baseline | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
-| sender-side shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
+| tight baseline, 0.5 % everywhere | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
+| phase-aware shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
 | FORGIVE with exemption, 0.4 | 1459 to 1468 ms | 20 to 21 ms | 36 to 37 ms | 8.8 to 9.5 % | 1 % |
-| blind shedding, 0.4 | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
+| unmasked shedding, 0.4 everywhere | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
 
-Read the last two columns together. FORGIVE reaches a shorter window
-than sender-side shedding while discarding a third as much gradient, and
-its critical steps do not move while blind shedding's critical steps
-speed up by a third, which is exactly the protection being sold.
+Both shedding arms drop messages at the sender; they differ only in
+whether the critical steps are protected. Read the last two columns
+together. FORGIVE reaches a shorter window than phase-aware shedding
+while discarding about a third as much gradient, and its critical steps
+do not move while the unmasked arm's critical steps speed up by a third,
+which is exactly the protection being sold.
 
 Per seed the exempt run ignored 10.4 to 10.9 million rate cuts, acted on
 6.0 to 6.4 million, and re-armed 12 to 13 thousand of its 71 680 exempt
 flows. The budget rule held in every ledger entry.
 
-Set against the map: DCQCN's bill at this cell is about 320 ms, and the
-exempt run gives back 225 of them, a little over two thirds.
+Set against the map: the same fabric with no congestion control ran in
+1367 ms, so DCQCN's bill here is about 320 ms and the exempt run gives
+back 225 of them, a little over two thirds. That comparison crosses two
+runs and the no-congestion-control number is a single seed, so treat it
+as a scale rather than a measurement.
 
 ---
 
-## 13. Run #122, read this morning: the dose front
+## 13. Run #122, read this morning: the budget sweep
 
-![Dose front](figures/dose-front.svg)
+![Budget sweep](figures/dose-front.svg)
 
-Fourteen records, 56 arms: budgets 0.1, 0.2 and 0.6 at three seeds, two
-more seeds at 0.4, and a mask-off ablation at three seeds.
+Fourteen comparisons, 56 arms: budgets 0.1, 0.2 and 0.6 at three seeds,
+two more seeds at 0.4, and a mask-off ablation at three seeds.
 
 Three readings, in order of how much they change the story.
 
-**The curve saturates, so the dose comes down.** Budget 0.1 already buys
-80 % of the gain at two thirds of the loss. Our headline dose moves from
-0.4 to 0.1, which puts the loss we actually spend inside the range MLT
+**The curve saturates, so the budget comes down.** Budget 0.1 already
+buys 80 % of the gain at two thirds of the loss. Our headline budget
+moves from 0.4 to 0.1, which puts the loss we actually spend inside the range MLT
 profiles as tolerable.
 
-**Aimed loss is self-limiting; blind loss is not.** Sender-side shedding
-discards 0.79 x p of gradient bytes at every budget, because that is what
-its hash was told to do. FORGIVE converges to about 9.3 % and stops,
-because the share of rate cuts a sender can ignore ceilings at 64 to
-65 %. Budget utilisation across the front falls 81 %, 54 %, 30 %, 19 %:
-above 0.2 the binding constraint is no longer the budget, it is how often
-the fabric trims.
+**Aimed loss is self-limiting; hash-aimed loss is not.** Sender-side
+shedding discards 0.79 x p of all data-parallel bytes at every budget,
+where 0.79 is the share of those bytes sitting on non-critical steps.
+That is exactly what its hash was told to do and it does not depend on
+congestion at all. FORGIVE converges to about 9.3 % and stops. The
+proximate reason is visible in the counters: the share of rate cuts a
+sender can ignore ceilings at 64 to 65 %. Budget utilisation across the
+sweep falls 81 %, 54 %, 30 %, 19 %, so above 0.2 the binding constraint
+is no longer the budget, it is how often the fabric trims.
 
-**Efficiency is a constant.** Points of training time recovered per
-percent of gradient lost: 1.4 to 1.7 for FORGIVE, 0.3 to 0.4 for
-shedding, at every budget and with the mask on or off. Shedding only
-overtakes on time past a budget of about 0.45, where it is discarding a
-third of every gradient.
+**Efficiency is a constant.** Divide the percentage of training time
+recovered by the percentage of data-parallel bytes discarded: 1.4 to 1.7
+for FORGIVE, 0.3 to 0.4 for shedding, at every budget and with the mask
+on or off. Shedding only overtakes on time past a budget of about 0.45,
+where it is discarding a third of every gradient.
 
 The mask ablation prices the safety property. Removing the protection on
 steps 1, 2, 3 and 20 buys 3.2 more points of time for 2.3 more points of
 loss. The mask is proved by the ledger rather than by the clock: masked
 runs put 1.0 to 1.5 % of their forgiven bytes on those steps against the
 19 to 21 % an unmasked run puts there, and the budget law verified with
-zero violations in all fourteen records.
+zero violations in all fourteen comparisons.
 
 ---
 
@@ -352,9 +390,13 @@ notifications per GB offered fall 9.5 % for a 10 % load cut.
 
 Time is bytes over rate. Shedding attacks the numerator and the
 controller pins the denominator, so it moves fewer bytes at the
-baseline's rate. FORGIVE attacks the denominator: it puts 0.6 % *more*
-bytes on the wire, provokes 22 % more notifications than the baseline,
-acts on 39 % fewer, and moves the same payload 51 % faster.
+baseline's rate: 537 ms against 588 ms for 10 % fewer bytes, which is
+proportional to what it threw away and nothing more. FORGIVE attacks the
+denominator. It finishes the same payload in 392 ms, half again as fast,
+while putting 0.6 % *more* bytes on the wire, provoking 22 % more
+notifications than the baseline and acting on 39 % fewer. Panel B of the
+figure converts those times into a wire rate, which needs one assumption:
+that physical bytes per logical byte is uniform across steps.
 
 There is a structural version of the same point. The load is a seven-way
 fan-in, and congestion at an incast is set by how many senders arrive at
@@ -369,7 +411,7 @@ oversubscribed by the same factor.
 | # | Question | Where it stands now |
 | --- | --- | --- |
 | 1 | Sparsification | Separated, deliberately. We model pure drop with no error feedback, and we wrote down why mixing it with an error-feedback compressor is a second uncontrolled lossy layer: the optimiser's residual does not know which updates never arrived. The tolerance question is now a designed experiment rather than an assumption, and the literature gives us bounds to hit: MLT profiles 0.7 to 3.3 % at equal rounds, OptiReduce reports accuracy surviving 1 %. |
-| 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the communication window, so what we report is exposed communication time inside a makespan, not blocking transfer time. This is the confound that made us stop quoting 24.8 %. |
+| 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the communication window, so what we report is exposed communication time inside a training window, not blocking transfer time. This is the confound that made us stop quoting 24.8 %. |
 | 3 | CLR identification | Split into two halves. The detector is out of scope for a simulator with no gradients, so we pinned a schedule from independent literature with a written circularity guard. What we can now do, and did this week, is price it: the mask costs 3.2 points of time and holds to the byte in the ledger. |
 | 4 | Topology, centralized against ring | Turned from a threat into two measured axes. DP fan-in and spine oversubscription are knobs on the regime map, and they are the two things that actually set the trim ratio, multiplying it 2.7x and 5.5x. Hub-and-spoke pressure at one NIC is our fan-in 7 cell, and it is the worst cell of the map. |
 
@@ -390,9 +432,9 @@ we spend at budget 0.1. Nothing in a network simulator can test this.
 Our defence is a plan, not a result.
 
 **Not yet touched:** per-packet spraying, which is how Ultra Ethernet and
-Meta's fabric actually balance load, where we use per-flow ECMP. NSCC,
-the window-based controller Ultra Ethernet actually ships, where we use
-DCQCN. What an exempt job costs a neighbouring tenant. Anything above 64
+Meta's MRC balance load, where we use per-flow ECMP hashing. NSCC, the
+window-based controller the Ultra Ethernet specification defines, where
+we use DCQCN. What an exempt job costs a neighbouring tenant. Anything above 64
 ranks.
 
 The honest summary is that we have a mechanism result at one point of a
@@ -420,7 +462,7 @@ one, and explicitly asks for the congestion control we are proposing.
 Bounded gradient loss at a receiver is not new, and we should stop
 implying it is.
 
-**What we did not find anywhere.** A per-trimmed-range receiver verdict
+**What four literature reviews did not turn up.** A per-trimmed-range receiver verdict
 on a fabric with selective repeat. A loss budget denominated in bytes per
 (rank, step) rather than a probability. And an RDMA flow that ignores
 congestion notifications under a receiver-held loss budget, with the
@@ -478,10 +520,10 @@ Every figure and table above recomputes from a release bundle in
 
 | Run | Date | Release tag | What it is |
 | --- | --- | --- | --- |
-| #117 | 1 Sep | `zuihrl5stp6ulacoogghyp4loy7xsjpj` | 16-seed anchor, go-back-N, sweeps |
+| #117 | 1 Sep | `zuihrl5stp6ulacoogghyp4loy7xsjpj` | the sixteen-seed 16-rank configuration, go-back-N, plus sweeps |
 | #120 | 6 Sep | `uwlaookzhemmwabtbwfe2yhyxepupnmw` | eight-cell regime map |
 | #121 | 7 Sep | `b363b3rri7pbgbaudfh3tbnysiranl66` | FORGIVE with exemption, two cells, three seeds |
-| #122 | 8 Sep | `rt4732ejzjqe2hkar2bturuv3qav6pv3` | dose front and mask ablation, 56 arms |
+| #122 | 8 Sep | `rt4732ejzjqe2hkar2bturuv3qav6pv3` | budget sweep and mask ablation, 56 arms |
 
 Supporting documents in this directory: `forgive-protocol.md` is the
 specification, `forgive-related-work.md` the positioning,

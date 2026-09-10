@@ -86,7 +86,7 @@ TITLE, 58px bold, upper left at the 68px margin, wrapped to two lines:
   "Phase-aware bounded loss at LLM scale"
 
 SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
-  "What it buys, and where it stops"
+  "Measured benefits and limits"
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
@@ -96,7 +96,7 @@ BOTTOM LEFT, 20px, three tight lines:
 BOTTOM RIGHT, a horizontal strip of three statistics, each a figure above
 a label, 58px bold figure and 16px label, 58px apart:
   "3.91 %"  above  "shorter training window, 16 matched seeds"
-  "153 ms"  above  "off the worst all-reduce of the episode"
+  "153 ms"  above  "reduction in the episode's worst all-reduce"
   "0.93"    above  "correlation with trims prevented"
 
 Nothing else. No logo, no decorative rule.
@@ -124,20 +124,18 @@ placed in the 58px gaps. Each card carries a monospace step number at
     "by hand. Does it hold where the network itself makes the loss?"
 
   Card 02, "Build the fabric":
-    "No public backend modelled it, so we built one: packet trimming, PFC"
-    "off, 64 ranks, loss produced by a real incast."
+    "Public backends did not model it. We built packet trimming with PFC"
+    "off for 64 ranks, and a real incast produced the loss."
 
-  Card 03, "It works, and we know why":
-    "3.91 % of training time across sixteen seeds. The saving tracks the"
-    "packet trims prevented, not the gradient bytes discarded."
+  Card 03, "Prevented trims explain the saving":
+    "Training time fell 3.91 % across sixteen seeds. Packet trims prevented"
+    "explain the saving; discarded gradient bytes do not."
 
-  Card 04, "And we know where it stops":
-    "The value comes from the recovery scheme. Change go-back-N to"
-    "selective repeat and 3.9 to 11.1 % becomes 0.78 %."
+  Card 04, "The recovery scheme sets the limit":
+    "With selective repeat, relief drops from 3.9 to 11.1 % to 0.78 %."
 
 CLOSING LINE, centred beneath the row:
-  "That last step is why we can state the scope of the claim instead of
-  being asked for it."
+  "The selective-repeat result defines the claim's scope."
 
 SPEAKER NOTE: "Nothing here was exploratory. Each run had a decision rule
 written before it was dispatched, and the rule chose the next run."
@@ -147,7 +145,7 @@ SLIDE 3 of 10
 ===============================================================
 
 HEADLINE, 34px bold:
-  "Six of the seven weeks went into the instrument"
+  "The instrument took six of the seven weeks"
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
@@ -164,12 +162,12 @@ BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
   20 Jul  "fork ASTRA-sim"
   27 Jul  "UEC packet trimming"
-   4 Aug  "trimming to UEC 1.0.3"
+    4 Aug  "add trimming to UEC 1.0.3"
    6 Aug  "selective repeat"
    9 Aug  "SLURM cluster runners"
-  17 Aug  "critical-step schedule pinned"
+    17 Aug  "pin the critical-step schedule"
   22 Aug  "sixteen seeds"
-   5 Sep  "DCQCN and forgiveness"
+    5 Sep  "add DCQCN and forgiveness"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
@@ -179,8 +177,8 @@ bold 20px label and a 16px sublabel:
    8 Sep  "run #122"  /  "budget sweep"
 
 CLOSING LINE:
-  "184 commits, four cluster runs, about 180 simulated configurations at
-  roughly five hours each."
+  "We made 184 commits and ran four cluster jobs across about 180 simulated
+  configurations at roughly five hours each."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Everything the
 questions were about had to be built before anything could be measured."
@@ -234,9 +232,8 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
   "off the worst all-reduce of the episode, CI [5, 302] ms" at 16px
 
 CLOSING LINE:
-  "The policy flattens the worst seeds and barely moves the mild ones. On
-  the four seeds whose worst all-reduce exceeds 1.3 s, that collective
-  drops by 434 to 716 ms."
+  "On the four seeds whose worst all-reduce exceeds 1.3 s, the policy cuts
+  that collective by 434 to 716 ms; mild seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 Arms are matched off one random selection stream, so the messages the
@@ -251,12 +248,12 @@ The mechanism. Two scatter panels side by side, equal width, sharing one
 vertical axis label.
 
 HEADLINE, 34px bold:
-  "The saving tracks trims prevented, not gradient bytes discarded"
+  "Prevented trims explain the saving; discarded gradient bytes do not"
 
 SHARED VERTICAL AXIS, labelled "milliseconds saved on the window", range
 -600 to 900, gridlines ink-12, a heavier ink-30 line at zero.
 
-LEFT PANEL, titled "against packet trims the policy prevented". Marks in
+LEFT PANEL, titled "packet trims prevented by the policy". Marks in
 ink-100 with a dashed ink-55 least-squares line. Horizontal axis "trims
 prevented, millions", range -40 to 80. Place "r = 0.93" at 58px bold
 inside the panel, upper left, with generous space around it.
@@ -285,15 +282,13 @@ DATA, ms saved / trims prevented in millions / GB discarded:
   -494.4  -32.91  2.10
 
 THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
-  "Every seed discards about the same two gigabytes. That number predicts
-  nothing."
+  "Each seed discards about the same two gigabytes, which predicts nothing."
   "The slope is 11.9 ms per million trims prevented."
-  "The three seeds that regress are the three where the policy added
-  trims."
+  "The policy regresses on the three seeds where it adds trims."
 
 CLOSING LINE:
-  "Discarding 1.98 GiB of gradient removed 156 GiB from the wire, because
-  under go-back-N one trimmed packet rewinds a whole window."
+  "With go-back-N, discarding 1.98 GiB of gradient removed 156 GiB from the
+  wire because one trimmed packet rewinds a whole window."
 
 SPEAKER NOTE: "This is what makes it an explanation rather than a
 percentage, and it is also what told us where the gain would not appear,
@@ -304,8 +299,7 @@ SLIDE 6 of 10
 ===============================================================
 
 HEADLINE, 34px bold:
-  "Protecting the early steps costs most of the available gain, and we
-  should say so"
+  "Protecting the early steps uses most of the available gain"
 
 VISUAL: three horizontal bars across the left two thirds, 68px tall, 22px
 apart, sharing a left edge. Bar length is proportional to the training
@@ -321,15 +315,14 @@ at 16px beneath:
   Bar 3:  "9.42 %"  /  "CI [7.03, 11.82] %"
 
 RIGHT THIRD: an ink panel with paper text:
-  section label  "WHERE THE DIFFERENCE GOES"
+  section label  "WHERE THE TIME GOES"
   "242 ms" at 58px bold
-  "the phase bound's cost across steps 1 to 3, against the policy's whole
+  "cost of the phase bound across steps 1 to 3, against the policy's
   292 ms gain. It costs nothing measurable at the tail." at 16px
 
 CLOSING LINE:
-  "The claim is not that the schedule is free. It is that most of the
-  achievable gain sits in the permissive steps anyway, so a schedule buys
-  the early phase back cheaply."
+  "The schedule costs capacity, but most achievable gain comes from
+  permissive steps, so it restores the early phase cheaply."
 
 SPEAKER NOTE: "Both shedding arms drop messages at the sender. They
 differ only in whether the critical steps are protected."
@@ -341,8 +334,7 @@ SLIDE 7 of 10
 This slide owns the scope of the result. It must not read as an apology.
 
 HEADLINE, 34px bold:
-  "The gain is a property of the recovery scheme, and we measured its
-  edge"
+  "The recovery scheme determines the gain, and we measured its limit"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
 across the left two thirds. One bar per metric, ink-100 fill, drawn as a
@@ -364,20 +356,19 @@ Metric labels on the left at 16px, with the underlying pair in ink-55 at
       "4503 to 6795 ms against 1210 ms"
 
 RIGHT THIRD: an ink panel with paper text:
-  section label  "AND WE MAPPED IT"
+  section label  "WE MAPPED THE REGIME"
   "8 cells" at 34px bold
-  "64 ranks, selective repeat throughout, varying congestion control,
-  fan-in and oversubscription, against a rule written before the run."
+  "Across 64 ranks with selective repeat, we varied congestion control,
+  fan-in and oversubscription under a rule written before the run."
   a 1px paper-30 divider
-  "Rule asked for a trim ratio of 0.5. Worst cell reached 0.24."
-  "Rule asked for a burst excess of 20 % of the window. Worst cell
+  "The rule required a trim ratio of 0.5. The worst cell reached 0.24."
+  "The rule required a burst excess of 20 % of the window. The worst cell
   reached 0.62 %."
 
 CLOSING LINE:
-  "Relief across our go-back-N arms runs 3.9 to 11.1 %. The
-  selective-repeat arm buys 0.78 %. Every bounded-loss result our
-  literature reviews turned up, ours included, was measured on the left
-  side of this chart."
+  "Relief across our go-back-N arms is 3.9 to 11.1 %, while the
+  selective-repeat arm gains 0.78 %. Our literature review found every
+  bounded-loss result, including ours, on the left side of this chart."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
 selective repeat and Ultra Ethernet, so the finding that admission-time
@@ -389,7 +380,7 @@ SLIDE 8 of 10
 ===============================================================
 
 HEADLINE, 34px bold:
-  "The four open questions from May are now answered or scoped"
+  "May's four open questions are now answered or scoped"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card carries a monospace number at
@@ -398,28 +389,28 @@ status chip in each card's top right: 8px radius, ink-100 fill, paper
 text, 14px, reading either "CLOSED" or "SCOPED".
 
   Card 01, chip "SCOPED", question "Sparsification":
-    "We model pure drop with no error feedback, deliberately separate from
-    compression. Mixing the two is a second uncontrolled lossy layer: the
-    optimiser's residual does not know which updates never arrived."
+    "We model pure drop without error feedback separately from compression.
+    Mixing them creates a second uncontrolled lossy layer: the optimiser's
+    residual does not know which updates never arrived."
 
   Card 02, chip "CLOSED", question "Compute and transport interleaving":
     "Chakra traces overlap 5.4 ms of compute per node with the window, so
-    we report exposed communication time. This is the confound that made
-    us stop quoting the May headline."
+    we report exposed communication time. The overlap is the confound that
+    prevents us from quoting the May headline."
 
   Card 03, chip "SCOPED", question "CLR identification":
     "A simulator with no gradients cannot host a detector, so the schedule
-    is pinned from independent literature. What we can now do is price it:
-    the mask costs 3.2 points of time and holds to the byte in the ledger."
+    is pinned from independent literature. The ledger prices the mask at
+    3.2 points of time and tracks it to the byte."
 
   Card 04, chip "CLOSED", question "Centralized against ring":
-    "Now two measured axes. Fan-in and spine oversubscription set the trim
-    ratio, multiplying it 2.7x and 5.5x. Hub-and-spoke pressure at one NIC
-    is our fan-in 7 cell, the worst on the map."
+    "We measured two axes. Fan-in and spine oversubscription set the trim
+    ratio, multiplying it 2.7x and 5.5x. Our fan-in 7 cell models
+    hub-and-spoke pressure at one NIC and is worst on the map."
 
 CLOSING LINE:
-  "Two are closed by construction, two are scoped to an experiment that
-  needs hardware a simulator cannot provide."
+  "Two questions are closed by construction; the other two require
+  hardware that a simulator cannot provide."
 
 ===============================================================
 SLIDE 9 of 10
@@ -429,25 +420,25 @@ Future work. Mark it preliminary in the visual itself, not only in the
 notes.
 
 HEADLINE, 34px bold:
-  "Once the transport repairs selectively, the cost to attack is the
-  congestion controller"
+  "With selective repair, the congestion controller becomes the next cost
+  to reduce"
 
 LEFT HALF: three stacked statements, 22px apart, each with its key figure
 pulled out at 34px bold on its own line above 20px body text.
 
   "24 %"
   "DCQCN lengthens the training window by this much on the worst cell of
-  the map, while cutting packet trimming eightfold. Its tail is the rate
-  cut, not the repair."
+  the map, while cutting packet trimming eightfold. The rate cut creates
+  the tail rather than the repair."
 
   "10.4 to 10.9 %"
-  "recovered by letting the receiver forgive what the fabric trimmed and
+  "FORGIVE recovers this by letting the receiver forgive what the fabric trimmed and
   letting a flow with unspent budget ignore rate cuts until the receiver
   refuses it, for 6.3 % of data-parallel bytes."
 
   "4 to 5x"
-  "more time recovered per unit of gradient discarded than sender-side
-  shedding, at every budget we tested."
+  "FORGIVE recovers this much more time per unit of gradient discarded than
+  sender-side shedding at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
 label reading "PRELIMINARY: THREE SEEDS, ONE CELL, ONE CONTROLLER".
@@ -489,7 +480,7 @@ matching slide 1 so the deck closes where it opened. No slide number, no
 closing line.
 
 HEADLINE, 34px bold, paper:
-  "Three things I would like from you"
+  "I need help to take the next three steps"
 
 VISUAL: three equal columns separated by 1px paper-30 vertical rules.
 Each column has a monospace number at 28px in paper at 40%, a bold 20px
@@ -498,21 +489,19 @@ title, then 20px body.
   Column 01, "A GPU collaborator":
     "Export the forgiven byte ranges, zero those elements in a PyTorch DDP
     communication hook, train a 1B-class model against an unmodified run
-    at budgets 0.1 to 0.4. Eight GPUs for one to two weeks. It is the only
-    thing that can close the accuracy claim, and no amount of cluster time
-    substitutes for it."
+    at budgets 0.1 to 0.4. Eight GPUs for one to two weeks. Only this
+    experiment can resolve the accuracy claim; cluster time cannot replace it."
 
   Column 02, "A view on the controller":
     "We use DCQCN because it is what the backend had. The claim does not
-    depend on it, but the paper's currency might. Is it worth three to
+    depend on it, but it may matter for the paper. Is it worth three to
     four weeks to implement NSCC, the controller the Ultra Ethernet
     specification defines?"
 
   Column 03, "A view on the framing":
-    "Zechen and I think the pragmatic submission is slides 4 to 7 as the
-    result, with the boundary owned rather than hidden. The alternative is
-    to wait for FORGIVE to mature and write the Ultra Ethernet paper
-    instead: stronger, and about three months further out."
+    "Zechen and I favor slides 4 to 7 as the result and state its boundary
+    directly. We could wait for FORGIVE to mature and write the Ultra
+    Ethernet paper instead: stronger, and about three months further out."
 
 SPEAKER NOTE: "Stop here and take the discussion."
 
@@ -521,32 +510,32 @@ BACKUP SLIDE, place after slide 10
 ===============================================================
 
 HEADLINE, 34px bold:
-  "What we will not claim, and why"
+  "We will not claim what the evidence cannot support"
 
 VISUAL: a two-column table with 1px ink-30 horizontal rules only, no
 vertical rules and no fill. Left column 16px bold, right column 16px
 regular.
 
   "per-rank p99"
-  "Not a result. Averages -4.9 % across the same sixteen seeds, CI
+  "This is not a result. It averages -4.9 % across the same sixteen seeds, CI
   [-19.6, +9.8]. It is the top three of 320 samples and one path
   collision moves it by half."
 
   "worst-collective relief as a percentage"
-  "Report the 153 ms with CI [5, 302] ms instead. The ratio form averages
-  10.8 % with CI [-0.6, 22.2] and spans zero, because the baseline varies
+  "We report 153 ms with CI [5, 302] ms instead. The ratio form averages
+  10.8 % with CI [-0.6, 22.2] and spans zero because the baseline varies
   by seed."
 
   "the run #117 budget grid"
-  "Ran unmatched: the profile name entered the selection hash. Fixed, not
-  yet re-run."
+  "This ran unmatched because the profile name entered the selection hash.
+  We fixed it, but have not yet rerun it."
 
   "the sweeps outside the sixteen-seed configuration"
-  "One seed each. Directional, not measured."
+  "Each sweep has one seed, so these results are directional, not measured."
 
   "congestion control in run #117"
-  "There was none in any arm. It was added afterwards, so slides 4 to 7
-  are all no-congestion-control numbers."
+  "No arm used it. We added it afterward, so slides 4 to 7 contain only
+  no-congestion-control numbers."
 
   "anything about accuracy"
   "The simulator computes no gradients. That claim needs the GPU

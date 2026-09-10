@@ -137,17 +137,16 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     repeat."
 
   Card 03, "Experimental harness":
-    "One paired comparison takes most of a cluster-day. We built a
-    month-long harness with a shared random stream, sixteen fixed seeds,
-    and archived results."
+    "One paired comparison takes most of a day. We built a harness with
+    ephemeral GitHub Actions runners on DCS and archived the results."
 
   Card 04, "Result":
-    "Training time fell 3.91 % across sixteen seeds. Prevented trims
-    predict the savings, and recovery limits them."
+    "Training time fell 3.91 % across sixteen seeds. Trims the policy
+    prevented explain the saving, and the recovery scheme limits it."
 
   Card 05, "FORGIVE":
-    "FORGIVE adapts DBLP to congestion control with receiver-driven loss,
-    byte budgets, and receiver-revocable sender exemptions."
+    "FORGIVE adapts DBLP to congestion control. The receiver decides which
+    loss to accept, counts the budget in bytes, and revokes exemptions."
 
 CLOSING LINE, centred beneath the row:
   "Each addition was required to test DBLP."
@@ -168,21 +167,21 @@ is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
 
 ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
-  "Instrumentation"                   20 Jul to 11 Aug
-  "Experiment platform"               9 Aug to  1 Sep
-  "Fabric sweep"                       1 Sep to  7 Sep
-  "FORGIVE"                          5 Sep to  9 Sep
+  "Build instrumentation"              20 Jul to 11 Aug
+  "Build experiment platform"          9 Aug to  1 Sep
+  "Sweep the fabric"                   1 Sep to  7 Sep
+  "Build FORGIVE"                      5 Sep to  9 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
   20 Jul  "fork ASTRA-sim"
-  27 Jul  "UEC packet trimming"
-   4 Aug  "UEC 1.0.3 trimming"
-   6 Aug  "selective repeat"
-   9 Aug  "SLURM runners"
-  17 Aug  "protected-step schedule"
-  22 Aug  "16 seeds"
-   5 Sep  "DCQCN + FORGIVE"
+  27 Jul  "add UEC packet trimming"
+   4 Aug  "add trimming to UEC 1.0.3"
+   6 Aug  "add selective repeat"
+   9 Aug  "provision DCS GitHub Actions runners"
+  17 Aug  "pin the protected-step schedule"
+  22 Aug  "choose 16 seeds"
+   5 Sep  "add DCQCN and FORGIVE"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
@@ -192,8 +191,9 @@ bold 20px label and a 16px sublabel:
   8 Sep  "run #122"  /  "budget sweep"
 
 CLOSING LINE:
-  "One paired comparison takes most of a day; a full run takes several days.
-  Month-long harness: 184 commits, four cluster jobs, 180 configurations."
+  "One paired comparison takes most of a day, and a full run takes several
+  days. We built DCS runners, made 184 commits, ran four cluster jobs, and
+  covered 180 configurations."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
@@ -252,8 +252,8 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
   "reduction in the slowest all-reduce, CI [5, 302] ms" at 16px
 
 CLOSING LINE:
-  "For four seeds with a slowest all-reduce above 1.3 s, DBLP cuts 434 to
-  716 ms. Mild seeds barely move."
+  "On the four seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
+  all-reduce by 434 to 716 ms; mild seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -268,7 +268,7 @@ Two scatter panels side by side, equal width, sharing one vertical axis
 label.
 
 HEADLINE, 34px bold, two sentences:
-  "Prevented trims predict savings. Discarded bytes do not."
+  "Prevented trims explain the saving; discarded bytes do not."
 
 GLOSS LINE directly beneath the headline, 16px, ink at 55%:
   "A trim drops packet payload and forwards its header."
@@ -308,13 +308,13 @@ DATA, ms saved / trims prevented in millions / GB discarded:
   -494.4  -32.91  2.10
 
 THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
-  "Each seed discards about 2 GB; it predicts nothing."
-  "11.9 ms per million prevented trims."
-  "All regressions add trims."
+  "Each seed discards about 2 GB, which predicts nothing."
+  "The slope is 11.9 ms per million trims prevented."
+  "The policy regresses on the three seeds where it adds trims."
 
 CLOSING LINE:
-  "Under go-back-N, 1.98 GiB of discarded gradient removes 156 GiB from
-  the wire: one trim rewinds the send window."
+  "With go-back-N, discarding 1.98 GiB of gradient removes 156 GiB from the
+  wire because one trimmed packet rewinds a whole window."
 
 SPEAKER NOTE: "This is what makes the result an explanation rather than a
 percentage, and it is what told us where the gain would not appear, which
@@ -357,17 +357,19 @@ READING LINE directly beneath the chart, 16px, ink at 55%:
 
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
-  "8 configs" at 34px bold
-  "64 ranks, selective repeat. We swept congestion control, fan-in and
-  spine oversubscription. Criteria were set before the run."
+  "8 configurations" at 34px bold
+  "All 64 ranks used selective repeat, and we swept congestion control,
+  fan-in, and spine oversubscription. We set the criteria before the run."
   a 1px paper-30 divider
-  "Target: at least half a byte trimmed per byte sent; most congested config 0.24."
-  "Target: burst at least a fifth of training time; most congested config 0.62 %."
+  "We required switches to trim at least half a byte per byte sent. The
+  most congested configuration reached 0.24."
+  "We required the burst to take at least a fifth of training time. The
+  most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
-  "DBLP saves 3.9 to 11.1 % with go-back-N and 0.78 % with selective
-  repeat. All bounded-loss results in our review use go-back-N-like
-  recovery."
+  "Relief across our go-back-N arms is 3.9 to 11.1 %, while the
+  selective-repeat arm gains 0.78 %. All bounded-loss results in our
+  review use go-back-N-like recovery."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
 selective repeat and Ultra Ethernet, so the finding that admission-time
@@ -390,16 +392,16 @@ at 34px bold on its own line above 20px body text.
   "24 %"
   "With selective repeat, DCQCN adds this much to the 20-step run on the
   most congested configuration while reducing trimming eightfold. Rate
-  reductions, not repair, cause the slowdown."
+  reductions create the slowdown rather than repair."
 
   "10.4 to 10.9 %"
-  "FORGIVE recovers that time. The receiver accepts trimmed loss; senders
-  with budget remaining ignore rate reductions until refusal. Cost: 6.3 %
-  of data-parallel bytes."
+  "FORGIVE recovers that time by letting the receiver accept trimmed loss
+  and allowing senders with budget remaining to ignore rate reductions
+  until the receiver refuses. It uses 6.3 % of data-parallel bytes."
 
   "4 to 5x"
-  "More time per discarded gradient percent than sender drop, at every
-  budget we tested."
+  "FORGIVE recovers 4 to 5x more time per discarded gradient percent than
+  sender drop at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
 label reading "PRELIMINARY: THREE SEEDS, ONE FABRIC, ONE CONGESTION
@@ -419,8 +421,8 @@ models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "Above budget 0.2, gains flatten and gradient loss plateaus near 9.3 %
-  because trimming stops before the budget is spent."
+  "Above a budget of 0.2, the gain flattens, and discarded gradient levels
+  off near 9.3 % because trimming stops before the budget is spent."
 
 SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
 as: further right means more gradient thrown away, higher means more
@@ -439,7 +441,7 @@ SLIDE 8 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "We closed two July questions and scoped two"
+  "We closed two July questions and scoped the other two"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card carries a monospace number at
@@ -448,24 +450,26 @@ each card's top right: 8px radius, ink-100 fill, paper text, 14px,
 reading either "CLOSED" or "SCOPED".
 
   Card 01, chip "SCOPED", question "Sparsification":
-    "Pure drop, no error feedback; separate from compression. Mixing them
-    adds a second uncontrolled loss layer."
+    "We model pure drop without error feedback, separately from
+    compression. Mixing the two creates a second uncontrolled lossy layer."
 
   Card 02, chip "CLOSED", question "Compute and transport interleaving":
-    "Chakra shows 5.4 ms/node compute overlap. We report exposed
-    communication time; the preprint headline does not apply."
+    "Chakra traces show 5.4 ms of compute per node overlapping the run, so
+    we report exposed communication time. The overlap prevents us from
+    quoting the preprint headline."
 
   Card 03, chip "SCOPED", question "CLR identification":
     "The simulator has no gradients, so it cannot host a detector. The
     schedule is pinned from CLR detection literature."
 
   Card 04, chip "CLOSED", question "Centralized traffic versus ring traffic":
-    "Fan-in multiplies switch trimming 2.7x; spine oversubscription, 5.5x.
-    Seven-to-one fan-in models hub-and-spoke pressure at one NIC and is
-    the most congested configuration."
+    "Fan-in multiplies switch trimming 2.7x, while spine oversubscription
+    multiplies it 5.5x. Seven-to-one fan-in models hub-and-spoke pressure
+    at one NIC and is the most congested configuration."
 
 CLOSING LINE:
-  "Two are closed by construction; two need hardware."
+  "Two questions are closed by construction; the other two require
+  hardware that a simulator cannot provide."
 
 ===============================================================
 FINAL CHECK BEFORE YOU FINISH

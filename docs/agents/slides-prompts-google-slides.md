@@ -93,7 +93,7 @@ TITLE, 58px bold, upper left at the 68px margin, on two lines:
   "at modern ML training scale"
 
 SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
-  "Measured benefits and limits"
+  "We rebuilt DBLP's test environment to resemble a modern fabric"
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
@@ -115,51 +115,57 @@ is simulation on a fabric we built. Nothing here speaks to accuracy."
 SLIDE 2 of 8
 ===============================================================
 
-This slide carries the motivation for everything that follows. The cards
-must read left to right as one argument, each one explaining why the next
-piece of work existed.
+This slide states the motivation for the whole deck. Each card names a
+gap between DBLP's evaluation and a modern fabric, and the change that
+closed it. The cards read left to right as one argument.
 
 HEADLINE, 34px bold:
-  "We tested DBLP on a lossy fabric"
+  "DBLP's testbed does not resemble a modern training fabric"
 
 VISUAL: five cards in one horizontal row, equal width, 16px radius, 1px
 ink border, paper fill, connected left to right by 2px ink-30 arrows
-placed in the gaps. Each card carries a monospace step number at 28px in
+placed in the gaps. Each card shows a monospace step number at 28px in
 ink-30 at its top left, then a bold 20px line, then 20px body.
 
-  Card 01, "DBLP under injected loss":
+  Card 01, "DBLP's evaluation":
     "DBLP combines Accordion's phase awareness with lossy transport. It
     worked on 4 nodes with hand-injected loss."
 
-  Card 02, "Lossy fabric":
-    "Injected loss does not capture fabric behavior. The ns-3 backend is
-    lossless RDMA, so we disabled PFC and added UEC packet trimming and
-    selective repeat."
+  Card 02, "A fabric that loses packets itself":
+    "Injected loss does not reproduce fabric behavior. The ns-3 backend
+    ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
+    and added selective repeat at 64 ranks."
 
-  Card 03, "Experimental harness":
+  Card 03, "A harness that survives a day":
     "A paired comparison takes a day. Our harness provisions ephemeral
-    GitHub Actions runners on DCS and archives results."
+    GitHub Actions runners on DCS and archives every result."
 
-  Card 04, "Result":
-    "Training time fell 3.91 % across 16 seeds. Trims the policy
-    prevented explain the saving, and the recovery scheme limits it."
+  Card 04, "The answer, 16 seeds":
+    "Training time fell 3.91 % across 16 seeds. Prevented trims explain
+    the saving, and the recovery scheme limits it."
 
-  Card 05, "FORGIVE":
-    "FORGIVE adapts DBLP to congestion control. The receiver accepts loss,
-    counts the budget in bytes, and revokes sender exemptions."
+  Card 05, "DBLP under congestion control":
+    "Every modern fabric runs congestion control. FORGIVE lets the
+    receiver accept trimmed loss, counts the budget in bytes, and revokes
+    sender exemptions."
 
 CLOSING LINE, centred beneath the row:
-  "We added each component to test DBLP."
+  "Each change closes a gap between DBLP's testbed and a modern fabric."
 
-SPEAKER NOTE: "Nothing here was exploratory. Each run had a decision rule
-written before it was dispatched, and the rule chose the next run."
+SPEAKER NOTE: "We could not trust a result until the environment
+resembled a real fabric, so the order of these cards is the order the
+work had to happen in. Nothing here was exploratory; each run had a
+decision rule written before it was dispatched, and the rule chose the
+next run."
 
 ===============================================================
 SLIDE 3 of 8
 ===============================================================
 
+Each band names the gap it closed, not the activity it contained.
+
 HEADLINE, 34px bold:
-  "We built the platform and ran the experiments"
+  "We spent 6 of 7 weeks closing those gaps"
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
@@ -167,10 +173,10 @@ is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
 
 ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
-  "Build instrumentation"              20 Jul to 11 Aug
-  "Build experiment platform"          9 Aug to  1 Sep
-  "Sweep the fabric"                   1 Sep to  7 Sep
-  "Build FORGIVE"                      5 Sep to  9 Sep
+  "Make the loss real"                 20 Jul to 11 Aug
+  "Make a comparison repeatable"        9 Aug to  1 Sep
+  "Find where the result holds"         1 Sep to  7 Sep
+  "Redesign for congestion control"     5 Sep to  9 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
@@ -324,8 +330,9 @@ is the next slide."
 SLIDE 6 of 8
 ===============================================================
 
-This slide states the scope of the result. It must not read as an
-apology.
+This slide states the scope of the result. Selective repeat was our own
+fidelity change, so the limit comes from the same programme as the gain.
+The slide must not read as an apology.
 
 HEADLINE, 34px bold:
   "Go-back-N drives the gain; selective repeat removes it"
@@ -355,6 +362,10 @@ nobody has to guess which number belongs to which:
 READING LINE directly beneath the chart, 16px, ink at 55%:
   "At equal workload, go-back-N creates 110 to 520x more trimmed bytes."
 
+SUPPORTING LINE beneath the reading line, 20px:
+  "We added selective repeat for fidelity, and it removed most of the
+  gain."
+
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
   "8 configurations" at 34px bold
@@ -380,8 +391,9 @@ own, and it is what motivated the mechanism on the next slide."
 SLIDE 7 of 8
 ===============================================================
 
-Future work. Mark it preliminary in the visual itself, not only in the
-notes.
+Future work, and the last gap the deck closes. Every modern fabric runs
+congestion control, so DBLP has to work under one. Mark the numbers
+preliminary in the visual itself, not only in the notes.
 
 HEADLINE, 34px bold:
   "FORGIVE applies DBLP under congestion control"
@@ -444,7 +456,7 @@ HEADLINE, 34px bold:
   "We closed 2 July questions and scoped the other 2"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
-fill, equal size, 22px gutter. Each card carries a monospace number at
+fill, equal size, 22px gutter. Each card shows a monospace number at
 28px in ink-30, a bold 20px question, and 20px body. Put a status chip in
 each card's top right: 8px radius, ink-100 fill, paper text, 14px,
 reading either "CLOSED" or "SCOPED".
@@ -483,21 +495,24 @@ fails rather than reporting it:
   Every headline is a plain declarative sentence with an active verb.
   Every slide except 1 has exactly one visual and one closing line in ink
     at 55%.
-  No slide carries more than three supporting facts.
+  No slide shows more than three supporting facts.
   Only #141413 and #faf9f5 appear, plus opacity steps of the two.
   No icons, emoji, clip art, gradients, or text shadows anywhere.
   Every chart series is labelled beside itself, with no legend box.
   Every number in the deck matches the specification digit for digit.
   Speaker notes are attached wherever the specification supplied one.
 
-The through-line of the deck, in case a headline needs rewording: we
-wanted to run the DBLP idea on an environment as close to a modern
-training fabric as we could build, which is why we converted the shipped
-lossless RDMA backend into a lossy one with PFC off and UEC packet
-trimming, and added selective repeat on top of it; stabilising the
-experiment took a month we had not planned for; and FORGIVE is the
-design that idea turns into once you accept that a real fabric runs
-congestion control.
+The through-line, in case a headline needs rewording. DBLP was evaluated
+on 4 nodes with hand-injected loss, which does not resemble a modern
+training fabric, so we closed that gap one piece at a time. We converted
+the shipped lossless RDMA backend into a lossy one by disabling PFC and
+adding UEC packet trimming, we added selective repeat because modern
+transports recover that way, and we went to 64 ranks. Making a
+comparison repeatable took a month we had not planned for. Every change
+raised fidelity, and one of them, selective repeat, removed most of the
+gain; that is the result rather than a caveat. FORGIVE closes the last
+gap, because every modern fabric runs congestion control and DBLP has to
+work under one.
 
 Context, in case a caption needs it. The numbers come from four cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto

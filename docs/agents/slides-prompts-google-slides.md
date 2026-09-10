@@ -93,7 +93,7 @@ TITLE, 58px bold, upper left at the 68px margin, on two lines:
   "at modern ML training scale"
 
 SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
-  "We rebuilt DBLP's test environment to resemble a modern fabric"
+  "We built an ASTRA-sim simulation of a modern fabric"
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
@@ -120,7 +120,7 @@ gap between DBLP's evaluation and a modern fabric, and the change that
 closed it. The cards read left to right as one argument.
 
 HEADLINE, 34px bold:
-  "DBLP's testbed does not resemble a modern training fabric"
+  "DBLP did not simulate a modern training fabric"
 
 VISUAL: five cards in one horizontal row, equal width, 16px radius, 1px
 ink border, paper fill, connected left to right by 2px ink-30 arrows
@@ -131,13 +131,13 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     "DBLP combines Accordion's phase awareness with lossy transport. It
     worked on 4 nodes with hand-injected loss."
 
-  Card 02, "A fabric that loses packets itself":
-    "Injected loss does not reproduce fabric behavior. The ns-3 backend
-    ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
-    and added selective repeat at 64 ranks."
+  Card 02, "Fabric-generated loss":
+    "Injected loss does not reproduce fabric behavior. We disabled PFC in
+    the lossless ns-3 RDMA backend and added UEC packet trimming with
+    selective repeat at 64 ranks."
 
   Card 03, "A harness that survives a day":
-    "A paired comparison takes a day. Our harness provisions ephemeral
+    "A paired comparison takes a day, so our harness provisions ephemeral
     GitHub Actions runners on DCS and archives every result."
 
   Card 04, "The answer, 16 seeds":
@@ -145,12 +145,12 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     the saving, and the recovery scheme limits it."
 
   Card 05, "DBLP under congestion control":
-    "Every modern fabric runs congestion control. FORGIVE lets the
+    "Modern fabrics use congestion control. FORGIVE lets the
     receiver accept trimmed loss, counts the budget in bytes, and revokes
     sender exemptions."
 
 CLOSING LINE, centred beneath the row:
-  "Each change closes a gap between DBLP's testbed and a modern fabric."
+  "Together, these changes let us simulate a modern fabric."
 
 SPEAKER NOTE: "We could not trust a result until the environment
 resembled a real fabric, so the order of these cards is the order the
@@ -197,8 +197,8 @@ bold 20px label and a 16px sublabel:
   8 Sep  "run #122"  /  "loss-budget sweep"
 
 CLOSING LINE:
-  "A paired comparison takes a day, and a full run takes several
-  days. We made 184 commits and ran 4 cluster jobs across 180
+  "A paired comparison takes a day, and a full run takes several days; we
+  made 184 commits and ran 4 cluster jobs across 180
   configurations."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
@@ -259,7 +259,7 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
 
 CLOSING LINE:
   "On the 4 seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
-  all-reduce by 434 to 716 ms; the remaining seeds barely change."
+  all-reduce by 434 to 716 ms; mild seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -274,10 +274,10 @@ Two scatter panels side by side, equal width, sharing one vertical axis
 label.
 
 HEADLINE, 34px bold, two sentences:
-  "Prevented trims explain the saving; discarded bytes do not."
+  "Prevented trims explain the saving; discarded gradient bytes do not."
 
 GLOSS LINE directly beneath the headline, 16px, ink at 55%:
-  "A trim drops packet payload and forwards its header."
+  "During a trim, a switch drops packet payload and forwards the header."
 
 SHARED VERTICAL AXIS, labelled "20-step savings (ms)",
 ticks at
@@ -335,11 +335,11 @@ fidelity change, so the limit comes from the same programme as the gain.
 The slide must not read as an apology.
 
 HEADLINE, 34px bold:
-  "Go-back-N drives the gain; selective repeat removes it"
+  "The gain comes from go-back-N; selective repeat removes it"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
 across the left two thirds, titled "Go-back-N overhead versus selective
-repeat, same workload and burst". One bar
+repeat under the same workload and burst". One bar
 per measure, ink-100 fill, drawn as a range from its low value to its
 high value, with the low and high multiplier printed at the bar's two
 ends. Gridlines at 1x, 10x, 100x and 1000x in ink-12, labelled at 16px.
@@ -360,27 +360,28 @@ nobody has to guess which number belongs to which:
       "go-back-N 4503 to 6795 ms    selective repeat 1210 ms"
 
 READING LINE directly beneath the chart, 16px, ink at 55%:
-  "At equal workload, go-back-N creates 110 to 520x more trimmed bytes."
+  "At equal workload, go-back-N creates 110 to 520x as many trimmed bytes
+  as selective repeat."
 
 SUPPORTING LINE beneath the reading line, 20px:
-  "We added selective repeat for fidelity, and it removed most of the
-  gain."
+  "We added selective repeat for fidelity, which removed most of the gain."
 
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
   "8 configurations" at 34px bold
   "Across 64 ranks with selective repeat, we varied congestion control,
-  fan-in, and spine oversubscription. We set the criteria before the run."
+  fan-in, and spine oversubscription. We set success criteria before the
+  run."
   a 1px paper-30 divider
   "We required switches to trim at least 0.5 bytes per byte sent. The
   most congested configuration reached 0.24."
-  "We required the burst to take at least 20 % of training time. The
+  "We required the 7-sender burst to take at least 20 % of training time. The
   most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
-  "With go-back-N, relief is 3.9 to 11.1 %, while selective repeat gains
-  0.78 %. All bounded-loss results in our review use go-back-N-like
-  recovery."
+  "DBLP saves 3.9 to 11.1 % with go-back-N, while it saves 0.78 % with
+  selective repeat. All bounded-loss results in our review use
+  go-back-N-like recovery."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
 selective repeat and Ultra Ethernet, so the finding that admission-time
@@ -402,18 +403,18 @@ LEFT HALF: three stacked statements, 22px apart, each with its key figure
 at 34px bold on its own line above 20px body text.
 
   "24 %"
-  "With selective repeat, DCQCN adds 24 % to the 20-step run on the
-  most congested configuration while reducing trimming 8x. Rate
+  "With selective repeat, DCQCN lengthens the 20-step run on the most
+  congested configuration while reducing switch-trimmed bytes 8x. Rate
   reductions create the slowdown rather than repair."
 
   "10.4 to 10.9 %"
-  "FORGIVE recovers 10.4 to 10.9 % by letting the receiver accept trimmed loss
-  and allowing senders with budget remaining to ignore rate reductions
-  until the receiver refuses. It uses 6.3 % of data-parallel bytes."
+  "FORGIVE recovers time when the receiver accepts trimmed loss and senders
+  with budget remaining ignore rate reductions until the receiver refuses.
+  It uses 6.3 % of data-parallel bytes."
 
   "4 to 5x"
-  "FORGIVE recovers 4 to 5x more time per discarded gradient percent than
-  sender drop at every budget we tested."
+  "FORGIVE recovers more time per discarded gradient percent than sender
+  drop at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
 label reading "PRELIMINARY: 3 SEEDS, 1 FABRIC, 1 CONGESTION
@@ -433,8 +434,8 @@ models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "Above a budget of 0.2, the gain flattens, and discarded gradient levels
-  off near 9.3 % because trimming stops before the budget is spent."
+  "Above a budget of 0.2, the gain flattens, and discarded gradient bytes
+  level off near 9.3 % because trimming stops before the budget is spent."
 
 SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
 as: further right means more gradient thrown away, higher means more

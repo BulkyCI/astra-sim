@@ -93,7 +93,7 @@ TITLE, 58px bold, upper left at the 68px margin, on two lines:
   "at modern ML training scale"
 
 SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
-  "We simulate a modern training fabric in ASTRA-sim"
+  "We simulate a 64-rank lossy training fabric in ASTRA-sim/ns-3"
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
@@ -129,24 +129,24 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
 
   Card 01, "DBLP's evaluation":
     "DBLP combines Accordion's phase awareness with lossy transport. It
-    worked on 4 nodes with hand-injected loss."
+    ran on 4 nodes with hand-injected loss."
 
   Card 02, "A lossy fabric":
-    "Injected loss does not reproduce fabric behavior. The ns-3 backend
+    "Hand-injected loss cannot model a 64-rank fabric. The ns-3 backend
     ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
     and added selective repeat at 64 ranks."
 
-  Card 03, "Day-long comparisons":
-    "A paired comparison takes a day, so our harness provisions ephemeral
-    GitHub Actions runners on DCS and archives every result."
+  Card 03, "Paired comparisons":
+    "Each pair shares a seed and random stream; ephemeral GitHub Actions
+    runners on DCS archive both results."
 
-  Card 04, "Result across 16 seeds":
-    "Training time fell 3.91 % across 16 seeds. Prevented trims explain
-    the saving, and the recovery scheme limits it."
+  Card 04, "3.91 % lower training time":
+    "Across 16 seeds, prevented trims explain the 3.91 % reduction, and
+    selective repeat limits it."
 
   Card 05, "DBLP under congestion control":
-    "Modern fabrics use congestion control. FORGIVE lets the
-    receiver accept trimmed loss, counts the budget in bytes, and revokes
+    "FORGIVE lets DBLP run under congestion control: the
+    receiver accepts trimmed loss, counts the budget in bytes, and revokes
     sender exemptions."
 
 CLOSING LINE, centred beneath the row:
@@ -162,10 +162,10 @@ next run."
 SLIDE 3 of 8
 ===============================================================
 
-Each band names the gap it closed, not the activity it contained.
+Each band names a model dependency, not an implementation task.
 
 HEADLINE, 34px bold:
-  "We modeled loss and recovery before measuring DBLP"
+  "The simulator models loss and recovery before it measures DBLP"
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
@@ -173,10 +173,10 @@ is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
 
 ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
-  "Make the loss real"                 20 Jul to 11 Aug
-  "Make a comparison repeatable"        9 Aug to  1 Sep
-  "Find where the result holds"         1 Sep to  7 Sep
-  "Redesign for congestion control"     5 Sep to  9 Sep
+  "Model packet loss and recovery"      20 Jul to 11 Aug
+  "Pair runs deterministically"          9 Aug to  1 Sep
+  "Measure seed-dependent effects"       1 Sep to  7 Sep
+  "Model congestion control"             5 Sep to  9 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
@@ -191,13 +191,13 @@ above, joined by 1px ink-30 leader lines:
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
-  1 Sep  "run #117"  /  "go-back-N seed study"
-  6 Sep  "run #120"  /  "network sweep"
-   7 Sep  "run #121"  /  "FORGIVE"
-  8 Sep  "run #122"  /  "loss-budget sweep"
+  1 Sep  "16 paired seeds"  /  "go-back-N recovery"
+  6 Sep  "8 configurations"  /  "selective repeat"
+   7 Sep  "FORGIVE"  /  "3 seeds, 1 fabric, 1 controller"
+  8 Sep  "Loss-budget sweep"  /  "training time and gradient loss"
 
 CLOSING LINE:
-  "A paired comparison takes a day, and a full run takes several days."
+  "Shared seeds and random streams let paired run times be subtracted."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
@@ -213,7 +213,7 @@ SLIDE 4 of 8
 The main result. The chart is the slide.
 
 HEADLINE, 34px bold:
-  "DBLP improved training time in 13/16 seeds"
+  "DBLP reduces 20-step time in 13/16 seeds"
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
@@ -257,7 +257,8 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
 
 CLOSING LINE:
   "On the 4 seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
-  all-reduce by 434 to 716 ms; the other seeds barely change."
+  all-reduce by 434 to 716 ms; on 3 seeds, it raises 20-step time by
+  1.42 to 7.45 %."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -272,7 +273,7 @@ Two scatter panels side by side, equal width, sharing one vertical axis
 label.
 
 HEADLINE, 34px bold, two sentences:
-  "Prevented trims explain the saving; discarded gradient bytes do not."
+  "Prevented trims predict 20-step savings; discarded gradient bytes do not."
 
 GLOSS LINE directly beneath the headline, 16px, ink at 55%:
   "During a trim, a switch drops packet payload and forwards the header."
@@ -312,7 +313,7 @@ DATA, ms saved / trims prevented in millions / GB discarded:
   -494.4  -32.91  2.10
 
 THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
-  "Each seed discards about 2 GB, but discarded bytes do not predict the saving."
+  "Each seed discards 1.93 to 2.36 GB, but that does not predict 20-step savings."
   "The slope is 11.9 ms per million trims prevented."
   "The policy regresses on the 3 seeds where it adds trims."
 
@@ -333,7 +334,7 @@ fidelity change, so the limit comes from the same programme as the gain.
 The slide must not read as an apology.
 
 HEADLINE, 34px bold:
-  "Most DBLP relief comes from go-back-N recovery"
+  "DBLP saves 0.78 % with selective repeat, versus 3.9 to 11.1 % with go-back-N"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
 across the left two thirds, titled "Go-back-N overhead versus selective
@@ -362,14 +363,13 @@ READING LINE directly beneath the chart, 16px, ink at 55%:
   as selective repeat."
 
 SUPPORTING LINE beneath the reading line, 20px:
-  "Selective repeat removes most of the gain."
+  "Selective repeat retransmits lost packets without rewinding the window."
 
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
   "8 configurations" at 34px bold
-  "Across 64 ranks with selective repeat, we varied congestion control,
-  fan-in, and spine oversubscription. We set success criteria before the
-  run."
+  "Across 64 ranks with selective repeat, the sweep varies congestion
+  control, fan-in, and spine oversubscription."
   a 1px paper-30 divider
   "We required switches to trim at least 0.5 bytes per byte sent. The
   most congested configuration reached 0.24."
@@ -408,7 +408,7 @@ at 34px bold on its own line above 20px body text.
   "10.4 to 10.9 %"
   "FORGIVE recovers time when the receiver accepts trimmed loss and senders
   with budget remaining ignore rate reductions until the receiver refuses.
-  It uses 6.3 % of data-parallel bytes."
+  FORGIVE uses 6.3 % of data-parallel bytes."
 
   "4 to 5x"
   "FORGIVE recovers more time per discarded gradient percent than sender
@@ -432,7 +432,7 @@ models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "Above a budget of 0.2, the gain flattens, and discarded gradient bytes
+  "Above a budget of 0.2, training-time recovery flattens, and discarded gradient bytes
   level off near 9.3 % because trimming stops before the budget is spent."
 
 SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
@@ -452,7 +452,7 @@ SLIDE 8 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "The study answers 2 July questions and scopes the other 2"
+  "The study answers 2 July questions; 2 require hardware"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card shows a monospace number at
@@ -466,8 +466,8 @@ reading either "CLOSED" or "SCOPED".
 
   Card 02, chip "CLOSED", question "Compute and transport interleaving":
     "Chakra traces show 5.4 ms of compute per node overlapping the run, so
-    we report exposed communication time. The overlap prevents us from
-    quoting the preprint headline."
+    the study reports exposed communication time rather than end-to-end
+    training time."
 
   Card 03, chip "SCOPED", question "CLR identification":
     "The simulator has no gradients, so it cannot host a detector. The
@@ -475,8 +475,8 @@ reading either "CLOSED" or "SCOPED".
 
   Card 04, chip "CLOSED", question "Centralized traffic versus ring traffic":
     "Fan-in multiplies switch trimming 2.7x, while spine oversubscription
-    multiplies it 5.5x. A 7:1 fan-in models hub-and-spoke pressure
-    at one NIC and is the most congested configuration."
+    multiplies it 5.5x. At 7:1, fan-in creates the study's highest switch
+    trimming at one NIC."
 
 CLOSING LINE:
   "The remaining 2 questions require hardware rather than a simulator."
@@ -500,17 +500,15 @@ fails rather than reporting it:
   Every number in the deck matches the specification digit for digit.
   Speaker notes are attached wherever the specification supplied one.
 
-The through-line, in case a headline needs rewording. DBLP was evaluated
-on 4 nodes with hand-injected loss, which does not resemble a modern
-training fabric, so we closed that gap one piece at a time. We converted
-the shipped lossless RDMA backend into a lossy one by disabling PFC and
-adding UEC packet trimming, we added selective repeat because modern
-transports recover that way, and we went to 64 ranks. Making a
-comparison repeatable took a month we had not planned for. Every change
-raised fidelity, and one of them, selective repeat, removed most of the
-gain; that is the result rather than a caveat. FORGIVE closes the last
-gap, because every modern fabric runs congestion control and DBLP has to
-work under one.
+The through-line, in case a headline needs rewording. DBLP ran on 4 nodes
+with hand-injected loss, which does not model a modern training fabric.
+The simulation converts the shipped lossless RDMA backend into a lossy
+one by disabling PFC and adding UEC packet trimming; selective repeat
+matches modern recovery, and the simulation runs at 64 ranks. Each paired
+result shares a seed and random stream, and ephemeral DCS runners archive
+both results. Selective repeat reduces DBLP's 3.9 to 11.1 % go-back-N
+relief to 0.78 %, which defines the result's scope. FORGIVE applies DBLP
+under congestion control.
 
 Context, in case a caption needs it. The numbers come from four cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto

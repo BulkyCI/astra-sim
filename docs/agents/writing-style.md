@@ -155,6 +155,22 @@ the measurement, or the boundary instead.
 | "We spent 6 of 7 weeks closing those gaps" | "We modeled loss and recovery before measuring DBLP" |
 | "A harness that survives a day" | "Day-long comparisons" |
 
+## 14. Make every visible sentence earn its place.
+
+Keep a sentence only when it gives the reader a result, mechanism,
+condition, comparison, or boundary. Replace labels such as "the answer"
+and claims such as "barely changes" with the measurement itself. Delete
+the sentence when no specific fact is available.
+
+| drafted | his |
+| --- | --- |
+| "A paired comparison takes a day" | "Each paired result shares a seed and random stream" |
+| "The other seeds barely change" | "On 3 seeds, 20-step time rises 1.42 to 7.45 %" |
+
+Repeat a fact only when its placement supplies a new inference. On a
+timeline, shared randomness explains why paired times are comparable; on
+the result slide, it does not need repeating.
+
 ## Smaller habits, single instances each
 
 - Possessive to compress: "The four open questions from May" became
@@ -168,6 +184,7 @@ the measurement, or the boundary instead.
 - Repeat a number when it scopes the local claim; otherwise omit it.
 - Use digits for visible quantities; use an article when the number is not data.
 - State the evidence, measurement, or boundary rather than the effort.
+- Keep visible sentences only when they add a result, mechanism, condition, comparison, or boundary.
 
 ## Checklist before anything ships under his name
 

@@ -137,11 +137,11 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     repeat."
 
   Card 03, "Experimental harness":
-    "One paired comparison takes most of a day. We built a harness with
+    "One paired comparison takes a day. We built a harness with
     ephemeral GitHub Actions runners on DCS and archived the results."
 
   Card 04, "Result":
-    "Training time fell 3.91 % across sixteen seeds. Trims the policy
+    "Training time fell 3.91 % across 16 seeds. Trims the policy
     prevented explain the saving, and the recovery scheme limits it."
 
   Card 05, "FORGIVE":
@@ -180,18 +180,18 @@ above, joined by 1px ink-30 leader lines:
    6 Aug  "add selective repeat"
    9 Aug  "provision DCS GitHub Actions runners"
   17 Aug  "pin the protected-step schedule"
-  22 Aug  "choose 16 seeds"
+  22 Aug  "choose seeds"
    5 Sep  "add DCQCN and FORGIVE"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
-   1 Sep  "run #117"  /  "16 seeds, go-back-N"
+  1 Sep  "run #117"  /  "seeds, go-back-N"
   6 Sep  "run #120"  /  "8 configurations"
    7 Sep  "run #121"  /  "FORGIVE"
   8 Sep  "run #122"  /  "budget sweep"
 
 CLOSING LINE:
-  "One paired comparison takes most of a day, and a full run takes several
+  "One paired comparison takes a day, and a full run takes several
   days. We built DCS runners, made 184 commits, ran four cluster jobs, and
   covered 180 configurations."
 
@@ -209,7 +209,7 @@ SLIDE 4 of 8
 The main result. The chart is the slide.
 
 HEADLINE, 34px bold:
-  "Thirteen of sixteen seeds improved on the baseline"
+  "Thirteen seeds improved on the baseline"
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
@@ -244,7 +244,7 @@ DIRECT LABELS beside the first row, no legend box:
   ink-100 circle   "DBLP"  /  "0.5 % on steps 1, 2, 3, 20; 10 % elsewhere"
 
 RIGHT THIRD: an ink panel, 24px radius, paper text:
-  section label  "SIXTEEN SEEDS, PAIRED"
+  section label  "PAIRED SEEDS"
   "3.91 %" at 58px bold
   "faster 20-step run, 95 % CI [1.13, 6.68] %" at 16px
   a 1px paper-30 divider

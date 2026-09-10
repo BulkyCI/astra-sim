@@ -29,6 +29,7 @@ small while retaining the non-obvious project decisions.
 | Briefing someone who has not followed the work: the chronological progress review from the May DBLP draft to run #122, with figures | [September 2026 progress slides](slides-2026-09-progress.md) |
 | Presenting the go-back-N results as the centre, with FORGIVE as future work: the results-first variant of the progress review | [September 2026 results-first slides](slides-2026-09-results-first.md) |
 | Rebuilding any figure from either progress deck, or handing the numbers to someone outside the repository | [Figure data and readings](figure-data.md) |
+| Building the deck in Google Slides, or handing it to a slides-generating agent | [Google Slides build prompts](slides-prompts-google-slides.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/author-skill/SKILL.md) |

@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="560" viewBox="0 0 1060 560" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1060" height="560" fill="white"/>
+<text x="20" y="26" font-size="15" font-weight="bold">Run #122: what a percent of lost gradient buys, and who spends it well</text>
+<text x="20" y="46" font-size="11" fill="#4b5563">Worst cell of the map (DCQCN, fan-in 7, 4:1). Three seeds per point. Baseline is the same fabric shedding 0.5 % on every step; its window is 1688 to 1710 ms.</text>
+<rect x="88.3" y="90" width="31.0" height="340" fill="#16a34a" fill-opacity="0.10"/>
+<line x1="199.2" y1="90" x2="199.2" y2="430" stroke="#16a34a" stroke-dasharray="5 4"/>
+<text x="103.84615384615384" y="104" text-anchor="middle" font-size="9.5" fill="#166534">MLT: 0.7 to 3.3 %</text>
+<text x="205.23076923076923" y="104" font-size="9.5" fill="#166534">MLT at a quality target: 10 %</text>
+<line x1="80" y1="430" x2="700" y2="430" stroke="#333"/>
+<line x1="80" y1="90" x2="80" y2="430" stroke="#333"/>
+<line x1="80.0" y1="90" x2="80.0" y2="430" stroke="#f3f4f6"/>
+<text x="80.0" y="448" text-anchor="middle" font-size="10" fill="#4b5563">0 %</text>
+<line x1="199.2" y1="90" x2="199.2" y2="430" stroke="#f3f4f6"/>
+<text x="199.23076923076923" y="448" text-anchor="middle" font-size="10" fill="#4b5563">10 %</text>
+<line x1="318.5" y1="90" x2="318.5" y2="430" stroke="#f3f4f6"/>
+<text x="318.46153846153845" y="448" text-anchor="middle" font-size="10" fill="#4b5563">20 %</text>
+<line x1="437.7" y1="90" x2="437.7" y2="430" stroke="#f3f4f6"/>
+<text x="437.6923076923077" y="448" text-anchor="middle" font-size="10" fill="#4b5563">30 %</text>
+<line x1="556.9" y1="90" x2="556.9" y2="430" stroke="#f3f4f6"/>
+<text x="556.9230769230769" y="448" text-anchor="middle" font-size="10" fill="#4b5563">40 %</text>
+<line x1="676.2" y1="90" x2="676.2" y2="430" stroke="#f3f4f6"/>
+<text x="676.1538461538462" y="448" text-anchor="middle" font-size="10" fill="#4b5563">50 %</text>
+<line x1="80" y1="430.0" x2="700" y2="430.0" stroke="#f3f4f6"/>
+<text x="72" y="434.0" text-anchor="end" font-size="10" fill="#4b5563">0 %</text>
+<line x1="80" y1="373.3" x2="700" y2="373.3" stroke="#f3f4f6"/>
+<text x="72" y="377.3333333333333" text-anchor="end" font-size="10" fill="#4b5563">3 %</text>
+<line x1="80" y1="316.7" x2="700" y2="316.7" stroke="#f3f4f6"/>
+<text x="72" y="320.6666666666667" text-anchor="end" font-size="10" fill="#4b5563">6 %</text>
+<line x1="80" y1="260.0" x2="700" y2="260.0" stroke="#f3f4f6"/>
+<text x="72" y="264.0" text-anchor="end" font-size="10" fill="#4b5563">9 %</text>
+<line x1="80" y1="203.3" x2="700" y2="203.3" stroke="#f3f4f6"/>
+<text x="72" y="207.33333333333334" text-anchor="end" font-size="10" fill="#4b5563">12 %</text>
+<line x1="80" y1="146.7" x2="700" y2="146.7" stroke="#f3f4f6"/>
+<text x="72" y="150.66666666666669" text-anchor="end" font-size="10" fill="#4b5563">15 %</text>
+<line x1="80" y1="90.0" x2="700" y2="90.0" stroke="#f3f4f6"/>
+<text x="72" y="94.0" text-anchor="end" font-size="10" fill="#4b5563">18 %</text>
+<text x="390.0" y="470" text-anchor="middle" font-size="11.5">gradient bytes lost, share of all data-parallel bytes</text>
+<text x="26" y="260.0" text-anchor="middle" font-size="11.5" transform="rotate(-90 26 260.0)">training time recovered</text>
+<polyline points="156.6,228.9 181.8,194.1 191.6,179.5 189.9,184.5" fill="none" stroke="#1d4ed8" stroke-width="2.2"/>
+<line x1="155.6" y1="228.9" x2="157.6" y2="228.9" stroke="#1d4ed8" stroke-width="3"/>
+<line x1="156.6" y1="233.7" x2="156.6" y2="224.1" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="156.6" cy="228.9" r="5" fill="#1d4ed8"/>
+<text x="165.60576923076923" y="220.9277777777778" font-size="10" fill="#1d4ed8">p=0.1</text>
+<line x1="180.5" y1="194.1" x2="183.0" y2="194.1" stroke="#1d4ed8" stroke-width="3"/>
+<line x1="181.8" y1="203.0" x2="181.8" y2="185.2" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="181.8" cy="194.1" r="5" fill="#1d4ed8"/>
+<text x="190.76346153846154" y="186.07777777777775" font-size="10" fill="#1d4ed8">p=0.2</text>
+<line x1="191.1" y1="179.5" x2="192.1" y2="179.5" stroke="#1d4ed8" stroke-width="3"/>
+<line x1="191.6" y1="183.5" x2="191.6" y2="175.6" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="191.6" cy="179.5" r="5" fill="#1d4ed8"/>
+<text x="200.6" y="171.5333333333333" font-size="10" fill="#1d4ed8">p=0.4</text>
+<line x1="189.1" y1="184.5" x2="190.8" y2="184.5" stroke="#1d4ed8" stroke-width="3"/>
+<line x1="189.9" y1="187.8" x2="189.9" y2="181.2" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="189.9" cy="184.5" r="5" fill="#1d4ed8"/>
+<text x="198.93076923076922" y="176.5388888888889" font-size="10" fill="#1d4ed8">p=0.6</text>
+<polyline points="171.5,375.9 267.4,332.0 455.8,215.1 650.8,124.7" fill="none" stroke="#c2410c" stroke-width="2.2"/>
+<line x1="171.2" y1="375.9" x2="171.8" y2="375.9" stroke="#c2410c" stroke-width="3"/>
+<line x1="171.5" y1="383.7" x2="171.5" y2="368.0" stroke="#c2410c" stroke-width="3"/>
+<circle cx="171.5" cy="375.9" r="5" fill="#c2410c"/>
+<text x="180.5096153846154" y="389.8833333333333" font-size="10" fill="#c2410c">p=0.1</text>
+<line x1="266.8" y1="332.0" x2="268.0" y2="332.0" stroke="#c2410c" stroke-width="3"/>
+<line x1="267.4" y1="338.2" x2="267.4" y2="325.7" stroke="#c2410c" stroke-width="3"/>
+<circle cx="267.4" cy="332.0" r="5" fill="#c2410c"/>
+<text x="276.4307692307692" y="345.9666666666667" font-size="10" fill="#c2410c">p=0.2</text>
+<line x1="454.6" y1="215.1" x2="457.0" y2="215.1" stroke="#c2410c" stroke-width="3"/>
+<line x1="455.8" y1="222.8" x2="455.8" y2="207.5" stroke="#c2410c" stroke-width="3"/>
+<circle cx="455.8" cy="215.1" r="5" fill="#c2410c"/>
+<text x="464.81538461538463" y="229.13888888888889" font-size="10" fill="#c2410c">p=0.4</text>
+<line x1="649.4" y1="124.7" x2="652.1" y2="124.7" stroke="#c2410c" stroke-width="3"/>
+<line x1="650.8" y1="128.7" x2="650.8" y2="120.6" stroke="#c2410c" stroke-width="3"/>
+<circle cx="650.8" cy="124.7" r="5" fill="#c2410c"/>
+<text x="659.7576923076923" y="138.66111111111115" font-size="10" fill="#c2410c">p=0.6</text>
+<circle cx="219.1" cy="118.7" r="5" fill="white" stroke="#1d4ed8" stroke-width="2"/>
+<text x="228.1423076923077" y="122.71111111111111" font-size="10" fill="#1d4ed8">mask off</text>
+<circle cx="554.5" cy="162.5" r="5" fill="white" stroke="#c2410c" stroke-width="2"/>
+<text x="563.5384615384615" y="166.53333333333336" font-size="10" fill="#c2410c">mask off</text>
+<text x="94" y="130" font-size="11.5" fill="#1d4ed8" font-weight="bold">FORGIVE, receiver forgives what the fabric trimmed</text>
+<text x="94" y="148" font-size="11.5" fill="#c2410c" font-weight="bold">DBLP-style shedding, sender drops before sending</text>
+<rect x="728" y="90" width="312" height="184" fill="#eff6ff" stroke="#bfdbfe"/>
+<text x="740" y="112" font-size="12" font-weight="bold">Three readings</text>
+<text x="740" y="132" font-size="10.5" fill="#1e3a5f">1. The curve saturates. Budget 0.1 already buys</text>
+<text x="740" y="147" font-size="10.5" fill="#1e3a5f">80 % of the gain at two thirds of the loss, so</text>
+<text x="740" y="162" font-size="10.5" fill="#1e3a5f">the headline dose drops from 0.4 to 0.1.</text>
+<text x="740" y="177" font-size="10.5" fill="#1e3a5f"></text>
+<text x="740" y="192" font-size="10.5" fill="#1e3a5f">2. Aimed loss self-limits near 9.3 % because the</text>
+<text x="740" y="207" font-size="10.5" fill="#1e3a5f">fabric stops trimming; blind loss is linear in the</text>
+<text x="740" y="222" font-size="10.5" fill="#1e3a5f">dial and unbounded.</text>
+<text x="740" y="237" font-size="10.5" fill="#1e3a5f"></text>
+<text x="740" y="252" font-size="10.5" fill="#1e3a5f">3. Efficiency is flat: 1.4 to 1.7 points of time per</text>
+<text x="740" y="267" font-size="10.5" fill="#1e3a5f">percent of gradient for FORGIVE, 0.3 to 0.4 for</text>
+<text x="740" y="282" font-size="10.5" fill="#1e3a5f">shedding, at every budget.</text>
+<rect x="728" y="286" width="312" height="124" fill="#f9fafb" stroke="#e5e7eb"/>
+<text x="740" y="308" font-size="12" font-weight="bold">What the phase mask costs</text>
+<text x="740" y="328" font-size="10.5" fill="#4b5563">Hollow markers remove the protection on steps</text>
+<text x="740" y="343" font-size="10.5" fill="#4b5563">1, 2, 3 and 20. Removing it buys 3.2 more points</text>
+<text x="740" y="358" font-size="10.5" fill="#4b5563">of time for 2.3 more points of loss.</text>
+<text x="740" y="373" font-size="10.5" fill="#4b5563"></text>
+<text x="740" y="388" font-size="10.5" fill="#4b5563">Masked runs place 1.0 to 1.5 % of forgiven bytes</text>
+<text x="740" y="403" font-size="10.5" fill="#4b5563">on those steps; unmasked runs place 19 to 21 %.</text>
+<rect x="20" y="480" width="1020" height="62" fill="#f9fafb" stroke="#e5e7eb"/>
+<text x="32" y="500" font-size="11.5">Shedding only overtakes FORGIVE on time past a budget of about 0.45, where it is discarding a third of every gradient. No published tolerance result reaches there.</text>
+<text x="32" y="522" font-size="11.5" font-weight="bold">At a dose the literature actually supports, FORGIVE recovers 10.4 to 10.9 % of training time and blind shedding recovers 2.4 to 3.3 %.</text>
+</svg>

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="400" viewBox="0 0 1180 400" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1180" height="400" fill="white"/>
+<text x="20" y="26" font-size="15" font-weight="bold">Seven weeks of work on one fork of ASTRA-sim: what was built, what was run</text>
+<text x="20" y="46" font-size="11" fill="#4b5563">Fork point 518bd51 (upstream, 2026-03-26). First commit of ours f31d865, 2026-07-20. 184 commits to 2026-09-08.</text>
+<line x1="70" y1="340" x2="1120" y2="340" stroke="#333"/>
+<line x1="70.0" y1="340" x2="70.0" y2="346" stroke="#333"/>
+<text x="70.0" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Jul 20</text>
+<line x1="296.5" y1="340" x2="296.5" y2="346" stroke="#333"/>
+<text x="296.47058823529414" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Jul 31</text>
+<line x1="378.8" y1="340" x2="378.8" y2="346" stroke="#333"/>
+<text x="378.8235294117647" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Aug 4</text>
+<line x1="522.9" y1="340" x2="522.9" y2="346" stroke="#333"/>
+<text x="522.9411764705883" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Aug 11</text>
+<line x1="749.4" y1="340" x2="749.4" y2="346" stroke="#333"/>
+<text x="749.4117647058823" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Aug 22</text>
+<line x1="955.3" y1="340" x2="955.3" y2="346" stroke="#333"/>
+<text x="955.2941176470588" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Sep 1</text>
+<line x1="1037.6" y1="340" x2="1037.6" y2="346" stroke="#333"/>
+<text x="1037.6470588235293" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Sep 5</text>
+<line x1="1120.0" y1="340" x2="1120.0" y2="346" stroke="#333"/>
+<text x="1120.0" y="360" text-anchor="middle" font-size="11" fill="#4b5563">Sep 9</text>
+<rect x="70.0" y="70" width="452.9" height="26" fill="#0891b2" fill-opacity="0.13" stroke="#0891b2" stroke-opacity="0.5"/>
+<text x="78.0" y="87" font-size="11" fill="#0891b2" font-weight="bold">Build the instrument: UEC-shaped lossy RDMA in ns-3</text>
+<rect x="481.8" y="112" width="473.5" height="26" fill="#059669" fill-opacity="0.13" stroke="#059669" stroke-opacity="0.5"/>
+<text x="489.7647058823529" y="129" font-size="11" fill="#059669" font-weight="bold">Make it an experiment platform: cluster, seeds, matched arms</text>
+<rect x="955.3" y="154" width="123.5" height="26" fill="#7c3aed" fill-opacity="0.13" stroke="#7c3aed" stroke-opacity="0.5"/>
+<text x="947.3" y="171" text-anchor="end" font-size="11" fill="#7c3aed" font-weight="bold">Map the regime: where does bounded loss have purchase?</text>
+<rect x="1037.6" y="196" width="82.4" height="26" fill="#1d4ed8" fill-opacity="0.13" stroke="#1d4ed8" stroke-opacity="0.5"/>
+<text x="1029.6" y="213" text-anchor="end" font-size="11" fill="#1d4ed8" font-weight="bold">FORGIVE: bounded loss as a congestion response</text>
+<line x1="70.0" y1="238" x2="70.0" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="70.0" cy="238" r="3" fill="#374151"/>
+<text x="66.0" y="232" text-anchor="start" font-size="10" fill="#374151">fork ASTRA-sim</text>
+<line x1="131.8" y1="238" x2="131.8" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="131.8" cy="238" r="3" fill="#374151"/>
+<text x="131.76470588235293" y="232" text-anchor="middle" font-size="10" fill="#374151">DBLP threat register</text>
+<line x1="214.1" y1="238" x2="214.1" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="214.1" cy="238" r="3" fill="#374151"/>
+<text x="214.11764705882354" y="232" text-anchor="middle" font-size="10" fill="#374151">UEC trimming</text>
+<line x1="378.8" y1="238" x2="378.8" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="378.8" cy="238" r="3" fill="#374151"/>
+<text x="378.8235294117647" y="232" text-anchor="middle" font-size="10" fill="#374151">trim to UEC 1.0.3</text>
+<line x1="420.0" y1="238" x2="420.0" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="420.0" cy="238" r="3" fill="#374151"/>
+<text x="420.0" y="232" text-anchor="middle" font-size="10" fill="#374151">selective repeat</text>
+<line x1="481.8" y1="238" x2="481.8" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="481.8" cy="238" r="3" fill="#374151"/>
+<text x="481.7647058823529" y="232" text-anchor="middle" font-size="10" fill="#374151">SLURM cluster runners</text>
+<line x1="646.5" y1="238" x2="646.5" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="646.5" cy="238" r="3" fill="#374151"/>
+<text x="646.4705882352941" y="220" text-anchor="middle" font-size="10" fill="#374151">CLR schedule from</text>
+<text x="646.4705882352941" y="232" text-anchor="middle" font-size="10" fill="#374151">independent evidence</text>
+<line x1="749.4" y1="238" x2="749.4" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="749.4" cy="238" r="3" fill="#374151"/>
+<text x="749.4117647058823" y="232" text-anchor="middle" font-size="10" fill="#374151">16-seed anchor</text>
+<line x1="1037.6" y1="238" x2="1037.6" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="1037.6" cy="238" r="3" fill="#374151"/>
+<text x="1031.6470588235293" y="232" text-anchor="end" font-size="10" fill="#374151">DCQCN knob + forgiveness</text>
+<line x1="1078.8" y1="238" x2="1078.8" y2="340" stroke="#9ca3af" stroke-dasharray="2 3"/>
+<circle cx="1078.8" cy="238" r="3" fill="#374151"/>
+<text x="1072.8235294117649" y="232" text-anchor="end" font-size="10" fill="#374151">CC exemption</text>
+<line x1="955.3" y1="340" x2="955.3" y2="294" stroke="#b91c1c" stroke-width="1.5"/>
+<polygon points="955.3,288 961.3,294 955.3,300 949.3,294" fill="#b91c1c"/>
+<text x="955.2941176470588" y="282" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">run #117</text>
+<line x1="1058.2" y1="340" x2="1058.2" y2="294" stroke="#b91c1c" stroke-width="1.5"/>
+<polygon points="1058.2,288 1064.2,294 1058.2,300 1052.2,294" fill="#b91c1c"/>
+<text x="1058.235294117647" y="282" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">run #120</text>
+<line x1="1087.1" y1="340" x2="1087.1" y2="294" stroke="#b91c1c" stroke-width="1.5"/>
+<polygon points="1087.1,288 1093.1,294 1087.1,300 1081.1,294" fill="#b91c1c"/>
+<text x="1087.0588235294117" y="282" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">run #121</text>
+<line x1="1111.8" y1="340" x2="1111.8" y2="294" stroke="#b91c1c" stroke-width="1.5"/>
+<polygon points="1111.8,288 1117.8,294 1111.8,300 1105.8,294" fill="#b91c1c"/>
+<text x="1111.764705882353" y="282" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">run #122</text>
+<text x="70" y="380" font-size="10" fill="#6b7280">Red markers are cluster evaluation waves: 20 to 56 simulated arms each, five hours per arm on the UofT DCS SLURM cluster.</text>
+</svg>

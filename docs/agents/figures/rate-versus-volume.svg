@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="470" viewBox="0 0 1120 470" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1120" height="470" fill="white"/>
+<text x="20" y="26" font-size="15" font-weight="bold">Why dropping data before you send it does not relieve a congestion-controlled fabric</text>
+<text x="20" y="46" font-size="11" fill="#4b5563">All four runs owe the same 70.0 GB of all-reduce payload on the 16 non-critical steps. Worst cell, budget 0.1, one seed. Peak switch queue: 4.19 MB in every one of them.</text>
+<text x="540.0" y="80" text-anchor="middle" font-weight="bold" font-size="12">A.  time to finish the same payload</text>
+<text x="378" y="119" text-anchor="end" font-size="11.5">baseline, sheds 0.5 % everywhere</text>
+<rect x="390" y="104" width="294.0" height="22" fill="#6b7280" fill-opacity="0.85"/>
+<text x="692.0" y="120" font-size="11" font-weight="bold" fill="#6b7280">588 ms</text>
+<text x="378" y="173" text-anchor="end" font-size="11.5">DBLP-style shedding at 0.1</text>
+<rect x="390" y="158" width="268.5" height="22" fill="#c2410c" fill-opacity="0.85"/>
+<text x="666.5" y="174" font-size="11" font-weight="bold" fill="#c2410c">537 ms</text>
+<text x="378" y="227" text-anchor="end" font-size="11.5">blind shedding at 0.1, no phase mask</text>
+<rect x="390" y="212" width="262.5" height="22" fill="#a16207" fill-opacity="0.85"/>
+<text x="660.5" y="228" font-size="11" font-weight="bold" fill="#a16207">525 ms</text>
+<text x="378" y="281" text-anchor="end" font-size="11.5">FORGIVE with congestion exemption</text>
+<rect x="390" y="266" width="196.0" height="22" fill="#1d4ed8" fill-opacity="0.85"/>
+<text x="594.0" y="282" font-size="11" font-weight="bold" fill="#1d4ed8">392 ms</text>
+<text x="915.0" y="80" text-anchor="middle" font-weight="bold" font-size="12">B.  rate achieved on the wire</text>
+<rect x="790" y="104" width="154.2" height="22" fill="#6b7280" fill-opacity="0.85"/>
+<text x="952.1666666666666" y="120" font-size="11" font-weight="bold" fill="#6b7280">259 GB/s</text>
+<text x="790" y="142" font-size="9.5" fill="#6b7280">moved 152.3 GB</text>
+<rect x="790" y="158" width="153.0" height="22" fill="#c2410c" fill-opacity="0.85"/>
+<text x="950.9761904761905" y="174" font-size="11" font-weight="bold" fill="#c2410c">257 GB/s</text>
+<text x="790" y="196" font-size="9.5" fill="#6b7280">moved 137.8 GB</text>
+<rect x="790" y="212" width="151.8" height="22" fill="#a16207" fill-opacity="0.85"/>
+<text x="949.7857142857142" y="228" font-size="11" font-weight="bold" fill="#a16207">255 GB/s</text>
+<text x="790" y="250" font-size="9.5" fill="#6b7280">moved 134.1 GB</text>
+<rect x="790" y="266" width="232.7" height="22" fill="#1d4ed8" fill-opacity="0.85"/>
+<text x="1030.7380952380952" y="282" font-size="11" font-weight="bold" fill="#1d4ed8">391 GB/s</text>
+<text x="790" y="304" font-size="9.5" fill="#6b7280">moved 153.3 GB</text>
+<line x1="944.2" y1="98" x2="944.2" y2="330" stroke="#6b7280" stroke-dasharray="4 3"/>
+<text x="940.1666666666666" y="344" text-anchor="end" font-size="10" fill="#6b7280">baseline rate</text>
+<rect x="20" y="366" width="1080" height="92" fill="#f9fafb" stroke="#e5e7eb"/>
+<text x="32" y="388" font-size="11" font-weight="normal">Shedding attacks the numerator of time = bytes / rate. The congestion controller pins the denominator: whatever load you remove it hands back as rate, until the queue</text>
+<text x="32" y="407" font-size="11" font-weight="normal">returns to its marking threshold. The shedding runs therefore move fewer bytes at the baseline's rate and finish early only in proportion to what they threw away.</text>
+<text x="32" y="426" font-size="11" font-weight="bold">FORGIVE attacks the denominator. It puts 0.6 % more bytes on the wire, provokes 22 % more congestion notifications than the baseline, acts on 39 % fewer, and runs 51 % faster.</text>
+<text x="32" y="445" font-size="11" font-weight="normal">It also halves the retransmission timeouts, 5 415 against 10 110, because a forgiven byte range never waits for a repair.</text>
+</svg>

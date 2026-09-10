@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="430" viewBox="0 0 1120 430" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1120" height="430" fill="white"/>
+<text x="20" y="26" font-size="15" font-weight="bold">Run #117: the storm was the retransmission scheme, not the incast</text>
+<text x="20" y="46" font-size="11" fill="#4b5563">Same 64 ranks, same 2:1 fabric, same seven-source 128 MiB burst at step 18. Only the loss-recovery scheme differs.</text>
+<line x1="330.0" y1="80" x2="330.0" y2="330" stroke="#e5e7eb"/>
+<text x="330.0" y="346" text-anchor="middle" font-size="11" fill="#4b5563">1x</text>
+<line x1="556.7" y1="80" x2="556.7" y2="330" stroke="#e5e7eb"/>
+<text x="556.6666666666666" y="346" text-anchor="middle" font-size="11" fill="#4b5563">10x</text>
+<line x1="783.3" y1="80" x2="783.3" y2="330" stroke="#e5e7eb"/>
+<text x="783.3333333333333" y="346" text-anchor="middle" font-size="11" fill="#4b5563">100x</text>
+<line x1="1010.0" y1="80" x2="1010.0" y2="330" stroke="#e5e7eb"/>
+<text x="1010.0" y="346" text-anchor="middle" font-size="11" fill="#4b5563">1000x</text>
+<text x="318" y="107" text-anchor="end" font-size="11.5">trimmed bytes per offered byte  (W)</text>
+<rect x="792.7" y="93" width="152.9" height="18" fill="#b91c1c" fill-opacity="0.75"/>
+<text x="953.6274245572212" y="107" font-size="11" fill="#b91c1c" font-weight="bold">110 to 520x</text>
+<text x="318" y="122" text-anchor="end" font-size="9.5" fill="#6b7280">go-back-N 2.2 to 10.4   vs   selective repeat 0.02</text>
+<text x="318" y="155" text-anchor="end" font-size="11.5">retransmitted per offered byte, per DP flow</text>
+<rect x="722.7" y="141" width="172.7" height="18" fill="#b91c1c" fill-opacity="0.75"/>
+<text x="903.3417079775137" y="155" font-size="11" fill="#b91c1c" font-weight="bold">54 to 312x</text>
+<text x="318" y="170" text-anchor="end" font-size="9.5" fill="#6b7280">go-back-N 7x to 25x   vs   selective repeat 0.08x to 0.13x</text>
+<text x="318" y="203" text-anchor="end" font-size="11.5">burst drain time</text>
+<rect x="596.6" y="189" width="162.3" height="18" fill="#b91c1c" fill-opacity="0.75"/>
+<text x="766.8747766098422" y="203" font-size="11" fill="#b91c1c" font-weight="bold">15 to 78x</text>
+<text x="318" y="218" text-anchor="end" font-size="9.5" fill="#6b7280">go-back-N 423 to 1798 ms   vs   selective repeat 23 to 29 ms</text>
+<text x="318" y="251" text-anchor="end" font-size="11.5">all-reduce span, burst step</text>
+<rect x="574.6" y="237" width="146.2" height="18" fill="#b91c1c" fill-opacity="0.75"/>
+<text x="728.8358637761789" y="251" font-size="11" fill="#b91c1c" font-weight="bold">12 to 53x</text>
+<text x="318" y="266" text-anchor="end" font-size="9.5" fill="#6b7280">go-back-N 205 to 935 ms   vs   selective repeat 17.6 ms</text>
+<text x="318" y="299" text-anchor="end" font-size="11.5">20-step window</text>
+<rect x="458.8" y="285" width="40.8" height="18" fill="#b91c1c" fill-opacity="0.75"/>
+<text x="507.5892861214054" y="299" font-size="11" fill="#b91c1c" font-weight="bold">3.7 to 5.6x</text>
+<text x="318" y="314" text-anchor="end" font-size="9.5" fill="#6b7280">go-back-N 4503 to 6795 ms   vs   selective repeat 1210 ms</text>
+<line x1="330" y1="80" x2="330" y2="330" stroke="#333"/>
+<text x="670.0" y="366" text-anchor="middle" font-size="11">go-back-N cost, as a multiple of the selective-repeat cost (log scale)</text>
+<rect x="20" y="370" width="1080" height="44" fill="#fef2f2" stroke="#fecaca"/>
+<text x="32" y="388" font-size="11.5">Consequence: under go-back-N one trim re-carries a whole window, so shedding 1.98 GiB of gradient removed 156 GiB from the wire, an amplification of 79x.</text>
+<text x="32" y="405" font-size="11.5" font-weight="bold">The phase-aware policy looked worth 3.9 to 11.1 % of training time. On the same fabric with selective repeat it was worth 0.78 %. We were measuring the recovery scheme.</text>
+</svg>

@@ -26,6 +26,7 @@ small while retaining the non-obvious project decisions.
 | Planning the next phases toward a full paper: promises, open questions, phase order, kill tests | [Roadmap to a full paper](roadmap-to-full-paper.md) |
 | Positioning the forgive protocol against MLT, trimmable gradients, OptiReduce, partial-reliability transports, and deadline-aware congestion control | [Forgive related work](forgive-related-work.md) |
 | Reading what runs #120 and #121 measured: the regime map and the congestion-exempt wave | [Run #120 regime map](run-120-regime-map.md), [Run #121 readout](run-121-cc-exempt-readout.md) |
+| Briefing someone who has not followed the work: the chronological progress review from the May DBLP draft to run #122, with figures | [September 2026 progress slides](slides-2026-09-progress.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/author-skill/SKILL.md) |

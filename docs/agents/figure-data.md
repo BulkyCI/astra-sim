@@ -62,12 +62,12 @@ Build events:
 | Date | Event |
 | --- | --- |
 | 2026-07-20 | fork ASTRA-sim, adopt uv for the Python toolchain |
-| 2026-07-23 | phase-aware critical-step masks; DBLP validity-threat register written |
+| 2026-07-23 | phase-aware critical-step masks; register written of the gaps in our own May evaluation |
 | 2026-07-27 | first UEC packet-trimming profiles |
 | 2026-08-04 | trimming aligned to UEC 1.0.3; best-effort fabric controls |
 | 2026-08-06 | selective repeat for trimmed and missing ranges; direct all-reduce to form an organic incast |
 | 2026-08-09 | heavy comparisons moved to just-in-time SLURM runners on the UofT DCS cluster |
-| 2026-08-17 | critical-step schedule `[1, 2, 3, 20]` pinned from literature independent of DBLP |
+| 2026-08-17 | critical-step schedule `[1, 2, 3, 20]` pinned from literature independent of our own preprint |
 | 2026-08-22 | anchor family scaled to sixteen pi-derived seeds |
 | 2026-09-05 | DCQCN knob and rate-cut telemetry; receiver forgiveness verdict in the transport |
 | 2026-09-07 | congestion exemption for a forgiven flow |
@@ -244,8 +244,8 @@ Readings.
   than a footnote.
 - Every published bounded-loss result sits on the left-hand side of this
   chart: MLT and OptiReduce against TCP or UDP with millisecond timeouts,
-  DBLP against its own bitmap-and-probe rounds, deployed RoCEv2 NICs on
-  go-back-N.
+  our own May evaluation against its bitmap-and-probe rounds, deployed
+  RoCEv2 NICs on go-back-N.
 
 ---
 
@@ -618,5 +618,5 @@ Keep these out of the deck, and be ready to say why.
 | worst-collective relief as a percentage | 10.8 % mean, CI [-0.60, 22.20], spans zero. Report the 153 ms with CI [5, 302] instead |
 | the run #117 dose grid | ran unmatched, because the profile name entered the selection hash. Fixed in commit `63ef7c2`, not yet re-run |
 | `wire_per_offered` | hop-weighted, not bytes a receiver saw |
-| DBLP's 24.8 % end-to-end reduction | measured with a fully blocking worker loop, so it includes network time a modern framework hides |
+| the 24.8 % from our own May preprint | measured with a fully blocking worker loop, so it includes network time a modern framework hides. It is our earlier number rather than a rival's, and nothing in this file is comparable with it |
 | single-seed sweeps, fan-in and burst-source counts | directional only, no error bars |

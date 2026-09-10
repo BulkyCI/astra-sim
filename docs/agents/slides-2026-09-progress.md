@@ -13,10 +13,12 @@ Slides are separated by rules. Figures are SVG in `figures/`.
 
 ## 1. The one-slide version
 
-We set out to test whether DBLP's phase-aware bounded loss holds up on a
-fabric that looks like what large training jobs will actually run on. To
-do that we had to build the fabric first, because the backend ASTRA-sim
-ships with models none of it.
+This is the revision of our own DBLP work. The question we took on after
+the May preprint was whether its phase-aware bounded-loss result carries
+onto a fabric that looks like what large training jobs will actually run
+on. To ask that we had to build the
+fabric first, because the backend ASTRA-sim ships with models none of
+it.
 
 Three things came out of it, in this order.
 
@@ -45,19 +47,20 @@ when the congestion stops.
 
 ## 2. Where we started: the May draft
 
-DBLP as written is a three-worker, one-server prototype running
-centralized all-reduce on models from 5M to 125M parameters, with
+The May preprint evaluates DBLP on three workers and one server running
+centralized all-reduce, on models from 5M to 125M parameters, with
 microbursts injected by hand at 60 to 90 % loss. Data on UDP, control on
 TCP, no congestion control in the sender. Headline: 24.8 % average
 training time reduction.
 
-In May we listed four things that had to be settled before that result
-could be claimed at LLM scale.
+That is a prototype result, and we said so at the time. In May we listed
+four things we would have to settle ourselves before claiming it at LLM
+scale.
 
 | # | The question | Why it mattered |
 | --- | --- | --- |
 | 1 | Sparsification | Is dropping gradients different from compressing them, and what happens when both run at once? |
-| 2 | Compute and transport interleaving | The prototype's loop blocks on communication. A modern framework hides most of it. How much of 24.8 % survives overlap? |
+| 2 | Compute and transport interleaving | Our worker loop blocks on communication. A modern framework hides most of it. How much of 24.8 % survives overlap? |
 | 3 | CLR identification | The detector is a gradient-norm test run once per epoch. Does the phase signal exist at LLM scale, and what does the schedule cost? |
 | 4 | Topology, centralized against ring | Hub-and-spoke concentrates pressure at one NIC. Does anything survive on a leaf-spine fabric with ring or direct collectives? |
 
@@ -114,7 +117,7 @@ fixture.
 The last row is worth pausing on. Run #117 was already collected before
 we noticed that every generated configuration wrote `CC_MODE 12`, which
 no handler implements. Queue pairs were sending at line rate inside a
-static window. That is the same transport the original paper has, by
+static window. That is the same transport our own prototype had, by
 accident, but it is not what anyone deploys.
 
 ---
@@ -138,8 +141,8 @@ believable.
   per-arm summaries, telemetry, the exact profile, and a provenance
   attestation. Every number in this deck can be recomputed from one.
 - **A pinned critical-step schedule**, `[1, 2, 3, 20]`, derived from
-  literature that is independent of DBLP, with the circularity guard
-  written down: the hypothesis under test cannot also be its own
+  literature independent of our own preprint, with the circularity guard
+  written down: the claim under test cannot also be its own
   justification.
 
 ---
@@ -187,10 +190,10 @@ fabric. The policy worked exactly as designed. There was simply nothing
 left for it to relieve.
 
 We treat this as the finding, not the embarrassment. Every prior
-bounded-loss result we can find, ours included, was measured against a
-transport whose recovery amplifies loss: MLT and OptiReduce against TCP
-or UDP with millisecond timeouts, DBLP against its own bitmap-and-probe
-rounds. It is the motivating negative result of the paper we want to
+bounded-loss result we can find was measured against a transport whose
+recovery amplifies loss: MLT and OptiReduce against TCP or UDP with
+millisecond timeouts, and our own May evaluation against its
+bitmap-and-probe rounds. It is the motivating negative result of the paper we want to
 write.
 
 ---
@@ -248,8 +251,8 @@ is what pointed at the mechanism on the next slide.
 
 ![Mechanism](figures/forgive-mechanism.svg)
 
-Three shedding domains now share one budget law. `admission` is DBLP's
-mechanism, a sender-side draw that suppresses a whole message.
+Three shedding domains now share one budget law. `admission` is the
+mechanism from our May preprint, a sender-side draw that suppresses a whole message.
 `recovery` forgives at the receiver but leaves congestion control alone.
 `recovery_exempt` forgives and also lets the sender ignore rate cuts
 until the receiver's first repair request re-arms it.
@@ -276,7 +279,7 @@ Worst cell of the map, three seeds, four matched arms each.
 | run | training time | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | bytes re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tight baseline | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
-| DBLP-style shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
+| sender-side shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
 | FORGIVE with exemption, 0.4 | 1459 to 1468 ms | 20 to 21 ms | 36 to 37 ms | 8.8 to 9.5 % | 1 % |
 | blind shedding, 0.4 | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
 
@@ -402,7 +405,13 @@ of what would make it a paper.
 
 Four literature reviews plus three papers read in full, last week.
 
-**Prior art, and we should cite it as lineage rather than contrast.** MLT
+**DBLP is our own prior work, and we are revising it rather than
+competing with it.** Every arm labelled `admission` in these runs is the
+preprint's sender-side mechanism, re-implemented in the simulator so the
+new mechanism can be measured beside it. Nothing here is a comparison
+against an outside system.
+
+**Third-party lineage, which we should cite rather than contrast.** MLT
 (NSDI 2024) has the receiver stop a tensor once (1 - p) of it has
 arrived. OptiReduce (NSDI 2025) has a receiver timeout that gives up on
 stragglers. The HotNets 2024 trimmable-gradients paper puts 1-bit heads

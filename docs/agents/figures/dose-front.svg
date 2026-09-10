@@ -75,7 +75,7 @@
 <circle cx="554.5" cy="162.5" r="5" fill="white" stroke="#c2410c" stroke-width="2"/>
 <text x="563.5384615384615" y="166.53333333333336" font-size="10" fill="#c2410c">mask off</text>
 <text x="94" y="130" font-size="11.5" fill="#1d4ed8" font-weight="bold">FORGIVE, receiver forgives what the fabric trimmed</text>
-<text x="94" y="148" font-size="11.5" fill="#c2410c" font-weight="bold">DBLP-style shedding, sender drops before sending</text>
+<text x="94" y="148" font-size="11.5" fill="#c2410c" font-weight="bold">Admission shedding, sender drops before sending</text>
 <rect x="728" y="90" width="312" height="184" fill="#eff6ff" stroke="#bfdbfe"/>
 <text x="740" y="112" font-size="12" font-weight="bold">Three readings</text>
 <text x="740" y="132" font-size="10.5" fill="#1e3a5f">1. The curve saturates. Budget 0.1 already buys</text>

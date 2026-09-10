@@ -14,8 +14,9 @@ backend. Four cluster waves, about 180 simulated arms.
 
 ## 1. The one-slide version
 
-DBLP showed phase-aware bounded loss on four nodes with hand-injected
-loss and models up to 125M parameters. We rebuilt the idea at LLM scale
+This is the revision of our own DBLP work. The May preprint showed
+phase-aware bounded loss on four nodes with hand-injected loss and models
+up to 125M parameters. Since then we have rebuilt the idea at LLM scale
 on a simulated Ultra-Ethernet-shaped fabric where the loss is produced by
 the network itself, and measured it properly.
 
@@ -30,7 +31,8 @@ bounded-loss result has been measured on, phase-aware loss delivers:
 - **9.42 %** if you drop the phase protection entirely, CI [7.03,
   11.82] %, which prices what the protection costs.
 
-And we can say why, which the original work could not: the saving tracks
+And we can now say why, which the May testbed could not: the saving
+tracks
 the packet trims the policy prevented, at 11.9 ms per million trims,
 correlation 0.93 across seeds. It does not track the bytes discarded at
 all, correlation -0.01. Two gigabytes of discarded gradient removed 156
@@ -44,18 +46,19 @@ is a finding, and it is what the last three slides are about.
 
 ## 2. Where we started: the May draft
 
-DBLP as written is three workers and one server running centralized
-all-reduce, models from 5M to 125M parameters, microbursts injected by
-hand at 60 to 90 % loss, data on UDP and control on TCP with no
-congestion control in the sender. Headline: 24.8 % average training time
-reduction.
+The May preprint evaluates three workers and one server running
+centralized all-reduce, models from 5M to 125M parameters, microbursts
+injected by hand at 60 to 90 % loss, data on UDP and control on TCP with
+no congestion control in the sender. Headline: 24.8 % average training
+time reduction.
 
-Four things had to be settled before that could be claimed at LLM scale.
+We listed four things we would have to settle ourselves before claiming
+that at LLM scale.
 
 | # | The question |
 | --- | --- |
 | 1 | Sparsification: is dropping gradients different from compressing them, and what happens when both run at once? |
-| 2 | Compute and transport interleaving: the prototype blocks on communication, a modern framework hides most of it |
+| 2 | Compute and transport interleaving: our worker loop blocks on communication, a modern framework hides most of it |
 | 3 | CLR identification: a gradient-norm test once per epoch, and what the schedule costs |
 | 4 | Topology, centralized against ring: hub-and-spoke concentrates pressure at one NIC |
 
@@ -79,7 +82,7 @@ We changed it, one mechanism at a time, each with a fixture.
 | Aggregated transport telemetry, then a compressed raw stream | Every number in this deck comes from these counters |
 | DCQCN as a switchable congestion control | Added after this wave; see slide 12 |
 
-Two things this bought us that the prototype could not have. The loss is
+Two things this bought us that the May testbed could not. The loss is
 produced by a real incast on a real fabric model rather than injected at
 a rate we chose. And Chakra traces overlap 5.4 ms of compute per node
 with the communication window, so what we report is exposed
@@ -196,8 +199,8 @@ survive a referee, and we would rather say it than have it said to us.
 Three arguments, in order of strength.
 
 **Every published bounded-loss result lives in it.** MLT and OptiReduce
-measure against TCP or UDP with millisecond timeouts. DBLP measures
-against its own bitmap-and-probe rounds. Deployed RoCEv2 NICs do
+measure against TCP or UDP with millisecond timeouts, and our own May
+evaluation measures against its bitmap-and-probe rounds. Deployed RoCEv2 NICs do
 go-back-N. Nobody has quantified what bounded loss is worth on that class
 of transport at LLM scale with matched arms and a seed band, and that is
 what slides 5 to 8 are.
@@ -225,7 +228,7 @@ fabric stops retransmitting.*
 | --- | --- | --- |
 | 1 | Sparsification | Separated on purpose. We model pure drop with no error feedback and wrote down why mixing it with an error-feedback compressor is a second uncontrolled lossy layer: the optimiser's residual does not know which updates never arrived. Tolerance is now a designed experiment rather than an assumption, with bounds from the literature to hit: MLT profiles 0.7 to 3.3 % at equal rounds, OptiReduce reports accuracy surviving 1 %. |
 | 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the window, so we report exposed communication time inside a makespan. This is the confound that made us stop quoting 24.8 %, and it is why our numbers are smaller and defensible. |
-| 3 | CLR identification | Split in two. The detector is out of scope for a simulator with no gradients, so we pinned `[1, 2, 3, 20]` from literature independent of DBLP, with the circularity guard written down. What we can do is price the schedule, and slide 8 does. |
+| 3 | CLR identification | Split in two. The detector is out of scope for a simulator with no gradients, so we pinned `[1, 2, 3, 20]` from literature independent of our own preprint, with the circularity guard written down: the claim under test cannot also be its own justification. What we can do is price the schedule, and slide 8 does. |
 | 4 | Topology, centralized against ring | Turned from a threat into two measured axes. DP fan-in and spine oversubscription are what set the trim ratio, multiplying it about 2.7x and 5.5x. Hub-and-spoke pressure at one NIC is our fan-in 7 cell, and it is the worst cell of the map. |
 
 ---

@@ -6,7 +6,7 @@
 <text x="378" y="119" text-anchor="end" font-size="11.5">baseline, sheds 0.5 % everywhere</text>
 <rect x="390" y="104" width="294.0" height="22" fill="#6b7280" fill-opacity="0.85"/>
 <text x="692.0" y="120" font-size="11" font-weight="bold" fill="#6b7280">588 ms</text>
-<text x="378" y="173" text-anchor="end" font-size="11.5">DBLP-style shedding at 0.1</text>
+<text x="378" y="173" text-anchor="end" font-size="11.5">admission shedding at 0.1</text>
 <rect x="390" y="158" width="268.5" height="22" fill="#c2410c" fill-opacity="0.85"/>
 <text x="666.5" y="174" font-size="11" font-weight="bold" fill="#c2410c">537 ms</text>
 <text x="378" y="227" text-anchor="end" font-size="11.5">blind shedding at 0.1, no phase mask</text>

@@ -144,6 +144,17 @@ Counts, denominators, thresholds, and multipliers must scan as numbers.
 Use `13/16`, `4 nodes`, `0.5`, and `8x`; use an article instead when the
 singular count is not data.
 
+## 13. State the evidence, not the effort.
+
+Do not describe weeks spent, commits made, or a system's endurance unless
+that fact changes how the reader interprets the result. State the model,
+the measurement, or the boundary instead.
+
+| drafted | his |
+| --- | --- |
+| "We spent 6 of 7 weeks closing those gaps" | "We modeled loss and recovery before measuring DBLP" |
+| "A harness that survives a day" | "Day-long comparisons" |
+
 ## Smaller habits, single instances each
 
 - Possessive to compress: "The four open questions from May" became
@@ -156,6 +167,7 @@ singular count is not data.
 - No em dash or en dash appears anywhere in his writing.
 - Repeat a number when it scopes the local claim; otherwise omit it.
 - Use digits for visible quantities; use an article when the number is not data.
+- State the evidence, measurement, or boundary rather than the effort.
 
 ## Checklist before anything ships under his name
 

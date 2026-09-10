@@ -93,7 +93,7 @@ TITLE, 58px bold, upper left at the 68px margin, on two lines:
   "at modern ML training scale"
 
 SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
-  "We built an ASTRA-sim simulation of a modern fabric"
+  "We simulate a modern training fabric in ASTRA-sim"
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
@@ -136,11 +136,11 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
     and added selective repeat at 64 ranks."
 
-  Card 03, "A harness that survives a day":
+  Card 03, "Day-long comparisons":
     "A paired comparison takes a day, so our harness provisions ephemeral
     GitHub Actions runners on DCS and archives every result."
 
-  Card 04, "The answer, 16 seeds":
+  Card 04, "Result across 16 seeds":
     "Training time fell 3.91 % across 16 seeds. Prevented trims explain
     the saving, and the recovery scheme limits it."
 
@@ -150,7 +150,7 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     sender exemptions."
 
 CLOSING LINE, centred beneath the row:
-  "Together, these changes let us simulate a modern fabric."
+  "The simulation includes fabric loss, 64 ranks, and congestion control."
 
 SPEAKER NOTE: "We could not trust a result until the environment
 resembled a real fabric, so the order of these cards is the order the
@@ -165,7 +165,7 @@ SLIDE 3 of 8
 Each band names the gap it closed, not the activity it contained.
 
 HEADLINE, 34px bold:
-  "We spent 6 of 7 weeks closing those gaps"
+  "We modeled loss and recovery before measuring DBLP"
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
@@ -197,9 +197,7 @@ bold 20px label and a 16px sublabel:
   8 Sep  "run #122"  /  "loss-budget sweep"
 
 CLOSING LINE:
-  "A paired comparison takes a day, and a full run takes several days; we
-  made 184 commits and ran 4 cluster jobs across 180
-  configurations."
+  "A paired comparison takes a day, and a full run takes several days."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
@@ -215,7 +213,7 @@ SLIDE 4 of 8
 The main result. The chart is the slide.
 
 HEADLINE, 34px bold:
-  "13/16 seeds beat the baseline"
+  "DBLP improved training time in 13/16 seeds"
 
 VISUAL: horizontal dumbbell chart across the left two thirds. One row per
 seed, sorted by relief descending. Horizontal axis is the 20-step
@@ -259,7 +257,7 @@ RIGHT THIRD: an ink panel, 24px radius, paper text:
 
 CLOSING LINE:
   "On the 4 seeds whose slowest all-reduce exceeds 1.3 s, DBLP cuts that
-  all-reduce by 434 to 716 ms; mild seeds barely change."
+  all-reduce by 434 to 716 ms; the other seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -314,7 +312,7 @@ DATA, ms saved / trims prevented in millions / GB discarded:
   -494.4  -32.91  2.10
 
 THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
-  "Each seed discards about 2 GB, which predicts nothing."
+  "Each seed discards about 2 GB, but discarded bytes do not predict the saving."
   "The slope is 11.9 ms per million trims prevented."
   "The policy regresses on the 3 seeds where it adds trims."
 
@@ -335,7 +333,7 @@ fidelity change, so the limit comes from the same programme as the gain.
 The slide must not read as an apology.
 
 HEADLINE, 34px bold:
-  "The gain comes from go-back-N; selective repeat removes it"
+  "Most DBLP relief comes from go-back-N recovery"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
 across the left two thirds, titled "Go-back-N overhead versus selective
@@ -364,7 +362,7 @@ READING LINE directly beneath the chart, 16px, ink at 55%:
   as selective repeat."
 
 SUPPORTING LINE beneath the reading line, 20px:
-  "We added selective repeat for fidelity, which removed most of the gain."
+  "Selective repeat removes most of the gain."
 
 RIGHT THIRD: an ink panel with paper text:
   section label  "NETWORK SWEEP"
@@ -454,7 +452,7 @@ SLIDE 8 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "We closed 2 July questions and scoped the other 2"
+  "The study answers 2 July questions and scopes the other 2"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card shows a monospace number at
@@ -481,8 +479,7 @@ reading either "CLOSED" or "SCOPED".
     at one NIC and is the most congested configuration."
 
 CLOSING LINE:
-  "2 questions are closed by construction; the other 2 require
-  hardware that a simulator cannot provide."
+  "The remaining 2 questions require hardware rather than a simulator."
 
 ===============================================================
 FINAL CHECK BEFORE YOU FINISH

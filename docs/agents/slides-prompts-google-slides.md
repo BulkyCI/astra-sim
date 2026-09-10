@@ -120,7 +120,7 @@ gap between DBLP's evaluation and a modern fabric, and the change that
 closed it. The cards read left to right as one argument.
 
 HEADLINE, 34px bold:
-  "DBLP did not simulate a modern training fabric"
+  "DBLP's testbed did not resemble a modern training network"
 
 VISUAL: five cards in one horizontal row, equal width, 16px radius, 1px
 ink border, paper fill, connected left to right by 2px ink-30 arrows
@@ -131,7 +131,7 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     "DBLP combines Accordion's phase awareness with lossy transport. It
     worked on 4 nodes with hand-injected loss."
 
-  Card 02, "Fabric-generated loss":
+  Card 02, "A lossy fabric":
     "Injected loss does not reproduce fabric behavior. We disabled PFC in
     the lossless ns-3 RDMA backend and added UEC packet trimming with
     selective repeat at 64 ranks."

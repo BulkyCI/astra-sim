@@ -102,9 +102,9 @@ BOTTOM LEFT, 20px, three tight lines:
 
 BOTTOM RIGHT, a horizontal strip of three statistics, each a figure above
 a label, 58px bold figure and 16px label, 58px apart:
-  "3.91 %"  above  "shorter training window"
-  "153 ms"  above  "off the slowest all-reduce in the run"
-  "0.93"    above  "correlation with trims prevented"
+  "3.91 %"  above  "faster 20-step training run"
+  "153 ms"  above  "reduction in the slowest all-reduce"
+  "0.93"    above  "correlation with packet trims prevented"
 
 Nothing else. No logo, no decorative rule.
 
@@ -120,43 +120,40 @@ must read left to right as one argument, each one explaining why the next
 piece of work existed.
 
 HEADLINE, 34px bold:
-  "We set out to test the DBLP idea on a fabric that behaves like the
-  real thing"
+  "We tested the DBLP idea on a fabric that produces real loss"
 
 VISUAL: five cards in one horizontal row, equal width, 16px radius, 1px
 ink border, paper fill, connected left to right by 2px ink-30 arrows
 placed in the gaps. Each card carries a monospace step number at 28px in
 ink-30 at its top left, then a bold 20px line, then 20px body.
 
-  Card 01, "The idea":
-    "DBLP combines Accordion's phase awareness with a lossy transport. On
-    four nodes, with loss we injected by hand, it worked."
+  Card 01, "DBLP under injected loss":
+    "DBLP combines Accordion's phase awareness with lossy transport. It
+    worked on four nodes under hand-injected loss."
 
-  Card 02, "Make the loss real":
-    "Injected loss says nothing about a real fabric. The ns-3 backend
-    ships lossless RDMA, so we made it lossy: PFC off plus UEC packet
-    trimming. We then added selective repeat, because that is how modern
-    transports recover."
+  Card 02, "A fabric that produces loss":
+    "Hand-injected loss does not tell us how a real fabric behaves. The
+    ns-3 backend ships lossless RDMA, so we added UEC packet trimming with
+    PFC off, then selective repeat because modern transports use it to
+    recover."
 
-  Card 03, "Make the experiment survivable":
-    "A single comparison occupies the cluster for most of a day. A month
-    went into the harness: paired runs that share one random stream,
-    sixteen fixed seeds, and archived results, before any number was
-    worth reading."
+  Card 03, "A repeatable experiment":
+    "One comparison uses the cluster for most of a day. Before we trusted
+    a number, we built a month-long harness for paired runs sharing one
+    random stream, sixteen fixed seeds, and archived results."
 
-  Card 04, "What the fabric said":
-    "Training time fell 3.91 % across sixteen seeds. The saving tracks
-    the packet trims we prevented, and the recovery scheme sets its
-    limit."
+  Card 04, "The measured result":
+    "Training time fell 3.91 % across sixteen seeds. Prevented packet
+    trims explain the saving, and the recovery scheme limits it."
 
-  Card 05, "What the idea should become":
-    "FORGIVE is what DBLP looks like once the fabric runs congestion
-    control. The receiver decides what to give up on, the loss budget is
-    counted in bytes rather than rolled as a probability, and a sender's
-    exemption ends the moment the receiver refuses it."
+  Card 05, "FORGIVE with congestion control":
+    "FORGIVE adapts DBLP to a fabric with congestion control. The receiver
+    decides what to give up, the loss budget is counted in bytes instead
+    of as a probability, and a sender's exemption ends when the receiver
+    refuses it."
 
 CLOSING LINE, centred beneath the row:
-  "We built each piece because the idea could not be tested without it."
+  "We built every piece the test required."
 
 SPEAKER NOTE: "Nothing here was exploratory. Each run had a decision rule
 written before it was dispatched, and the rule chose the next run."
@@ -166,7 +163,7 @@ SLIDE 3 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "What we built, and what we ran"
+  "We built the instrument and ran the experiments"
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
@@ -175,32 +172,32 @@ is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
 ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
   "Build the instrument"            20 Jul to 11 Aug
-  "Make it an experiment platform"   9 Aug to  1 Sep
-  "Sweep the fabric"                 1 Sep to  7 Sep
+  "Build repeatable experiments"     9 Aug to  1 Sep
+  "Test the fabric"                   1 Sep to  7 Sep
   "FORGIVE"                          5 Sep to  9 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
   20 Jul  "fork ASTRA-sim"
-  27 Jul  "UEC packet trimming"
+  27 Jul  "add UEC packet trimming"
    4 Aug  "add trimming to UEC 1.0.3"
-   6 Aug  "selective repeat"
-   9 Aug  "SLURM cluster runners"
+   6 Aug  "add selective repeat"
+   9 Aug  "build SLURM cluster runners"
   17 Aug  "fix the protected-step schedule"
-  22 Aug  "sixteen seeds"
+  22 Aug  "choose sixteen seeds"
    5 Sep  "add DCQCN and forgiveness"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
    1 Sep  "run #117"  /  "16 seeds, go-back-N"
-   6 Sep  "run #120"  /  "8 fabric configurations"
+  6 Sep  "run #120"  /  "8 network configurations"
    7 Sep  "run #121"  /  "FORGIVE"
-   8 Sep  "run #122"  /  "loss-budget sweep"
+  8 Sep  "run #122"  /  "sweep loss budgets"
 
 CLOSING LINE:
-  "One comparison occupies the cluster for most of a day and a full run
-  for several, which is why a month went into the harness: 184 commits,
-  four cluster jobs, about 180 simulated configurations."
+  "One comparison uses the cluster for most of a day, and a full run takes
+  several days. The harness took a month: 184 commits, four cluster jobs,
+  and about 180 simulated configurations."
 
 SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
@@ -247,20 +244,20 @@ DATA, seed / baseline ms / policy ms / relief %:
   70679821  6634.4  7128.8   -7.45
 
 DIRECT LABELS beside the first row, no legend box:
-  ink-30 circle    "Baseline"  /  "discards 0.5 % of gradient messages on every step"
-  ink-100 circle   "Policy"    /  "discards 0.5 % on steps 1, 2, 3 and 20, and 10 % on the rest"
+  ink-30 circle    "Baseline loss rule"  /  "discards 0.5 % of gradient messages on every step"
+  ink-100 circle   "Phase-aware loss rule"  /  "discards 0.5 % on steps 1, 2, 3 and 20, and 10 % on the rest"
 
 RIGHT THIRD: an ink panel, 24px radius, paper text:
   section label  "SIXTEEN SEEDS, PAIRED"
   "3.91 %" at 58px bold
-  "shorter training window, 95 % CI [1.13, 6.68] %" at 16px
+  "faster 20-step training run, 95 % CI [1.13, 6.68] %" at 16px
   a 1px paper-30 divider
   "153 ms" at 58px bold
-  "off the slowest all-reduce in the run, CI [5, 302] ms" at 16px
+  "reduction in the slowest all-reduce, CI [5, 302] ms" at 16px
 
 CLOSING LINE:
-  "On the four seeds whose slowest all-reduce exceeds 1.3 s, the policy
-  cuts that all-reduce by 434 to 716 ms. The mild seeds barely move."
+  "For the four seeds whose slowest all-reduce exceeds 1.3 s, the policy
+  cuts it by 434 to 716 ms. The other seeds barely change."
 
 SPEAKER NOTE: "Seeds are eight-digit chunks of pi, fixed before the run.
 The two runs share one random stream, so the messages the baseline drops
@@ -275,24 +272,25 @@ Two scatter panels side by side, equal width, sharing one vertical axis
 label.
 
 HEADLINE, 34px bold, two sentences:
-  "Trims prevented predict the saving. Bytes discarded predict nothing."
+  "Prevented packet trims predict the saving. Discarded gradient bytes do
+  not."
 
 GLOSS LINE directly beneath the headline, 16px, ink at 55%:
-  "A trim is a switch throwing away a packet's payload and forwarding
-  only its header, which is how this fabric reports congestion."
+  "A trim occurs when a switch discards a packet's payload and forwards
+  only its header. This fabric uses trims to signal congestion."
 
 SHARED VERTICAL AXIS, labelled "Milliseconds saved on the 20-step run",
 ticks at
 -600, -300, 0, 300, 600 and 900, gridlines ink-12, a heavier ink-30 line
 at zero.
 
-LEFT PANEL, titled "Against packet trims the policy prevented". Marks in
+LEFT PANEL, titled "Packet trims prevented by the policy". Marks in
 ink-100 with a dashed ink-55 least-squares line. Horizontal axis "Packet
 trims prevented (millions)", ticks at -40, -20, 0, 20, 40, 60 and 80.
 Place "r = 0.93" at 58px bold inside the panel, upper left, with generous
 space around it.
 
-RIGHT PANEL, titled "Against gradient bytes the policy discarded". Marks in ink-55,
+RIGHT PANEL, titled "Gradient bytes discarded by the policy". Marks in ink-55,
 no fit line. Horizontal axis "Gradient bytes discarded (GB)", ticks at
 1.85, 1.95, 2.05, 2.15, 2.25, 2.35 and 2.45. Place "r = -0.01" at 58px
 bold inside the panel, upper left.
@@ -319,11 +317,12 @@ THREE SUPPORTING LINES beneath the panels, 20px, no bullets, 22px apart:
   "Each seed discards about the same two gigabytes, which predicts
   nothing."
   "The slope is 11.9 ms per million trims prevented."
-  "The policy regresses on the three seeds where it adds trims."
+  "The policy slows the three seeds where it adds trims."
 
 CLOSING LINE:
-  "Under go-back-N, discarding 1.98 GiB of gradient removed 156 GiB from
-  the wire, because one trimmed packet rewinds a whole window."
+  "With go-back-N, discarding 1.98 GiB of gradient removes 156 GiB from
+  the wire because one trimmed packet makes the sender retransmit every
+  packet that follows it."
 
 SPEAKER NOTE: "This is what makes the result an explanation rather than a
 percentage, and it is what told us where the gain would not appear, which
@@ -337,11 +336,11 @@ This slide states the scope of the result. It must not read as an
 apology.
 
 HEADLINE, 34px bold:
-  "The gain comes from go-back-N, and selective repeat removes it"
+  "Go-back-N creates the gain; selective repeat removes it"
 
 VISUAL: horizontal bar chart on a logarithmic axis from 1x to 1000x
-across the left two thirds, titled "How much more work go-back-N does
-than selective repeat, on the same workload and the same burst". One bar
+across the left two thirds, titled "Go-back-N work compared with selective
+repeat for the same workload and burst". One bar
 per measure, ink-100 fill, drawn as a range from its low value to its
 high value, with the low and high multiplier printed at the bar's two
 ends. Gridlines at 1x, 10x, 100x and 1000x in ink-12, labelled at 16px.
@@ -354,35 +353,34 @@ nobody has to guess which number belongs to which:
       "go-back-N 2.2 to 10.4    selective repeat 0.02"
   "Bytes re-sent after loss, per byte sent"          54x to 312x
       "go-back-N 7 to 25    selective repeat 0.08 to 0.13"
-  "Time to clear the seven-sender burst"             15x to  78x
+  "Time for a seven-sender burst to clear"           15x to  78x
       "go-back-N 423 to 1798 ms    selective repeat 23 to 29 ms"
-  "All-reduce time at the burst step"                12x to  53x
+  "All-reduce time during the burst step"            12x to  53x
       "go-back-N 205 to 935 ms    selective repeat 17.6 ms"
   "Time to finish 20 training steps"                3.7x to 5.6x
       "go-back-N 4503 to 6795 ms    selective repeat 1210 ms"
 
 READING LINE directly beneath the chart, 16px, ink at 55%:
-  "Read the top bar as: for the same twenty steps of training, go-back-N
-  pushes 110 to 520 times more trimmed bytes through the switches than
-  selective repeat does."
+  "For the same 20 training steps, go-back-N sends 110 to 520 times as
+  many trimmed bytes through the switches as selective repeat."
 
 RIGHT THIRD: an ink panel with paper text:
-  section label  "THEN WE SWEPT THE FABRIC"
+  section label  "WE TESTED THE NETWORK"
   "8 configurations" at 34px bold
-  "At 64 ranks, all on selective repeat, we varied the congestion
-  controller, the number of senders converging on one receiver, and how
-  far the spine is oversubscribed. We wrote the pass mark before the run."
+  "With 64 ranks using selective repeat, we varied the congestion
+  controller, senders converging on one receiver, and spine
+  oversubscription. We set the success threshold before the run."
   a 1px paper-30 divider
-  "We needed switches to trim at least half a byte for every byte sent.
+  "We required switches to trim at least half a byte for every byte sent.
   The most congested configuration reached 0.24."
-  "We needed the burst to cost at least a fifth of total training time.
+  "We required the burst to take at least a fifth of total training time.
   The most congested configuration reached 0.62 %."
 
 CLOSING LINE, two sentences:
   "Across our go-back-N runs the policy saves 3.9 to 11.1 % of training
-  time. On selective repeat it saves 0.78 %. Our literature review found
-  every bounded-loss result, ours included, measured on a transport that
-  recovers the way go-back-N does."
+  time. On selective repeat it saves 0.78 %. All bounded-loss results in
+  our literature review, including ours, use a transport that recovers
+  with go-back-N."
 
 SPEAKER NOTE: "Do not let this land as a caveat. The field is moving to
 selective repeat and Ultra Ethernet, so the finding that admission-time
@@ -397,32 +395,31 @@ Future work. Mark it preliminary in the visual itself, not only in the
 notes.
 
 HEADLINE, 34px bold:
-  "FORGIVE is the idea rebuilt for a fabric that runs congestion control"
+  "FORGIVE adapts DBLP to a fabric with congestion control"
 
 LEFT HALF: three stacked statements, 22px apart, each with its key figure
 at 34px bold on its own line above 20px body text.
 
   "24 %"
-  "Once the transport repairs selectively, congestion control is what
-  costs time. On the most congested fabric we swept, DCQCN adds this much
-  to the twenty-step training time, while cutting the bytes switches trim
-  by a factor of eight. The slowdown comes from the sender being told to
-  slow down, not from repairing loss."
+  "With selective repair, congestion control becomes the time cost. On
+  the most congested network we tested, DCQCN adds this much to the
+  20-step training time while reducing switch-trimmed bytes eightfold.
+  Sender rate reductions cause the slowdown, not loss repair."
 
   "10.4 to 10.9 %"
-  "FORGIVE gives that time back. The receiver gives up on what the
-  switches trimmed instead of asking for it again, and a sender with
-  budget left ignores slow-down signals until the receiver refuses. It
-  spends 6.3 % of all data-parallel bytes to do it."
+  "FORGIVE recovers that time. The receiver gives up on switch-trimmed
+  data instead of requesting it again, and a sender with budget left
+  ignores rate-reduction signals until the receiver refuses. It spends
+  6.3 % of all data-parallel bytes to do this."
 
   "4 to 5x"
-  "FORGIVE buys that much more time per percent of gradient given up than
-  dropping messages at the sender does, at every budget we tested."
+  "FORGIVE recovers that much more time per percent of gradient discarded
+  than sender-side message dropping at every budget we tested."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
 label reading "PRELIMINARY: THREE SEEDS, ONE FABRIC, ONE CONGESTION
 CONTROLLER". Horizontal axis "Gradient given up (% of all data-parallel
-bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
+bytes discarded (% of all data-parallel bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
 recovered (%)", ticks at 0, 3, 6, 9, 12, 15 and 18. Shade the band from
 0.7 % to 3.3 % in ink-12, labelled at 14px "MLT (NSDI 2024) reports
 models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
@@ -433,13 +430,13 @@ models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
     (6.4, 10.6)   (8.5, 12.5)   (9.4, 13.3)   (9.2, 13.0)
 
   Series B, ink-55, solid line with hollow circles, labelled directly
-  "Dropping messages at the sender", points as (x, y):
+  "Messages dropped at the sender", points as (x, y):
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "Above a budget of 0.2 the curve flattens, and the gradient given up
-  stops rising near 9.3 %, because the fabric stops trimming before the
-  budget is spent."
+  "The curve flattens above a budget of 0.2. Gradient discarded levels
+  off near 9.3 % because the network stops trimming before the budget is
+  spent."
 
 SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
 as: further right means more gradient thrown away, higher means more
@@ -458,7 +455,7 @@ SLIDE 8 of 8
 ===============================================================
 
 HEADLINE, 34px bold:
-  "Where the four July questions stand"
+  "We closed two July questions and scoped the other two"
 
 VISUAL: a two-by-two grid of cards, 16px radius, 1px ink border, paper
 fill, equal size, 22px gutter. Each card carries a monospace number at
@@ -467,28 +464,28 @@ each card's top right: 8px radius, ink-100 fill, paper text, 14px,
 reading either "CLOSED" or "SCOPED".
 
   Card 01, chip "SCOPED", question "Sparsification":
-    "We model pure drop without error feedback, kept separate from
-    compression. Mixing them creates a second uncontrolled lossy layer."
+    "We simulate pure message loss without error feedback and keep it
+    separate from compression. Mixing them creates a second uncontrolled
+    source of loss."
 
   Card 02, chip "CLOSED", question "Compute and transport interleaving":
-    "Chakra traces overlap 5.4 ms of compute per node with the window, so
-    we report exposed communication time. That overlap is the confound
-    that stops us quoting the preprint's headline number."
+    "Chakra traces show 5.4 ms of compute per node overlapping the run, so
+    we report exposed communication time. This overlap prevents us from
+    quoting the preprint's headline number."
 
   Card 03, chip "SCOPED", question "CLR identification":
-    "A simulator with no gradients cannot host a detector, so we pinned
-    the schedule from the CLR detection literature."
+    "The simulator has no gradients and cannot run a detector, so we
+    pinned the schedule from the CLR detection literature."
 
-  Card 04, chip "CLOSED", question "Centralized against ring":
-    "We measured both. The number of senders converging on one receiver
-    multiplies how much switches trim by 2.7x, and spine
-    oversubscription by 5.5x. Seven senders onto one is our stand-in for
-    hub-and-spoke pressure at a single NIC, and it is the most congested
-    fabric we swept."
+  Card 04, chip "CLOSED", question "Centralized traffic versus ring traffic":
+    "We measured both effects. Senders converging on one receiver multiply
+    switch-trimmed bytes by 2.7x, and spine oversubscription by 5.5x.
+    Seven senders to one receiver stand in for hub-and-spoke pressure at a
+    single NIC and create the most congested network we tested."
 
 CLOSING LINE:
-  "Two are closed by construction. The other two need hardware a
-  simulator cannot provide."
+  "Two questions are closed by construction. Hardware experiments must
+  answer the other two."
 
 ===============================================================
 FINAL CHECK BEFORE YOU FINISH

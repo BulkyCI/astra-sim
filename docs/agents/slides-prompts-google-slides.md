@@ -132,9 +132,9 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     ran on 4 nodes with hand-injected loss."
 
   Card 02, "A lossy fabric":
-    "Hand-injected loss cannot model a 64-rank fabric. The ns-3 backend
-    ships lossless RDMA, so we disabled PFC, added UEC packet trimming,
-    and added selective repeat at 64 ranks."
+    "Hand-injected loss cannot model a 64-rank fabric. ASTRA-sim's ns-3
+    patch ships a lossless RDMA fabric by default, so we disabled PFC,
+    added UEC packet trimming, and added selective repeat at 64 ranks."
 
   Card 03, "Paired comparisons":
     "Each pair shares a seed and random stream; ephemeral GitHub Actions
@@ -199,7 +199,7 @@ bold 20px label and a 16px sublabel:
 CLOSING LINE:
   "Shared seeds and random streams let paired run times be subtracted."
 
-SPEAKER NOTE: "The stock ns-3 backend is lossless RoCEv2. Turning off PFC
+SPEAKER NOTE: "ASTRA-sim's ns-3 patch defaults to lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
 it is the change the whole question depends on. Selective repeat came
 after, and it is what slide 6 turns out to be about. I did not expect the
@@ -502,13 +502,13 @@ fails rather than reporting it:
 
 The through-line, in case a headline needs rewording. DBLP ran on 4 nodes
 with hand-injected loss, which does not model a modern training fabric.
-The simulation converts the shipped lossless RDMA backend into a lossy
-one by disabling PFC and adding UEC packet trimming; selective repeat
-matches modern recovery, and the simulation runs at 64 ranks. Each paired
-result shares a seed and random stream, and ephemeral DCS runners archive
-both results. Selective repeat reduces DBLP's 3.9 to 11.1 % go-back-N
-relief to 0.78 %, which defines the result's scope. FORGIVE applies DBLP
-under congestion control.
+ASTRA-sim's ns-3 patch ships a lossless RDMA fabric by default; the
+simulation converts it to a lossy fabric by disabling PFC and adding UEC
+packet trimming. Selective repeat matches modern recovery, and the
+simulation runs at 64 ranks. Each paired result shares a seed and random
+stream, and ephemeral DCS runners archive both results. Selective repeat
+reduces DBLP's 3.9 to 11.1 % go-back-N relief to 0.78 %, which defines the
+result's scope. FORGIVE applies DBLP under congestion control.
 
 Context, in case a caption needs it. The numbers come from four cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto

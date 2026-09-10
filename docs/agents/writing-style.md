@@ -126,6 +126,18 @@ He keeps a clumsy construction if it is exact. "Relief drops from 3.9 to
 it, because collapsing it would have lost the range. Do not smooth at the
 cost of a number's meaning.
 
+## 11. Repeat a number when it scopes the local claim.
+
+State a denominator, sample size, or condition where the reader needs it
+to interpret the sentence or figure in front of them. Do not make them
+recover that context from an earlier slide. Remove repetitions that add no
+new scope.
+
+| drafted | his |
+| --- | --- |
+| "Thirteen seeds beat the baseline" | "Thirteen of 16 seeds beat the baseline" |
+| "16 seeds, go-back-N" in a timeline after the result stated the sample size | "go-back-N seed study" |
+
 ## Smaller habits, single instances each
 
 - Possessive to compress: "The four open questions from May" became
@@ -136,6 +148,7 @@ cost of a number's meaning.
   the optimiser's residual does not know...") but not for a clever
   two-part title.
 - No em dash or en dash appears anywhere in his writing.
+- Repeat a number when it scopes the local claim; otherwise omit it.
 
 ## Checklist before anything ships under his name
 

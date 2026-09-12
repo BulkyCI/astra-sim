@@ -5,30 +5,31 @@ revocation, which currently fires on any repair rather than on budget
 exhaustion. Goal B lets the receiver concede bytes the sender has not sent
 yet, so the allowance can be spent on traffic the fabric never carries.
 
-The two changes turn out to be one change. Both are concessions of bytes
-against a single per-cell allowance, and both are answered by the same
-verdict type.
+The two changes turn out to be one change. Both are the receiver forgiving
+bytes against a single per-cell allowance, and both are answered by the
+same verdict type.
 
 Target: C++20, matching `astra-sim/network_frontend/ns3/ExperimentConfig.hh`.
 
 ## 1. Domain model
 
-The central rename is `conceded`. A byte is conceded when the receiver has
-agreed never to see it, whether the fabric already destroyed it, the
-receiver stopped it before the sender sent it, or the sender suppressed it
-at admission. One counter, charged by whichever mechanism the domain
-allows.
+The organising principle is that only the receiver can forgive, because
+only the receiver knows both how much it needs and how much it has. The
+name stays `forgiven`, and it covers both ways the receiver exercises that
+knowledge: forgiving a range the fabric destroyed, and forgiving bytes it
+is still owed. Those two differ in timing, not in kind.
 
-Today `may_forgive` reads `cell->shed + cell->forgiven + bytes`, which
-implies the two are separate resources competing for one cap. They never
-compete. `evaluate_shedding` returns early whenever `forgives(domain)`
-holds, so `shed` is identically zero in every FORGIVE run, and
-`admission_shed_cell_count` is 0 in all 14 records of run #122. The sum is
-a guard against a future domain that both sheds and forgives, and it costs
-a reader the question of why an admission-domain counter appears in the
-receiver's invariant. Charging one counter removes the question and keeps
-the guard, because a domain that did both would charge the same counter
-twice.
+`shed` leaves the law. It is the sender deciding without knowing either
+quantity, which is the admission domain's mechanism and the thing FORGIVE
+is defined against. Today `may_forgive` reads
+`cell->shed + cell->forgiven + bytes`, which reads as two resources
+competing for one cap. They never compete: `evaluate_shedding` returns
+early whenever `forgives(domain)` holds, so `shed` is identically zero in
+every FORGIVE run, and `admission_shed_cell_count` is 0 in all 14 records
+of run #122. That term was a guard against a domain that both sheds and
+forgives. No such domain exists, `forgives(domain)` is `constexpr`, and a
+guard belongs in an assertion rather than in an addition that silently
+absorbs a foreign quantity.
 
 ```cpp
 // A cell is the allowance for one destination rank in one training step.
@@ -43,23 +44,23 @@ class Cell {
     static std::optional<Cell> open(CellKey, uint64_t eligible_bytes,
                                     uint64_t p_scaled);
 
-    uint64_t remaining_allowance() const { return cap_ - conceded_; }
-    uint64_t outstanding() const { return eligible_ - delivered_ - conceded_; }
+    uint64_t remaining_allowance() const { return cap_ - forgiven_; }
+    uint64_t outstanding() const { return eligible_ - delivered_ - forgiven_; }
 
   private:
     CellKey  key_;
     uint64_t eligible_;
     uint64_t cap_;            // p_scaled * eligible / kDecisionScale, fixed at open
     uint64_t delivered_ = 0;  // monotone non-decreasing
-    uint64_t conceded_  = 0;  // monotone non-decreasing
+    uint64_t forgiven_  = 0;  // monotone non-decreasing
 };
 ```
 
 Invariants, all checkable in one line each:
 
-- `delivered_ + conceded_ + outstanding() == eligible_`
-- `conceded_ <= cap_`, whichever mechanism charged it
-- `delivered_` and `conceded_` never decrease
+- `delivered_ + forgiven_ + outstanding() == eligible_`
+- `forgiven_ <= cap_`, and nothing else charges this cell
+- `delivered_` and `forgiven_` never decrease
 - `cap_` never changes after `open`
 
 The last one matters. `eligible_` is known at launch, so the cap is a
@@ -68,9 +69,9 @@ constant for the life of the cell and no transition needs to recompute it.
 ## 2. The verdict, as a closed sum
 
 ```cpp
-enum class ConcessionKind : uint8_t {
-    Forgive,   // the fabric trimmed these bytes; do not ask for them again
-    Stop,      // the sender has not sent these bytes; do not send them
+enum class ForgiveKind : uint8_t {
+    Trimmed,      // the fabric destroyed these bytes; do not ask again
+    Outstanding,  // the sender has not sent these bytes; do not send them
 };
 
 enum class RefusalCause : uint8_t {
@@ -79,10 +80,10 @@ enum class RefusalCause : uint8_t {
     RangeIneligible,   // not data-parallel payload
 };
 
-struct Concede { ConcessionKind kind; ByteRange range; };
+struct Forgive { ForgiveKind  kind;  ByteRange range; };
 struct Refuse  { RefusalCause  cause; ByteRange range; };
 
-using Verdict = std::variant<Concede, Refuse>;
+using Verdict = std::variant<Forgive, Refuse>;
 ```
 
 Goal A becomes one total function over that sum, and the compiler enforces
@@ -121,9 +122,9 @@ std::pair<Cell, std::optional<Verdict>> step(Cell, const Event&);
 | open | Arrived | always | `delivered_ += len` | none |
 | open | Trimmed | protected step | unchanged | `Refuse{StepProtected}` |
 | open | Trimmed | not DP payload | unchanged | `Refuse{RangeIneligible}` |
-| open | Trimmed | `len <= remaining_allowance()` | `conceded_ += len` | `Concede{Forgive}` |
+| open | Trimmed | `len <= remaining_allowance()` | `forgiven_ += len` | `Forgive{Trimmed}` |
 | open | Trimmed | otherwise | unchanged | `Refuse{BudgetExhausted}` |
-| open | TailIdle | `outstanding() <= remaining_allowance()` and `outstanding() > 0` | `conceded_ += outstanding()` | `Concede{Stop}` |
+| open | TailIdle | `outstanding() <= remaining_allowance()` and `outstanding() > 0` | `forgiven_ += outstanding()` | `Forgive{Outstanding}` |
 | open | TailIdle | otherwise | unchanged | none |
 | open | Closed | always | cell retires | none |
 
@@ -144,15 +145,15 @@ The shell holds four things.
 | effect | notes |
 | --- | --- |
 | the idle timer that emits `TailIdle` | one armed timer per live cell, rearmed on `Arrived` |
-| transmitting a `Concede` | it is an acknowledgement of a range the receiver never got, which is the primitive forgiveness already uses, so `Stop` needs no new message type |
+| transmitting a `Forgive` | it is an acknowledgement of a range the receiver never got, which is the primitive forgiveness already uses, so forgiving an outstanding range needs no new message type |
 | the sender cancelling outstanding bytes | must tolerate an acknowledgement past `snd_nxt`, for which the fork already has precedent in the cumulative-acknowledgement clamp |
 | the exemption flag | cleared when `revokes_exemption` holds, which is the only write |
 
-Idempotency falls out of monotonicity. A duplicate `Concede` for a range
-already conceded is a no-op, because `conceded_` only grows and the range
-set is a set. A `Stop` that races bytes already in flight is harmless: they
-arrive, the receiver discards them, and `delivered_` does not move because
-the range is already conceded.
+Idempotency falls out of monotonicity. A duplicate `Forgive` for a range
+already forgiven is a no-op, because `forgiven_` only grows and the range
+set is a set. Forgiving outstanding bytes that are already in flight is
+harmless: they arrive, the receiver discards them, and `delivered_` does
+not move because the range is already forgiven.
 
 ## 5. Complexity budget
 
@@ -166,7 +167,8 @@ the range is already conceded.
 
 Space is 40 bytes per cell, and a real receiver holds one cell per step in
 flight rather than all 1280, so the ledger is a few hundred bytes per rank.
-The range bookkeeping `Stop` needs already exists for selective repeat, so
+The range bookkeeping `Forgive{Outstanding}` needs already exists for
+selective repeat, so
 Goal B adds no new index.
 
 ## 6. Rejected alternative: stop unconditionally at `(1 - p)` delivered
@@ -178,7 +180,7 @@ in full. I reject it, and the reason is measured rather than aesthetic.
 Under the current design, loss is congestion-proportional. Run #122 spends
 6.4 %, 8.5 %, 9.4 % and 9.2 % of data-parallel bytes at budgets of 0.1, 0.2,
 0.4 and 0.6, because the fabric stops trimming before the budget is spent.
-An uncongested run concedes almost nothing. Stopping unconditionally
+An uncongested run forgives almost nothing. Stopping unconditionally
 converts the cap from a ceiling into a target, so loss becomes exactly `p`
 whether or not the fabric is busy, and the self-limiting result disappears.
 
@@ -186,7 +188,7 @@ That contract is also what forces MLT's tolerable `p` down to 0.7 to 3.3 %.
 Adopting it would move our headline budget into the same range and cost us
 the argument that the mechanism spends only what congestion demands.
 
-The tail-triggered version keeps both properties. It concedes only when a
+The tail-triggered version keeps both properties. It forgives only when a
 straggler exists, which is exactly when the outstanding bytes sit on the
 collective's critical path, so it captures the wire saving where the saving
 is worth something.
@@ -205,12 +207,13 @@ refusals, so a burst no longer revokes exemptions through the side door.
    inter-arrival median, floored at one estimated round trip and capped at
    a quarter of the retransmission timeout. It is one profile knob and the
    sweep is cheap.
-2. **Do `Forgive` and `Stop` draw on one pool or two?** Default: one pool
+2. **Do the two forgiveness kinds draw on one pool or two?** Default: one pool
    and one cap, which keeps the invariant list at four lines. A reserved
-   stop pool would guarantee a tail concession is always affordable, at the
+   reserved pool would guarantee a tail forgiveness is always affordable, at the
    cost of a second cap and a second exhaustion path.
-3. **Does `Stop` need its own telemetry column?** Default: yes, a
-   `stopped_bytes` counter beside `forgiven_bytes`, because the whole point
+3. **Does forgiving outstanding bytes need its own telemetry column?**
+   Default: yes, a
+   `forgiven_outstanding_bytes` counter beside `forgiven_trimmed_bytes`, because the whole point
    of Goal B is bytes that never reach the wire and the existing counters
    cannot see them.
 
@@ -225,7 +228,7 @@ Four arms at the worst cell, budget 0.1, three seeds, isolating each change.
 | 3 | tagged | tail-triggered | what Goal A and B are worth together |
 | 4 | tagged | unconditional at `(1 - p)` | prices the contract change in section 6 |
 
-Report for each: training time recovered, gradient conceded as a share of
+Report for each: training time recovered, gradient forgiven as a share of
 data-parallel bytes, physical bytes on the wire, and whether loss still
 rises with congestion rather than with the budget. Arm 4 is the one that
 tells us whether the self-limiting property is worth defending.

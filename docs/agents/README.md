@@ -32,6 +32,7 @@ small while retaining the non-obvious project decisions.
 | Building the deck in Google Slides, or handing it to a slides-generating agent | [Google Slides build prompts](slides-prompts-google-slides.md) |
 | Drafting prose that goes out under Joe's name: the ten style invariants with paired evidence | [Writing style invariants](writing-style.md) |
 | Changing the receiver verdict: tagged exemption revocation and proactive stop, with the arms that price each | [FORGIVE v2 design](forgive-v2-design.md) |
+| Fixing the exemption revocation and re-running FORGIVE v1: the defect, the edits in order, and the re-run plan | [FORGIVE v1 revocation fix](forgive-v1-revocation-fix.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/author-skill/SKILL.md) |

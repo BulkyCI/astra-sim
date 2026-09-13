@@ -17,7 +17,7 @@ v2 adds two capabilities and corrects one defect.
 
 | # | change | reason |
 | --- | --- | --- |
-| A | The exemption revokes on a budget refusal, not on any repair | The protocol claims the exemption ends when the allowance ends. Today it ends on any repair, which is a broader and different event. |
+| A | The exemption revokes on a budget refusal, not on any repair | The receiver emits the same repair request from three sites and only one of them consults the ledger, so two thirds of the revocation paths mean nothing about the allowance. See section 3. |
 | B | The receiver may forgive bytes the sender has not sent | A forgiven trimmed byte was already carried and destroyed, so forgiving it saves only the repair. Forgiving an unsent byte saves the transmission too. |
 | C | `shed` leaves the receiver's budget law | `shed` is the sender deciding without knowing either quantity. It belongs to the admission domain, which is the thing this protocol is defined against. |
 
@@ -65,8 +65,17 @@ its three cases and gains no fourth.
 enum class RecoveryVerdict : uint8_t { Pull = 0, Forgive = 1, PullPriority = 2 };
 ```
 
-What is new is a kind attached to a forgiveness and a cause attached to a
-refusal.
+**Decision: the wire says acknowledge or repair, plus one bit on the
+repair.** The sender does not need to know why the receiver forgave. Both kinds of
+forgiveness produce the same sender action, which is to advance and send
+nothing, and the sender can tell them apart itself by comparing the
+acknowledged range against `snd_nxt`. The one question a sender must
+answer is whether to re-engage congestion control, that question only
+arises on a repair request, and section 3 shows why the receiver has to
+answer it rather than leaving the sender to guess.
+
+The two enums below are receiver-side bookkeeping and telemetry. Neither
+appears in a header.
 
 ```cpp
 enum class ForgiveKind : uint8_t {
@@ -99,18 +108,48 @@ constexpr bool revokes_exemption(RefusalCause cause) {
 }
 ```
 
-The reason is measurement. The mask-off arm of run #122 issues zero
-receiver refusals, because a 0.4 budget everywhere is never exhausted, and
-it still re-arms 15,509 to 15,773 flows of 89,600. Those revocations cannot
-be budget refusals. They come from `RecoverTrimmedQueue` firing on repair
-paths the verdict never sees, such as a timeout-driven retransmit or a
-selective-repeat gap that no trim caused.
+The reason is that a repair request does not mean what the sender assumes.
+`SendTrimNack` always stamps `kUecTrimRepairProtocol` and only the
+destination calls it, so every entry to `RecoverTrimmedQueue` is a
+destination repair request and the back-to-sender branch its comment
+mentions is dead in this build. Three receiver sites emit that request,
+and two of them never reach the ledger.
 
-**Decision: the fix belongs in `RecoverTrimmedQueue`, not in the verdict.**
-The re-arm is written in the transport, upstream of
-`evaluate_forgiveness`, so tagging the verdict alone would never reach it.
-The transport has to learn which repairs are budget refusals, which is one
-bit sent with the repair request.
+| site | condition | consults the ledger |
+| --- | --- | --- |
+| `rdma-hw.cc:737` | the receive queue pair is gone, so a late trim gets a plain pull | no |
+| `rdma-hw.cc:756` | `FindPulledRange` hits, so the range already has a repair outstanding and the request is re-sent | no |
+| `rdma-hw.cc:790` | the verdict was `Pull` or `PullPriority` | yes |
+
+The middle row is the common one. Under selective repeat with steady
+congestion the same range is trimmed again while its repair is still in
+flight, the receiver re-sends the request without asking anything, and the
+sender revokes. That is why the mask-off arm re-arms 15,509 to 15,773
+flows of 89,600 while its allowance sits at 37 % utilisation and almost
+never refuses.
+
+Note on evidence: `priority_pull_count` is not a refusal count. It
+increments only on `FLAG_PULL_PRIORITY`, which `evaluate_forgiveness` sets
+only on a critical step, so a profile with no critical steps reports zero
+regardless of how often the receiver refused. An earlier draft of this
+document read that zero as a measurement.
+
+**Decision: the repair request carries one bit, and the sender re-arms on
+that bit alone.** The sender cannot infer the cause, because all three
+sites produce an identical packet, so the receiver has to say which one it
+is. One flag beside `FLAG_PULL_PRIORITY` in the existing header is enough,
+set only at `rdma-hw.cc:790` and only when the verdict refused for want of
+allowance.
+
+This is the smallest change that restores the stated semantics. Leaving
+the other two sites silent is not an option, since a lost repair must be
+re-requestable and a late trim must still be answered.
+
+**Decision: count the three sites separately in telemetry.** The flow
+record carries `priority_pulls` but no refusal total, so today a reader
+cannot tell a duplicate re-request from a real refusal. Add one counter
+per site. It costs three increments and it is what makes arm 2 in section
+9 readable.
 
 ## 4. Transitions
 
@@ -219,10 +258,11 @@ isolating each change.
 
 | arm | revocation | outstanding forgiveness | answers |
 | --- | --- | --- | --- |
-| 1 | any repair, as in v1 | none | the current baseline |
-| 2 | budget refusals only | none | what Goal A alone is worth |
+| 1 | any repair, as in v1, with the three sites counted separately | none | the baseline, and how the revocations split |
+| 2 | budget refusals only | none | what Goal A is worth |
 | 3 | budget refusals only | on a straggler | what A and B are worth together |
 | 4 | budget refusals only | at `(1 - p)` delivered | prices the contract change in section 6 |
+
 
 Report for each: training time recovered, gradient forgiven as a share of
 data-parallel bytes, physical bytes on the wire, and whether the forgiven

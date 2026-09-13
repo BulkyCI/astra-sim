@@ -26,72 +26,66 @@ identical packet for all four. The receiver has to say which it is.
 
 ## 2. Domain model
 
-The verdict states two facts, urgency and cause, and the current enum
-encodes only urgency. They are not independent: priority exists only
-on the refusal path, so a flat sum states the invariant that a bitfield
-would leave implicit.
+The verdict states two independent facts about a repair, urgency and
+cause, and the byte encodes only urgency today. Priority means the step is
+critical. Exhaustion means the allowance is spent. They co-occur in the
+current code only because `evaluate_forgiveness` computes priority inside
+the refusal branch, which is incidental rather than essential.
+
+The callback returns one `uint8_t`, so both facts share it. Encode them as
+a kind plus two orthogonal flags, which is what the wire already does.
 
 ```cpp
-// Mirrored by RdmaHw::RecoveryVerdict. The numeric values of the three
-// existing cases do not move, so the ABI is unchanged for them.
-enum class RecoveryVerdict : uint8_t {
-    // Repair. The receiver never consulted the allowance: the domain does
-    // not forgive, the flow is not eligible payload, the step is unknown or
-    // closed, or the receive queue pair is gone.
-    Repair = 0,
-    Forgive = 1,
-    // The allowance for this (rank, step) is spent, and the step is
-    // critical, so the repair also jumps the queue.
-    RepairExhaustedPriority = 2,
-    // The allowance is spent on an ordinary step.
-    RepairExhausted = 3,
+// Mirrored by RdmaHw::RecoveryVerdict. Bit 0 is the kind; bits 1 and 2 are
+// attributes of a repair. Pull (0), Forgive (1) and PullPriority (2) keep
+// their present values, so no existing arm changes behaviour.
+enum : uint8_t {
+    kVerdictRepair    = 0,       // bit 0 clear
+    kVerdictForgive   = 1,       // bit 0 set
+    kRepairPriority   = 1 << 1,  // the step is critical, so repair it first
+    kRepairExhausted  = 1 << 2,  // the allowance for this (rank, step) is spent
 };
 
-constexpr bool consulted_allowance(RecoveryVerdict v) {
-    switch (v) {
-        case RecoveryVerdict::Repair:                  return false;
-        case RecoveryVerdict::Forgive:                 return true;
-        case RecoveryVerdict::RepairExhausted:         return true;
-        case RecoveryVerdict::RepairExhaustedPriority: return true;
-    }
-}
-
-constexpr bool revokes_exemption(RecoveryVerdict v) {
-    switch (v) {
-        case RecoveryVerdict::Repair:                  return false;
-        case RecoveryVerdict::Forgive:                 return false;
-        case RecoveryVerdict::RepairExhausted:         return true;
-        case RecoveryVerdict::RepairExhaustedPriority: return true;
-    }
+constexpr bool forgave(uint8_t v)      { return (v & 1) == kVerdictForgive; }
+constexpr bool is_priority(uint8_t v)  { return !forgave(v) && (v & kRepairPriority); }
+constexpr bool revokes_exemption(uint8_t v) {
+    return !forgave(v) && (v & kRepairExhausted);
 }
 ```
 
-**Decision: a fourth enum case, not a flag bit beside the enum.** Priority
-without exhaustion cannot occur, because `evaluate_forgiveness` sets
-priority only after `may_forgive` refuses. A separate boolean would make
-that combination representable and then rely on a comment to forbid it.
-Four closed cases make it unrepresentable and give both switches above
-their exhaustiveness check for free.
+**Decision: two orthogonal flags, not a fourth enum case.** A case named
+`RepairExhaustedPriority` would encode today's coupling as a type-level
+invariant, so a later choice to prioritise critical-step repairs whatever
+their cause would need a new case and a new wire mapping. The flags cost
+nothing and match the header, which has carried `FLAG_PULL_PRIORITY` and
+will carry `FLAG_ALLOWANCE_EXHAUSTED` as separate bits regardless.
 
-**Decision: keep 0, 1 and 2 at their current values.** The enum is
-duplicated in `rdma-hw.h` as `VERDICT_PULL`, `VERDICT_FORGIVE` and
-`VERDICT_PULL_PRIORITY`, and the callback passes a raw `uint8_t`. Holding
-the values still means the only edit on the ns-3 side is the new case and
-the two predicates.
+**Decision: keep 0, 1 and 2 at their present values.** `PullPriority` is
+`kVerdictRepair | kRepairPriority`, which is 2, so the three constants in
+`rdma-hw.h` need no renumbering and no arm that never exhausts its
+allowance changes behaviour.
 
-**Decision: `PulledRange` stores the verdict, not a boolean.**
+**The one illegal state left is a forgiveness with flags set.** Nothing
+constructs it, and `forgave` masks it out, so a stray flag on a
+forgiveness is inert rather than harmful. Assert it once in
+`evaluate_forgiveness` rather than modelling around it.
+
+**Decision: `PulledRange` stores the verdict byte, not a boolean.**
 
 ```cpp
 struct PulledRange {
     uint64_t end;
-    RecoveryVerdict verdict;   // replaces `bool priority`
+    uint8_t  verdict;   // replaces `bool priority`
 };
 ```
 
-The replay at line 756 must reproduce the request it already sent, which
-is now two facts rather than one. Storing the verdict makes the replay a
-copy rather than a reconstruction, and it costs nothing: `bool` and
-`uint8_t` are the same size in that struct.
+The replay at line 756 must reproduce the request it already sent. It
+matters only when the original request or its repair was lost, since
+otherwise the exemption is already gone and a second revocation is a no-op.
+Control packets take the high-priority queue and no control drop occurs in
+these runs, so this is correctness under a case the simulation does not
+currently produce. Storing the byte costs nothing over the bool it
+replaces.
 
 ## 3. Wire format
 
@@ -118,9 +112,10 @@ repair is padded to the 60 byte minimum anyway.
 | # | file | change |
 | --- | --- | --- |
 | 1 | `qbb-header.h` | add `FLAG_ALLOWANCE_EXHAUSTED`, plus its setter and getter beside the pull-priority pair |
-| 2 | `rdma-hw.h` | add `VERDICT_PULL_EXHAUSTED = 3`; rename the three existing constants to match the frontend names, values unchanged |
+| 2 | `rdma-hw.h` | add the two flag constants beside the three verdict values, which keep their numbers |
 | 3 | `rdma-queue-pair.h` | `PulledRange::priority` becomes `PulledRange::verdict` |
-| 4 | `rdma-hw.cc` `SendTrimNack` | take `RecoveryVerdict` instead of `bool priority`; set both flags |
+| 4 | `rdma-hw.cc` `SendTrimNack` | take the verdict byte instead of `bool priority`; set both flags from it |
+| 4b | `rdma-hw.cc:765, 788` | `verdict == VERDICT_FORGIVE` becomes `forgave(verdict)`, and `verdict == VERDICT_PULL_PRIORITY` becomes `is_priority(verdict)`. Equality breaks once flags ride in the byte, and this is the one place a missed edit compiles and misbehaves |
 | 5 | `rdma-hw.cc` `ReceiveTrimmedData` | pass `Repair` at 737 and 790's early-exit path, the stored verdict at 756, and the verdict at 790 |
 | 6 | `rdma-hw.cc` `RecoverTrimmedQueue` | gate the re-arm on the header flag |
 | 7 | `ExperimentConfig.hh` | `evaluate_forgiveness` returns the new cases; `RecoveryVerdict` gains its fourth |
@@ -146,17 +141,18 @@ the trim that caused it must take its own congestion notification.
 
 ## 5. Telemetry
 
-Today a reader cannot tell a replayed request from a refusal. Three
-counters on the queue pair, reported like the others:
+One counter, `trim_repair_exhausted`, incremented when a repair request
+arrives with `FLAG_ALLOWANCE_EXHAUSTED` set.
 
-| counter | incremented at |
-| --- | --- |
-| `trim_repair_unconsulted` | a request with neither flag set |
-| `trim_repair_replayed` | a request whose range was already pulled |
-| `trim_repair_exhausted` | a request with `FLAG_ALLOWANCE_EXHAUSTED` |
+Everything else is derivable. `m_trim_notifications` already counts every
+repair request the sender receives, so requests that did not consult the
+allowance are the difference. Splitting those further, into replays and
+missing-queue-pair cases, would answer a question we asked once while
+finding this defect and will not ask again.
 
-`trim_repair_exhausted` and `cc_rearmed` should agree to within the flows
-that were never exempt. That equality is the fix's own regression test.
+`trim_repair_exhausted` and `cc_rearmed` must agree, to within flows that
+were never exempt. That equality is the fix's own regression test, and
+`check_forgiveness.py` should assert it.
 
 ## 6. Fixtures
 
@@ -173,7 +169,26 @@ A third belongs in `exempt_smoke_8`: with a budget large enough never to
 refuse, `cc_rearmed` is zero. Under today's code that assertion fails,
 which is the cleanest demonstration that the defect is real.
 
-## 7. Complexity and risk
+## 7. Blast radius, checked against the tree
+
+Every consumer of the things this touches, and what happens to it.
+
+| surface | finding |
+| --- | --- |
+| `qbbHeader::flags` and `CustomHeader::ack.flags` | both `uint16_t`, written and read whole with `WriteU16`/`ReadU16`. Bit 4 is unused, so the packet does not grow and no parser changes |
+| `FLAG_PULL_PRIORITY` | read at exactly one site, `rdma-hw.cc:690`, which counts `m_priority_pulls`. Untouched |
+| `PulledRange` | three consumers. `FindPulledRange` and `RecordPulledRange` change; `PruneSettledPulls` reads only `end` |
+| `RecoveryVerdict` | five sites in `ExperimentConfig.hh`, one in `entry.h`, three constants in `rdma-hw.h`. The callback erases to `uint8_t`, so the two enums are pinned by `static_assert` |
+| the two equality tests in `rdma-hw.cc` | `verdict == VERDICT_FORGIVE` and `verdict == VERDICT_PULL_PRIORITY` must become mask tests. This is the only edit that compiles and misbehaves if missed |
+| `analyze.py` `_HOST_TRANSPORT_EVENTS` | a frozenset of five names. `trim_repair_exhausted` must be added there or the reporter drops it without complaint |
+| `check_forgiveness.py` | its re-arm assertions are conditional, of the form "if a flow re-armed then it was exempt and took a rate cut". Fewer re-arms, or none, keeps them satisfied |
+| `exempt_smoke_8` gate | requires that some flow be exempted and that some exempt flow ignore a rate cut. Both stay true; only the revocations fall |
+| CNP path | shares the flags word through `FLAG_CNP` at bit 0. Bit 4 is free there too |
+| admission domain, ledger law, DCQCN, trimming, ECMP | untouched. `m_cc_exempt` is false in every non-exempt arm, so `RecoverTrimmedQueue` never enters the block at all |
+
+The last row is what makes the re-run cheap: the baselines cannot move.
+
+## 8. Complexity and risk
 
 Every change is O(1) on the packet path: one shift and mask at the sender,
 one enum copy at the receiver. No allocation, no new state, and
@@ -181,13 +196,19 @@ one enum copy at the receiver. No allocation, no new state, and
 compiler-guided, so a missed case is a build failure rather than a silent
 default.
 
-The one risk worth naming is the duplicated enum. It lives in
-`rdma-hw.h` and `ExperimentConfig.hh` and the callback erases it to
-`uint8_t`, so a mismatch compiles and misbehaves. Mitigation: a
-`static_assert` in `entry.h` pinning each frontend value to its ns-3
-constant, which is four lines and turns the hazard into a build error.
+Two risks, both turned into build failures rather than silent drift.
 
-## 8. Re-run plan
+The enum is duplicated across `rdma-hw.h` and `ExperimentConfig.hh` and the
+callback erases it to `uint8_t`, so a mismatch compiles and misbehaves.
+A `static_assert` in `entry.h` pins each frontend value and flag to its
+ns-3 constant, which is five lines.
+
+The equality tests at `rdma-hw.cc:765` and `788` are correct today and
+wrong the moment flags share the byte. Deleting `VERDICT_PULL_PRIORITY`
+from the header after the mask helpers land makes any surviving comparison
+a compile error.
+
+## 9. Re-run plan
 
 The fix changes the exempt arm only. Baselines and admission arms never
 execute the re-arm block, because `m_cc_exempt` is false for them, so their

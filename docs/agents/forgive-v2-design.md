@@ -74,23 +74,27 @@ answer is whether to re-engage congestion control, that question only
 arises on a repair request, and section 3 shows why the receiver has to
 answer it rather than leaving the sender to guess.
 
-The two enums below are receiver-side bookkeeping and telemetry. Neither
-appears in a header.
+One receiver-side distinction earns its keep, and it never reaches a
+header:
 
 ```cpp
 enum class ForgiveKind : uint8_t {
     Trimmed,      // the fabric destroyed these bytes; do not ask again
     Outstanding,  // the sender has not sent these bytes; do not send them
 };
-
-enum class RefusalCause : uint8_t {
-    BudgetExhausted,  // the allowance for this cell is spent
-    NotForgivable,    // wrong flow kind, ineligible, unknown or closed step
-};
 ```
 
-**Decision: `RefusalCause` has two cases, not three.** A critical step is
-not a prohibition. It sets `p_low` rather than `p_high`, and forgiveness
+It exists because the whole point of Goal B is bytes that never reach the
+wire, and no existing counter can see them. Split the telemetry into
+`forgiven_trimmed_bytes` and `forgiven_outstanding_bytes` and the saving
+is readable; leave them merged and it is invisible.
+
+A matching enum for the refusal side would earn nothing. The sender needs
+one fact, whether the allowance is spent, and that is one bit. Naming its
+complement adds a symbol without adding a decision.
+
+**Decision: the refusal bit means "the allowance is spent", and nothing
+narrower.** A critical step is not a prohibition. It sets `p_low` rather than `p_high`, and forgiveness
 does happen there: masked runs place 1.0 to 1.5 % of their forgiven bytes
 on steps 1, 2, 3 and 20. A refusal on a critical step is therefore
 `BudgetExhausted` against a lower cap. The step's only distinct effect is
@@ -100,11 +104,8 @@ which `evaluate_forgiveness` already does and which stays.
 **Decision: revocation keys on `BudgetExhausted` alone.**
 
 ```cpp
-constexpr bool revokes_exemption(RefusalCause cause) {
-    switch (cause) {
-        case RefusalCause::BudgetExhausted: return true;
-        case RefusalCause::NotForgivable:   return false;
-    }
+constexpr bool revokes_exemption(uint8_t verdict) {
+    return !forgave(verdict) && (verdict & kRepairExhausted);
 }
 ```
 
@@ -164,10 +165,10 @@ std::pair<StepLedger, std::optional<Verdict>> step(StepLedger, const Event&);
 | event | guard | effect | verdict |
 | --- | --- | --- | --- |
 | Arrived | always | `delivered += len` | none |
-| Trimmed | flow ineligible, step unknown, or cell closed | none | `Pull`, cause `NotForgivable` |
+| Trimmed | flow ineligible, step unknown, or cell closed | none | repair, exhausted bit clear |
 | Trimmed | `forgiven + len` within the cap | `forgiven += len` | `Forgive`, kind `Trimmed` |
-| Trimmed | otherwise, critical step | none | `PullPriority`, cause `BudgetExhausted` |
-| Trimmed | otherwise | none | `Pull`, cause `BudgetExhausted` |
+| Trimmed | otherwise, critical step | none | repair, priority and exhausted bits set |
+| Trimmed | otherwise | none | repair, exhausted bit set |
 | Idle | `0 < outstanding <= cap - forgiven` | `forgiven += outstanding` | `Forgive`, kind `Outstanding` |
 | Idle | otherwise | none | none |
 | Close | always | `closed = true` | none |

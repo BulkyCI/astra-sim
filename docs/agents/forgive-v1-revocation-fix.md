@@ -42,33 +42,43 @@ deployed readers, so it goes rather than gets deprecated.
 That deletion pays for the fix exactly. `FLAG_PULL_PRIORITY` frees bit 3,
 `FLAG_ALLOWANCE_EXHAUSTED` takes it, and the header gains no bit.
 
-With priority gone the verdict is three states and needs no flag encoding
-at all:
+With priority gone, the verdict has two independent dimensions and every
+combination of them is meaningful.
+
+| dimension | values | what the sender does with it |
+| --- | --- | --- |
+| will these bytes be re-sent | forgive, repair | advance, or retransmit |
+| does the allowance have room | room, spent | keep, or end the exemption |
+
+**Decision: encode the two dimensions separately.** Exhaustion is a fact
+about the cell, not about this decision, so binding it to `Repair` would
+exclude the case that matters most. A flow spends its allowance by
+forgiving, so the moment to learn the allowance is gone is the forgiveness
+that empties it, not whatever unrelated trim arrives next. Bound to
+repair, the exemption outlives its justification until an arbitrary later
+event.
 
 ```cpp
-// Mirrored by RdmaHw::RecoveryVerdict.
-enum class RecoveryVerdict : uint8_t {
-    // Repair. The receiver never consulted the allowance: the domain does
-    // not forgive, the flow is not eligible payload, the step is unknown
-    // or closed, or the receive queue pair is gone.
-    Repair = 0,
-    Forgive = 1,
-    // Repair, because the allowance for this (rank, step) is spent. The
-    // only verdict that ends a congestion-control exemption.
-    RepairExhausted = 2,
+// Mirrored by RdmaHw::RecoveryVerdict. Two bits, and no name for the
+// absence of either: repair is "not forgive", room is "not spent".
+enum : uint8_t {
+    kForgive        = 1 << 0,
+    kAllowanceSpent = 1 << 1,   // cap reached; no room for a further range
 };
 
-constexpr bool revokes_exemption(RecoveryVerdict v) {
-    switch (v) {
-        case RecoveryVerdict::Repair:          return false;
-        case RecoveryVerdict::Forgive:         return false;
-        case RecoveryVerdict::RepairExhausted: return true;
-    }
-}
+// Reads one dimension and ignores the other, which is the test that the
+// two are genuinely independent.
+constexpr bool revokes_exemption(uint8_t v) { return v & kAllowanceSpent; }
+constexpr bool forgave(uint8_t v)           { return v & kForgive; }
 ```
 
-Value 2 is reused rather than added: `PullPriority` vacates it and
-`RepairExhausted` takes it, so the enum stays three wide.
+On the wire it is one bit. The kind is already the packet type, an
+acknowledgement against a repair request, so only the allowance state
+needs carrying.
+
+`kAllowanceSpent` means `remaining == 0`, which is exact and needs no
+threshold. A one byte remainder keeps the exemption alive for one more
+event, which is harmless.
 
 **Decision: delete `m_pulled_ranges` and everything that serves it.** The
 map exists to replay the request already sent for a range instead of
@@ -148,9 +158,27 @@ enum {
 `FLAG_TRIM_FTD` and `FLAG_PULL_PRIORITY` go, and the survivors renumber
 densely because nothing outside this tree reads the header.
 
-`SendTrimNack` takes `bool exhausted` in place of `bool priority` and sets
-the one flag from it. The field is a `uint16_t` written and read whole, so
-no packet changes size and no parser changes.
+**Decision, and the closest call in this document: the flag rides on the
+acknowledgement as well as the repair request.** Revocation is
+event-driven, so a flow that forgives the last byte of a cell and then
+sees no further trims keeps its exemption, backed by no allowance, until
+the step ends. Signalling only on refusal never reaches it. The counter
+argument is that the cell is shared by every sender to that rank, so the
+acknowledgement reaches only the flow that emptied it and the rest still
+learn by refusal, which makes this a partial fix to an unbounded case.
+
+It costs no bandwidth, since the bit exists either way, so the price is one
+argument on `SendAck` and one read in `ReceiveAck`. Revisit it if that
+code proves awkward.
+
+So `SendTrimNack` takes `bool spent` in place of `bool priority`, and
+`SendAck` gains the same argument on the forgiveness path at
+`rdma-hw.cc:784`. The field is a `uint16_t` written and read whole, so no
+packet changes size and no parser changes.
+
+At the sender, `ReceiveAck` and `RecoverTrimmedQueue` read the same bit
+and take the same action, which is the second half of the orthogonality
+test: one condition, two arrival paths, no special case.
 
 ## 5. Edits, in dependency order
 
@@ -162,16 +190,17 @@ Removals first, then the fix.
 | 2 | `rdma-hw.h` | `VERDICT_PULL_PRIORITY` becomes `VERDICT_REPAIR_EXHAUSTED`, value 2 unchanged |
 | 3 | `rdma-queue-pair.{h,cc}` | delete `PulledRange`, `m_pulled_ranges`, `RecordPulledRange`, `FindPulledRange`, `PruneSettledPulls`, `m_priority_pulls`, `m_trim_ftd_repairs`, `m_trim_bts_notifications` |
 | 4 | `rdma-hw.cc:690` | drop the `m_priority_pulls` increment |
-| 5 | `rdma-hw.cc` `SendTrimNack` | `bool priority` becomes `bool exhausted`; set the renamed flag |
+| 5 | `rdma-hw.cc` `SendTrimNack` | `bool priority` becomes `bool spent`; set the flag |
+| 5b | `rdma-hw.cc` `SendAck`, `ReceiveAck` | carry the flag on the forgiveness acknowledgement at 784, and read it at the sender so an acknowledgement can end the exemption |
 | 6 | `rdma-hw.cc:788` | `verdict == VERDICT_PULL_PRIORITY` becomes `verdict == VERDICT_REPAIR_EXHAUSTED`. `verdict == VERDICT_FORGIVE` at 765 is unchanged, since no flags share the byte |
 | 7 | `rdma-hw.cc` `ReceiveTrimmedData` | delete the `FindPulledRange` short-circuit and the `RecordPulledRange` call; pass `false` at 737, and the verdict at 790 |
 | 7b | `rdma-hw.cc` `ReceiveTrim`, `RecoverTrimmedQueue` | drop the `isFtdRepair` parameter and its dead branch; drop `SetTrimFtd` |
-| 8 | **`rdma-hw.cc` `RecoverTrimmedQueue`** | **gate the re-arm on the flag. This is the fix.** |
-| 9 | `ExperimentConfig.hh` | `RecoveryVerdict::PullPriority` becomes `RepairExhausted`; `Pull` becomes `Repair`; `evaluate_forgiveness` returns `RepairExhausted` on a refused verdict and `Repair` on every early exit; drop the `priority_pulls`, `trim_ftd_repairs` and `trim_bts_notifications` fields and their CSV columns; add `trim_repair_exhausted` |
+| 8 | **`rdma-hw.cc` `RecoverTrimmedQueue` and `ReceiveAck`** | **gate the re-arm on the flag, on both arrival paths. This is the fix.** |
+| 9 | `ExperimentConfig.hh` | replace the three-case `RecoveryVerdict` with the two-bit encoding; `evaluate_forgiveness` returns `kForgive` or `kRepair`, and sets `kAllowanceSpent` whenever the cell has no room after the decision; drop the `priority_pulls`, `trim_ftd_repairs` and `trim_bts_notifications` fields and their CSV columns; add `allowance_spent_signalled` |
 | 10 | `entry.h` | drop the `priority_pulls` export; add four `static_assert` lines pinning each verdict value to its ns-3 constant |
-| 11 | `analyze.py` | drop `priority_pulls` from the flow schema and the aggregate; add `trim_repair_exhausted` to `_HOST_TRANSPORT_EVENTS` |
+| 11 | `analyze.py` | drop `priority_pulls` from the flow schema and the aggregate; add `allowance_spent_signalled` to `_HOST_TRANSPORT_EVENTS` |
 | 12 | `report.py` | drop the "Priority pulls" row |
-| 13 | `check_forgiveness.py` | assert `trim_repair_exhausted` equals `cc_rearmed` over exempt flows |
+| 13 | `check_forgiveness.py` | assert `allowance_spent_signalled` equals `cc_rearmed` over exempt flows |
 | 14 | tests | `test_analyze.py`, `test_report.py`, `test_compare.py` drop the column; the race fixture gains the two assertions in section 6 |
 | 15 | `forgive-protocol.md` | sections 8, 9 and 14 lose the priority language |
 
@@ -195,8 +224,9 @@ the trim that caused it must take its own congestion notification.
 
 ## 6. Telemetry
 
-One counter, `trim_repair_exhausted`, incremented when a repair request
-arrives with `FLAG_ALLOWANCE_EXHAUSTED` set.
+One counter, `allowance_spent_signalled`, incremented when either an
+acknowledgement or a repair request arrives with `FLAG_ALLOWANCE_EXHAUSTED`
+set.
 
 Everything else is derivable. `m_trim_notifications` already counts every
 repair request the sender receives, so requests that did not consult the
@@ -204,7 +234,7 @@ allowance are the difference. Splitting those further, into replays and
 missing-queue-pair cases, would answer a question we asked once while
 finding this defect and will not ask again.
 
-`trim_repair_exhausted` and `cc_rearmed` must agree, to within flows that
+`allowance_spent_signalled` and `cc_rearmed` must agree, to within flows that
 were never exempt. That equality is the fix's own regression test, and
 `check_forgiveness.py` should assert it.
 
@@ -235,7 +265,7 @@ Every consumer of the things this touches, and what happens to it.
 | `PulledRange` | three consumers. `FindPulledRange` and `RecordPulledRange` change; `PruneSettledPulls` reads only `end` |
 | `RecoveryVerdict` | five sites in `ExperimentConfig.hh`, one in `entry.h`, three constants in `rdma-hw.h`. The callback erases to `uint8_t`, so the two enums are pinned by `static_assert` |
 | the two equality tests in `rdma-hw.cc` | both stay equality tests, because the verdict keeps three distinct values and no flags share the byte. Renaming `VERDICT_PULL_PRIORITY` makes a missed site a compile error |
-| `analyze.py` `_HOST_TRANSPORT_EVENTS` | a frozenset of five names. `trim_repair_exhausted` must be added there or the reporter drops it without complaint |
+| `analyze.py` `_HOST_TRANSPORT_EVENTS` | a frozenset of five names. `allowance_spent_signalled` must be added there or the reporter drops it without complaint |
 | `check_forgiveness.py` | its re-arm assertions are conditional, of the form "if a flow re-armed then it was exempt and took a rate cut". Fewer re-arms, or none, keeps them satisfied |
 | `exempt_smoke_8` gate | requires that some flow be exempted and that some exempt flow ignore a rate cut. Both stay true; only the revocations fall |
 | CNP path | shares the flags word through `FLAG_CNP` at bit 0. Bit 4 is free there too |

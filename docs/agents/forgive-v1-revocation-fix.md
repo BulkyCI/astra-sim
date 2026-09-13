@@ -109,38 +109,72 @@ counts. The parameter, the branch and both counters go.
 
 ## 3. Where the exemption hooks the congestion controller
 
-Unchanged by this fix, and recorded here because it is the decision most
-likely to be revisited by mistake.
+The one hard boundary in this design. We use DCQCN for convenience, the
+approach must hold for any controller, and congestion control is intricate
+enough that we neither own it nor want to answer for its fidelity.
 
-**Decision: hook at the controller's entry point, never inside it.** The
-exemption is one early return in `cnp_received_mlx`, so an exempt flow
-does not run DCQCN at all. Reaching further in, for example by routing
-every rate write through a guard, would make the controller's fidelity our
-claim to defend, and "have you modelled, tested and reproduced DCQCN
-correctly" is a question this project should never have to answer. We do
-not own this controller and do not want to.
+**Decision: hook at the transport's dispatch, not inside any controller.**
+The transport hands a congestion observation to whichever controller is
+configured at exactly three places:
 
-**The hook is complete, from two facts.** `m_cc_exempt` is set in
-`AddQueuePair` and only ever cleared, so a flow is exempt from birth or
-never and none becomes exempt after its timers exist. Both DCQCN timer
-chains bootstrap only inside the `m_first_cnp` block of
+| site | today |
+| --- | --- |
+| `rdma-hw.cc:530` | `if (cnp && m_cc_mode == 1) cnp_received_mlx(qp)` |
+| `rdma-hw.cc:698` | `if (m_cc_mode == 1) cnp_received_mlx(qp)` |
+| `rdma-hw.cc:571` | the `HandleAck*` dispatch for modes 3, 7, 8 and 10 |
+
+Each is `if (mode) call the controller`. That is the surface, and the
+guard belongs there:
+
+```cpp
+// The transport observed congestion for this queue pair. An exempt flow
+// does not run its controller at all, whichever controller that is.
+bool RdmaHw::DeliverCongestionSignal(Ptr<RdmaQueuePair> qp) {
+    if (!qp->m_cc_exempt) return true;
+    qp->m_cc_signals_withheld++;
+    ReportTransportEvent("cc_signal_withheld", 0);
+    return false;
+}
+```
+
+Today's guard sits at the first line of `cnp_received_mlx`, under the
+file's `Mellanox's version of DCQCN` banner. First line or not, that is
+inside the box. Moving it out buys a property that can be checked by diff
+rather than argued: no line inside any congestion controller changes.
+
+**It also makes the generality claim true.** The present guard covers mode
+1 alone, so an exempt flow under HPCC, TIMELY or DCTCP would run its
+controller normally. No arm uses those modes, so no measured result is
+wrong, but "the approach works with any congestion control" is not
+currently true of the code. One predicate at the dispatch makes it true
+for all five modes and for NSCC when it arrives, with no per-controller
+work.
+
+**The hook is complete for the modes in the tree, and here is how to
+re-check it.** A controller can only lower a rate if the transport calls
+it or if a timer it scheduled fires. All five current modes are called
+from the three sites above. DCQCN's timers, `UpdateAlphaMlx` and
+`CheckRateDecreaseMlx`, bootstrap only inside the `m_first_cnp` block of
 `cnp_received_mlx`, at lines 1199 and 1201, which an exempt flow never
-reaches. `UpdateAlphaMlx` and `CheckRateDecreaseMlx` are therefore never
-scheduled, so `FastRecoveryMlx`, `ActiveIncreaseMlx` and `HyperIncreaseMlx`
-never run, and all five of DCQCN's writes to `m_rate` sit downstream of
-that block. For an exempt flow the controller is dormant rather than
-partly suppressed.
+reaches; the three increase paths hang off those same timers. HPCC and
+TIMELY act from `HandleAck*` and schedule nothing independent. When adding
+NSCC, repeat this check: enumerate its entry points and its timers, and
+confirm every one is downstream of the dispatch.
 
-The semantics that follow are clean: an exemption means this queue pair's
-controller is not running, and re-arming starts it. A controller beginning
-from its initial state on revocation is correct rather than stale.
+**Semantics that follow.** An exemption means this queue pair's controller
+is not running, and re-arming starts it. A controller beginning from its
+initial state is correct rather than stale, and an exempt flow sends at
+the rate `AddQueuePair` gave it, still bounded by the link and the static
+window, which are transport concerns rather than controller concerns.
 
-**The rule for NSCC, when phase 3 arrives.** Give it one entry point that
-the transport calls with a congestion observation, and put the early
-return there. Do not weave the exemption through its window arithmetic.
-The reason holds even though we will write that controller ourselves: it
-has to read as a faithful implementation of UET 1.0.3 with the exemption
-visibly outside it.
+**Counter naming.** `cnp_ignored` names a DCQCN artifact.
+`cc_signal_withheld` means the same thing under any controller, so the
+headline statistic survives a controller change without a rename.
+
+**Behaviour is unchanged for every arm we have run.** For mode 1 the guard
+moves from the callee's first line to its call sites, which is the same
+test at the same moments. Non-exempt flows never evaluate it. So this
+refactor does not invalidate the re-run comparison in section 10.
 
 ## 4. Wire format
 
@@ -196,7 +230,8 @@ Removals first, then the fix.
 | 7 | `rdma-hw.cc` `ReceiveTrimmedData` | delete the `FindPulledRange` short-circuit and the `RecordPulledRange` call; pass `false` at 737, and the verdict at 790 |
 | 7b | `rdma-hw.cc` `ReceiveTrim`, `RecoverTrimmedQueue` | drop the `isFtdRepair` parameter and its dead branch; drop `SetTrimFtd` |
 | 8 | **`rdma-hw.cc` `RecoverTrimmedQueue` and `ReceiveAck`** | **gate the re-arm on the flag, on both arrival paths. This is the fix.** |
-| 9 | `ExperimentConfig.hh` | replace the three-case `RecoveryVerdict` with the two-bit encoding; `evaluate_forgiveness` returns `kForgive` or `kRepair`, and sets `kAllowanceSpent` whenever the cell has no room after the decision; drop the `priority_pulls`, `trim_ftd_repairs` and `trim_bts_notifications` fields and their CSV columns; add `allowance_spent_signalled` |
+| 8b | `rdma-hw.cc` three dispatch sites, `rdma-queue-pair.h` | move the exemption guard out of `cnp_received_mlx` into `DeliverCongestionSignal`, applied at lines 530, 571 and 698; rename `m_cnp_ignored` to `m_cc_signals_withheld` and the event to `cc_signal_withheld` |
+| 9 | `ExperimentConfig.hh` | replace the three-case `RecoveryVerdict` with the two-bit encoding; `evaluate_forgiveness` returns `kForgive` or `kRepair`, and sets `kAllowanceSpent` whenever the cell has no room after the decision; drop the `priority_pulls`, `trim_ftd_repairs` and `trim_bts_notifications` fields and their CSV columns; add `allowance_spent_signalled`; rename the `cnp_ignored` column |
 | 10 | `entry.h` | drop the `priority_pulls` export; add four `static_assert` lines pinning each verdict value to its ns-3 constant |
 | 11 | `analyze.py` | drop `priority_pulls` from the flow schema and the aggregate; add `allowance_spent_signalled` to `_HOST_TRANSPORT_EVENTS` |
 | 12 | `report.py` | drop the "Priority pulls" row |

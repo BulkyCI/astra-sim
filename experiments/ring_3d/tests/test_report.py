@@ -249,8 +249,6 @@ class Ring3DReportTests(unittest.TestCase):
                         "recovery_event_count": 1,
                         "trimmed_payload_bytes": 1_000,
                         "trim_notification_count": 1,
-                        "trim_ftd_repair_count": 1,
-                        "trim_bts_notification_count": 0,
                         "stale_trim_notification_count": 0,
                         "failed_by_reason": {},
                     },
@@ -417,7 +415,6 @@ class Ring3DReportTests(unittest.TestCase):
             summary["forgiveness"] = {
                 "forgiven_bytes": 78_608,
                 "forgiven_range_count": 79,
-                "priority_pull_count": 3,
                 "forgiven_bytes_by_training_step": {"2": 78_608},
                 "ledger_law": {
                     "status": "verified",
@@ -441,11 +438,12 @@ class Ring3DReportTests(unittest.TestCase):
     def test_report_renders_the_exemption_counters_for_an_exempt_run(
         self,
     ) -> None:
-        """The three mechanism counters are pre-registered estimands.
+        """The four mechanism counters are pre-registered estimands.
 
-        A wave that cannot see how many flows were exempt, how many rate cuts
-        they discarded, and how many a refusal re-armed cannot tell a null
-        result from a mechanism that never fired.
+        A wave that cannot see how many flows were exempt, how many congestion
+        signals they withheld, how many allowance reports reached them, and
+        how many of those reports re-armed a flow cannot tell a null result
+        from a mechanism that never fired.
         """
         with tempfile.TemporaryDirectory() as temporary_directory:
             run_dir = Path(temporary_directory) / "run"
@@ -455,9 +453,9 @@ class Ring3DReportTests(unittest.TestCase):
             summary["forgiveness"] = {
                 "forgiven_bytes": 78_608,
                 "forgiven_range_count": 79,
-                "priority_pull_count": 3,
                 "cc_exempt_flow_count": 42,
-                "cnp_ignored_count": 1_337,
+                "cc_signal_withheld_count": 1_337,
+                "allowance_spent_signalled_count": 9,
                 "cc_rearmed_flow_count": 9,
                 "forgiven_bytes_by_training_step": {"2": 78_608},
                 "ledger_law": {
@@ -475,7 +473,8 @@ class Ring3DReportTests(unittest.TestCase):
 
         self.assertIn("### Forgiveness", report)
         self.assertIn("| CC-exempt flows | 42 |", report)
-        self.assertIn("| CNPs ignored | 1337 |", report)
+        self.assertIn("| CC signals withheld | 1337 |", report)
+        self.assertIn("| Allowance reports | 9 |", report)
         self.assertIn("| Flows re-armed | 9 |", report)
 
     def test_report_omits_forgiveness_for_an_admission_run(self) -> None:
@@ -488,7 +487,6 @@ class Ring3DReportTests(unittest.TestCase):
             summary["forgiveness"] = {
                 "forgiven_bytes": 0,
                 "forgiven_range_count": 0,
-                "priority_pull_count": 0,
                 "forgiven_bytes_by_training_step": {},
                 "ledger_law": {"status": "not_applicable", "domain": "admission"},
             }

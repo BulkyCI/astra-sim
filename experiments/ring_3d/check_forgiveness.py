@@ -210,7 +210,7 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
 
     The exemption is granted once, at queue-pair creation, to an eligible DP
     payload flow on a non-critical step whose budget is not already spent, and
-    it ends at the receiver's first refusal to forgive. Each clause below is
+    it ends when the receiver reports that budget spent. Each clause below is
     one of those words, read back off telemetry the run already wrote.
     """
     failures: list[str] = []
@@ -238,19 +238,28 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
             )
     if not exempt:
         failures.append("no flow was exempted; the exemption never fired")
-    if not any(int(flow["cnp_ignored"]) for flow in exempt):
+    if not any(int(flow["cc_signal_withheld"]) for flow in exempt):
         failures.append(
-            "no exempt flow ignored a rate cut; the exemption cost the "
-            "congestion control nothing"
+            "no exempt flow withheld a congestion signal; the exemption cost "
+            "the congestion control nothing"
         )
     for flow in flows:
-        if flow["cc_exempt"] != "true" and int(flow["cnp_ignored"]):
+        if flow["cc_exempt"] != "true" and int(flow["cc_signal_withheld"]):
             failures.append(
-                f"a non-exempt {flow['flow_kind']} flow ignored "
-                f"{flow['cnp_ignored']} rate cuts"
+                f"a non-exempt {flow['flow_kind']} flow withheld "
+                f"{flow['cc_signal_withheld']} congestion signals"
             )
-    # A re-armed flow is one a receiver refused to forgive. Refusal arrives as
-    # a PULL, and the PULL's own rate cut is taken, so the flow must show one.
+    # An exemption ends on the receiver's report that the cell has no
+    # allowance left, and on nothing else. The two counters are written at
+    # different moments, so comparing them catches a report that re-armed
+    # nothing and a re-arm no report explains.
+    signalled = sum(1 for flow in exempt if int(flow["allowance_spent_signalled"]))
+    rearmed = sum(1 for flow in exempt if int(flow["cc_rearmed_ns"]))
+    if signalled != rearmed:
+        failures.append(
+            f"{signalled} exempt flows were told their allowance was spent "
+            f"but {rearmed} re-armed"
+        )
     for flow in flows:
         if int(flow["cc_rearmed_ns"]) == 0:
             continue
@@ -258,7 +267,7 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
             failures.append("a flow that was never exempt was re-armed")
         if int(flow["cnp_received"]) == 0:
             failures.append(
-                "a re-armed flow took no rate cut, so the refusal that "
+                "a re-armed flow took no rate cut, so the report that "
                 "re-armed it was not charged"
             )
 
@@ -269,8 +278,8 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
     forgiveness = _summary(run_dir)["forgiveness"]
     print(
         f"congestion-exempt: {len(exempt)} exempt flows, "
-        f"{forgiveness['cnp_ignored_count']} CNPs ignored, "
-        f"{forgiveness['cc_rearmed_flow_count']} flows re-armed"
+        f"{forgiveness['cc_signal_withheld_count']} congestion signals "
+        f"withheld, {forgiveness['cc_rearmed_flow_count']} flows re-armed"
     )
     return failures
 

@@ -32,6 +32,15 @@
 using namespace ns3;
 using namespace std;
 
+// The verdict crosses the boundary as a byte, so the two encodings are pinned
+// to each other here rather than trusted to stay in step.
+static_assert(static_cast<uint8_t>(AstraSimNs3::kForgive) ==
+                  static_cast<uint8_t>(RdmaHw::kForgive),
+              "the forgive bit must match the transport's");
+static_assert(static_cast<uint8_t>(AstraSimNs3::kAllowanceSpent) ==
+                  static_cast<uint8_t>(RdmaHw::kAllowanceSpent),
+              "the allowance-spent bit must match the transport's");
+
 // This bridge owns the ns-3 side of ASTRA send/receive completion. A message
 // remains logically complete only when both its sender and receiver callbacks
 // have been resolved.
@@ -201,8 +210,8 @@ void register_logical_send_event(int src_id,
 // The transport's recovery-verdict callback. ns-3 knows a five-tuple and a
 // byte range; this resolves the flow the way the telemetry join does, by
 // (src, dst, source_port), and lets the experiment layer answer. An unknown
-// five-tuple pulls: a range whose flow has already terminated cannot be
-// charged to anything.
+// five-tuple gets a repair with no allowance report: a range whose flow has
+// already terminated cannot be charged to anything.
 uint8_t recovery_verdict(uint32_t sip,
                          uint32_t dip,
                          uint16_t sport,
@@ -217,10 +226,9 @@ uint8_t recovery_verdict(uint32_t sip,
                                       static_cast<int>(dst));
     const auto active = active_flow_registry.find(key);
     if (active == active_flow_registry.end()) {
-        return static_cast<uint8_t>(AstraSimNs3::RecoveryVerdict::Pull);
+        return 0;
     }
-    return static_cast<uint8_t>(
-        AstraSimNs3::evaluate_forgiveness(active->second, length));
+    return AstraSimNs3::evaluate_forgiveness(active->second, length);
 }
 
 // The transport's congestion-exemption callback, asked once per queue pair at
@@ -472,15 +480,13 @@ void copy_transport_counters(AstraSimNs3::FlowRecord& flow,
     flow.trimmed_payload_bytes = q->m_trimmed_payload_bytes;
     flow.recovery_events = q->m_recovery_events;
     flow.trim_notifications = q->m_trim_notifications;
-    flow.trim_ftd_repairs = q->m_trim_ftd_repairs;
-    flow.trim_bts_notifications = q->m_trim_bts_notifications;
     flow.trim_lasthop_notifications = q->m_trim_lasthop_notifications;
     flow.trim_recovery_events = q->m_trim_recovery_events;
     flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.timeouts = q->m_timeouts;
     flow.cnp_received = q->m_cnp_received;
-    flow.priority_pulls = q->m_priority_pulls;
-    flow.cnp_ignored = q->m_cnp_ignored;
+    flow.cc_signal_withheld = q->m_cc_signals_withheld;
+    flow.allowance_spent_signalled = q->m_allowance_spent_signalled;
     flow.cc_rearmed_ns = q->m_cc_rearmed_ns;
     flow.first_trim_ns = q->m_first_trim_ns;
     flow.first_repair_ns = q->m_first_repair_ns;

@@ -709,7 +709,14 @@ class _FctJoin:
 
 
 _HOST_TRANSPORT_EVENTS: Final = frozenset(
-    {"rto_fired", "cnp_taken", "clipped_trim", "cnp_ignored", "cc_rearmed"}
+    {
+        "rto_fired",
+        "cnp_taken",
+        "clipped_trim",
+        "cc_signal_withheld",
+        "allowance_spent_signalled",
+        "cc_rearmed",
+    }
 )
 
 
@@ -756,11 +763,13 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         # retransmission timeout is a missing ACK, a rate cut is a CNP.
         "rto_fired",
         "cnp_taken",
-        # The congestion-exempt domain's two reactions: a rate cut the sender
-        # discarded while exempt, and the PULL that ended one exemption. Both
-        # carry no packet, so both are counts and no bytes on the control
-        # plane.
-        "cnp_ignored",
+        # The congestion-exempt domain's reactions: a congestion signal the
+        # sender withheld from its controller while exempt, the receiver's
+        # report that the cell has no allowance left, and the exemption that
+        # report ended. None carries a packet, so all three are counts and no
+        # bytes on the control plane.
+        "cc_signal_withheld",
+        "allowance_spent_signalled",
         "cc_rearmed",
         # A trim whose range the receiver already partly holds, so the verdict
         # was asked about fewer bytes than the packet carried. Those bytes were
@@ -1088,8 +1097,6 @@ _COUNTER_FIELDS: Final = (
     "recovery_events",
     "trimmed_payload_bytes",
     "trim_notifications",
-    "trim_ftd_repairs",
-    "trim_bts_notifications",
     "trim_lasthop_notifications",
     "trim_recovery_events",
     "stale_trim_notifications",
@@ -1097,8 +1104,8 @@ _COUNTER_FIELDS: Final = (
     "cnp_received",
     "forgiven_bytes",
     "forgiven_ranges",
-    "priority_pulls",
-    "cnp_ignored",
+    "cc_signal_withheld",
+    "allowance_spent_signalled",
 )
 """Telemetry columns summed verbatim. The column name is the only name they
 have, so the totals stay keyed by it rather than restating each one."""
@@ -1426,10 +1433,6 @@ def summarize(
             "failed_by_reason": dict(sorted(statistics.failed_by_reason.items())),
             "trimmed_payload_bytes": statistics.counters["trimmed_payload_bytes"],
             "trim_notification_count": statistics.counters["trim_notifications"],
-            "trim_ftd_repair_count": statistics.counters["trim_ftd_repairs"],
-            "trim_bts_notification_count": statistics.counters[
-                "trim_bts_notifications"
-            ],
             "trim_lasthop_notification_count": statistics.counters[
                 "trim_lasthop_notifications"
             ],
@@ -1457,12 +1460,17 @@ def summarize(
         "forgiveness": {
             "forgiven_bytes": statistics.counters["forgiven_bytes"],
             "forgiven_range_count": statistics.counters["forgiven_ranges"],
-            "priority_pull_count": statistics.counters["priority_pulls"],
             # What the congestion exemption did: how many flows were granted
-            # one, how many rate cuts they discarded, and how many exemptions
-            # a receiver's refusal to forgive ended.
+            # one, how many congestion signals they withheld, how many
+            # allowance reports reached them, and how many exemptions those
+            # reports ended.
             "cc_exempt_flow_count": statistics.cc_exempt_count,
-            "cnp_ignored_count": statistics.counters["cnp_ignored"],
+            "cc_signal_withheld_count": statistics.counters[
+                "cc_signal_withheld"
+            ],
+            "allowance_spent_signalled_count": statistics.counters[
+                "allowance_spent_signalled"
+            ],
             "cc_rearmed_flow_count": statistics.cc_rearmed_count,
             "forgiven_bytes_by_training_step": _forgiven_by_step(
                 statistics.ledger

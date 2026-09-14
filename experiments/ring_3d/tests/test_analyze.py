@@ -37,8 +37,6 @@ FLOW_FIELDS = [
     "trimmed_payload_bytes",
     "recovery_events",
     "trim_notifications",
-    "trim_ftd_repairs",
-    "trim_bts_notifications",
     "trim_lasthop_notifications",
     "trim_recovery_events",
     "stale_trim_notifications",
@@ -53,10 +51,10 @@ FLOW_FIELDS = [
     "first_repair_ns",
     "forgiven_bytes",
     "forgiven_ranges",
-    "priority_pulls",
     "delivered_bytes",
     "cc_exempt",
-    "cnp_ignored",
+    "cc_signal_withheld",
+    "allowance_spent_signalled",
     "cc_rearmed_ns",
 ]
 
@@ -145,8 +143,6 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "trimmed_payload_bytes": "0",
             "recovery_events": "0",
             "trim_notifications": "0",
-            "trim_ftd_repairs": "0",
-            "trim_bts_notifications": "0",
             "trim_lasthop_notifications": "0",
             "trim_recovery_events": "0",
             "stale_trim_notifications": "0",
@@ -161,7 +157,6 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "first_repair_ns": "0",
             "forgiven_bytes": "0",
             "forgiven_ranges": "0",
-            "priority_pulls": "0",
             "delivered_bytes": "64",
         }
 
@@ -531,23 +526,39 @@ class Ring3DAnalysisTests(unittest.TestCase):
 
         The exemption spends no budget, so the ledger law reads exactly as it
         does in the CC-neutral domain; what the exempt arm adds is the count
-        of flows granted an exemption, the rate cuts they discarded, and the
-        exemptions a receiver's refusal ended.
+        of flows granted an exemption, the congestion signals they withheld,
+        the allowance reports they were sent, and the exemptions those reports
+        ended.
         """
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             telemetry = root / "telemetry"
             exempt = self.eligible_flow("4", "2", 1_000, 100, "10001")
             exempt.update(
-                {"cc_exempt": "true", "cnp_ignored": "7", "cc_rearmed_ns": "500"}
+                {
+                    "cc_exempt": "true",
+                    "cc_signal_withheld": "7",
+                    "allowance_spent_signalled": "1",
+                    "cc_rearmed_ns": "500",
+                }
             )
             still_exempt = self.eligible_flow("5", "2", 1_000, 0, "10002")
             still_exempt.update(
-                {"cc_exempt": "true", "cnp_ignored": "5", "cc_rearmed_ns": "0"}
+                {
+                    "cc_exempt": "true",
+                    "cc_signal_withheld": "5",
+                    "allowance_spent_signalled": "0",
+                    "cc_rearmed_ns": "0",
+                }
             )
             obeying = self.eligible_flow("6", "2", 1_000, 0, "10003")
             obeying.update(
-                {"cc_exempt": "false", "cnp_ignored": "0", "cc_rearmed_ns": "0"}
+                {
+                    "cc_exempt": "false",
+                    "cc_signal_withheld": "0",
+                    "allowance_spent_signalled": "0",
+                    "cc_rearmed_ns": "0",
+                }
             )
             self.write_telemetry(telemetry, [exempt, still_exempt, obeying])
             manifest = self.write_recovery_manifest(
@@ -558,7 +569,8 @@ class Ring3DAnalysisTests(unittest.TestCase):
 
         forgiveness = summary["forgiveness"]
         self.assertEqual(forgiveness["cc_exempt_flow_count"], 2)
-        self.assertEqual(forgiveness["cnp_ignored_count"], 12)
+        self.assertEqual(forgiveness["cc_signal_withheld_count"], 12)
+        self.assertEqual(forgiveness["allowance_spent_signalled_count"], 1)
         self.assertEqual(forgiveness["cc_rearmed_flow_count"], 1)
         self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
         self.assertEqual(forgiveness["ledger_law"]["domain"], "recovery_exempt")
@@ -745,7 +757,6 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "retransmitted_bytes": "1024",
                     "trimmed_payload_bytes": "1000",
                     "trim_notifications": "1",
-                    "trim_ftd_repairs": "1",
                     "trim_recovery_events": "1",
                 }
             )
@@ -768,7 +779,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.assertEqual(trim["ftd_conversion_count"], 1)
             self.assertEqual(trim["lasthop_conversion_count"], 0)
             self.assertEqual(trim["trimmed_queue_drop_count"], 0)
-            self.assertEqual(summary["transport_recovery"]["trim_ftd_repair_count"], 1)
+            self.assertEqual(
+                summary["transport_recovery"]["trim_notification_count"], 1
+            )
 
     def test_summary_counts_lasthop_trims_and_trimmed_queue_drops(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -787,7 +800,6 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "retransmitted_bytes": "1024",
                     "trimmed_payload_bytes": "1000",
                     "trim_notifications": "1",
-                    "trim_ftd_repairs": "1",
                     "trim_lasthop_notifications": "1",
                     "trim_recovery_events": "1",
                 }
@@ -903,8 +915,6 @@ class Ring3DAnalysisTests(unittest.TestCase):
                     "failed_by_reason": {"retry_exhausted": 1},
                     "trimmed_payload_bytes": 0,
                     "trim_notification_count": 0,
-                    "trim_ftd_repair_count": 0,
-                    "trim_bts_notification_count": 0,
                     "trim_lasthop_notification_count": 0,
                     "trim_recovery_event_count": 0,
                     "stale_trim_notification_count": 0,

@@ -82,13 +82,23 @@ constexpr const char* selection_semantics(SheddingDomain domain) {
     return "";
 }
 
-// What the transport should do with one trimmed range. The numbers cross into
-// ns-3 as RdmaHw::RecoveryVerdict and must not drift from it.
-enum class RecoveryVerdict : uint8_t {
-    Pull = 0,
-    Forgive = 1,
-    PullPriority = 2,
+// What the transport should do with one trimmed range, and what the receiver
+// reports about the budget entry it belongs to. Two bits, because a repair is
+// "not forgive" and room is "not spent", and because the charge that empties
+// an entry is a forgiveness. The values cross into ns-3 as
+// RdmaHw::RecoveryVerdict and must not drift from it.
+enum : uint8_t {
+    kForgive = 1 << 0,
+    kAllowanceSpent = 1 << 1,
 };
+
+constexpr bool forgave(uint8_t verdict) {
+    return verdict & kForgive;
+}
+
+constexpr bool revokes_exemption(uint8_t verdict) {
+    return verdict & kAllowanceSpent;
+}
 
 // One receiving rank's budget for one training step.
 struct StepLedger {
@@ -251,14 +261,11 @@ struct FlowRecord {
     uint64_t trimmed_payload_bytes = 0;
     uint32_t recovery_events = 0;
     uint32_t trim_notifications = 0;
-    uint32_t trim_ftd_repairs = 0;
-    uint32_t trim_bts_notifications = 0;
     uint32_t trim_lasthop_notifications = 0;
     uint32_t trim_recovery_events = 0;
     uint32_t stale_trim_notifications = 0;
     uint32_t timeouts = 0;
     uint32_t cnp_received = 0;
-    uint32_t priority_pulls = 0;
     // Bytes the receiver accepted without ever seeing them, and how many
     // trimmed ranges that took. Recovery domain only.
     uint64_t forgiven_bytes = 0;
@@ -266,9 +273,12 @@ struct FlowRecord {
     // Congestion-exempt domain only. `cc_exempt` records the answer the
     // transport got at queue-pair creation and is never withdrawn: the flow's
     // exemption ended, but it was granted, and the telemetry is the record of
-    // that. `cc_rearmed_ns` is when it ended; zero means it never did.
+    // that. `allowance_spent_signalled` counts the receiver's reports that the
+    // budget entry was spent, and `cc_rearmed_ns` is when one of them ended the
+    // exemption; zero means none did.
     bool cc_exempt = false;
-    uint32_t cnp_ignored = 0;
+    uint32_t cc_signal_withheld = 0;
+    uint32_t allowance_spent_signalled = 0;
     uint64_t cc_rearmed_ns = 0;
     // Zero means never; no packet can be trimmed or repaired at time zero.
     uint64_t first_trim_ns = 0;
@@ -299,13 +309,13 @@ class ExperimentTelemetry {
                "message_sequence,src,dst,tag,source_port,priority_group,"
                "logical_bytes,physical_bytes,data_attempted_bytes,"
                "retransmitted_bytes,trimmed_payload_bytes,recovery_events,"
-               "trim_notifications,trim_ftd_repairs,trim_bts_notifications,"
-               "trim_lasthop_notifications,"
+               "trim_notifications,trim_lasthop_notifications,"
                "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
                "failure_reason,decision_hash,start_time_ns,end_time_ns,"
                "timeouts,cnp_received,first_trim_ns,first_repair_ns,"
-               "forgiven_bytes,forgiven_ranges,priority_pulls,"
-               "delivered_bytes,cc_exempt,cnp_ignored,cc_rearmed_ns\n";
+               "forgiven_bytes,forgiven_ranges,delivered_bytes,cc_exempt,"
+               "cc_signal_withheld,allowance_spent_signalled,"
+               "cc_rearmed_ns\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
             << "rank,parallelism_domain,collective_type,training_step,"
@@ -337,8 +347,6 @@ class ExperimentTelemetry {
                     << flow.retransmitted_bytes << ','
                     << flow.trimmed_payload_bytes << ',' << flow.recovery_events
                     << ',' << flow.trim_notifications << ','
-                    << flow.trim_ftd_repairs << ','
-                    << flow.trim_bts_notifications << ','
                     << flow.trim_lasthop_notifications << ','
                     << flow.trim_recovery_events << ','
                     << flow.stale_trim_notifications
@@ -348,10 +356,11 @@ class ExperimentTelemetry {
                     << ',' << flow.timeouts << ',' << flow.cnp_received << ','
                     << flow.first_trim_ns << ',' << flow.first_repair_ns << ','
                     << flow.forgiven_bytes << ',' << flow.forgiven_ranges
-                    << ',' << flow.priority_pulls << ','
-                    << delivered_bytes(flow) << ','
+                    << ',' << delivered_bytes(flow) << ','
                     << (flow.cc_exempt ? "true" : "false") << ','
-                    << flow.cnp_ignored << ',' << flow.cc_rearmed_ns << '\n';
+                    << flow.cc_signal_withheld << ','
+                    << flow.allowance_spent_signalled << ','
+                    << flow.cc_rearmed_ns << '\n';
     }
 
     void record_collective_completion(
@@ -576,30 +585,37 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
 // The transport is semantics-blind: it supplies a flow and a byte count, and
 // learns nothing about steps, phases, or budgets. Total by construction, since
 // this runs on the packet path: an unknown step, a closed ledger, or an
-// exhausted budget all answer "pull".
-inline RecoveryVerdict evaluate_forgiveness(FlowRecord& flow, uint64_t bytes) {
+// exhausted budget all answer "repair".
+//
+// The allowance bit rides on whatever the answer is, because a sender cannot
+// read a budget entry every other sender to that rank shares. It reports
+// remaining == 0 exactly: a one byte remainder keeps an exemption alive one
+// more event, which costs one event's congestion signals.
+inline uint8_t evaluate_forgiveness(FlowRecord& flow, uint64_t bytes) {
     if (!experiment_config.enabled || !forgives(experiment_config.domain) ||
         flow.kind != FlowKind::ForegroundPayload || !flow.admission_eligible) {
-        return RecoveryVerdict::Pull;
+        return 0;
     }
     const uint32_t step = flow.operation.training_step;
     const auto clr = experiment_config.clr_mask_by_step.find(step);
     if (clr == experiment_config.clr_mask_by_step.end()) {
-        return RecoveryVerdict::Pull;
+        return 0;
     }
     const uint64_t threshold = clr->second ? experiment_config.p_low_threshold
                                            : experiment_config.p_high_threshold;
     const uint32_t dst = static_cast<uint32_t>(flow.dst);
     if (!forgiveness_ledger.may_forgive(dst, step, bytes, threshold)) {
-        // A critical step that cannot spend more budget still wants its repair
-        // ahead of the rest; outside one, an ordinary pull is enough.
-        return clr->second ? RecoveryVerdict::PullPriority
-                           : RecoveryVerdict::Pull;
+        return kAllowanceSpent;
     }
     forgiveness_ledger.charge(dst, step, bytes);
     flow.forgiven_bytes += bytes;
     flow.forgiven_ranges++;
-    return RecoveryVerdict::Forgive;
+    // One byte is the smallest range a further trim could carry, so a cell
+    // that cannot take it has nothing left for anyone.
+    return kForgive |
+           (forgiveness_ledger.may_forgive(dst, step, 1, threshold)
+                ? 0
+                : kAllowanceSpent);
 }
 
 // Whether one queue pair may ignore congestion signals for as long as the

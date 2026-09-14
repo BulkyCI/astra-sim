@@ -60,7 +60,6 @@ def summary(
         "forgiveness": {
             "forgiven_bytes": 0,
             "forgiven_range_count": 0,
-            "priority_pull_count": 0,
             "ledger_law": {"status": "verified"},
         },
         "collective_completion": {

@@ -144,20 +144,26 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
         "to carry again. The ledger law caps shed plus forgiven bytes per "
         "(receiving rank, training step) and holds only in a forgiving "
         "domain; a violated status invalidates the arm. A CC-exempt flow "
-        "discards the rate cuts it is sent until a receiver refuses to "
-        "forgive one of its trims, which re-arms it.",
+        "withholds every congestion signal from its controller until a "
+        "receiver reports that cell's allowance spent, which re-arms it.",
         "",
         *_markdown_table(
             ["Signal", "Value"],
             [
                 ["Forgiven", _format_optional_bytes(forgiven_bytes)],
                 ["Forgiven ranges", forgiveness.get("forgiven_range_count", 0)],
-                ["Priority pulls", forgiveness.get("priority_pull_count", 0)],
                 [
                     "CC-exempt flows",
                     forgiveness.get("cc_exempt_flow_count", 0),
                 ],
-                ["CNPs ignored", forgiveness.get("cnp_ignored_count", 0)],
+                [
+                    "CC signals withheld",
+                    forgiveness.get("cc_signal_withheld_count", 0),
+                ],
+                [
+                    "Allowance reports",
+                    forgiveness.get("allowance_spent_signalled_count", 0),
+                ],
                 [
                     "Flows re-armed",
                     forgiveness.get("cc_rearmed_flow_count", 0),
@@ -1123,14 +1129,6 @@ def render_report(run_dir: Path, profile_path: Path) -> str:
                         [
                             "Trim notifications",
                             recovery.get("trim_notification_count", 0),
-                        ],
-                        [
-                            "FTD repair controls",
-                            recovery.get("trim_ftd_repair_count", 0),
-                        ],
-                        [
-                            "BTS notifications",
-                            recovery.get("trim_bts_notification_count", 0),
                         ],
                         [
                             "Stale trim notifications",

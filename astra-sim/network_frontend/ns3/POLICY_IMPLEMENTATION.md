@@ -49,17 +49,16 @@ switch trims a data packet (UEC 1.0.3 section 4.1)
         v
 RdmaHw::ReceiveTrim -> ReceiveTrimmedData          [Forgiveness attribute on]
   |- range settled (received or already forgiven): ACK, no charge
-  |- range pulled: repeat the PULL at the same priority
-  `- range unknown: ask the verdict callback
+  `- range unsettled: ask the verdict callback
         |
         v
 entry.h::recovery_verdict()   resolves (src, dst, source_port) in the registry
         |
         v
 ExperimentConfig.hh::evaluate_forgiveness()
-  |- ineligible, unknown step, closed ledger, or exhausted budget -> Pull
-  |     (PullPriority instead when the step is critical)
-  `- inside budget -> charge the ledger, count the flow's bytes, Forgive
+  |- ineligible, unknown step, closed ledger, or exhausted budget -> repair
+  `- inside budget -> charge the ledger, count the flow's bytes, forgive
+        (either answer reports kAllowanceSpent when the cell has no room left)
         |
         v
 RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
@@ -153,7 +152,8 @@ fields are:
 | `timeouts` / `cnp_received` | Retransmission-timeout firings that rescheduled data, and rate cuts taken. `cnp_received` is zero unless the profile sets `network.congestion_control.mode: dcqcn` |
 | `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
 | `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
-| `priority_pulls` | Repairs the receiver asked for ahead of the rest, on a critical step whose budget was exhausted |
+| `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
+| `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell had no allowance left, and the simulated time one of them ended the exemption; zero means none did |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |
 
 `source_port` identifies a live five-tuple, not a flow. ns-3 owns only the

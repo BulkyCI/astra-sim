@@ -1,271 +1,263 @@
-# FORGIVE v2: the receiver's decision
+# FORGIVE v2: pacing and the straggler stop
 
-Design of record for the next change to the receiver verdict. It replaces
-nothing in [forgive-protocol.md](forgive-protocol.md), which specifies the
-protocol as built and measured in runs #121 and #122. This document
-specifies what changes, and gives the reason for each decision.
+Design of record, revised 2026-09-14. It assumes the v1 revocation fix in
+[forgive-v1-revocation-fix.md](forgive-v1-revocation-fix.md) is merged:
+two-bit verdict, `FLAG_ALLOWANCE_EXHAUSTED`, `DeliverCongestionSignal`,
+no priority pulls, no pulled-range cache. v2 adds two receiver policies on
+top of that and changes no sender logic.
 
-Target: C++20, matching `astra-sim/network_frontend/ns3/ExperimentConfig.hh`.
+Target: C++20 in `astra-sim/network_frontend/ns3/ExperimentConfig.hh`,
+C++17 in the ns-3 fork.
 
-## 1. The principle
+## 1. Principle and the two changes
 
-Only the receiver can forgive, because only the receiver knows both how
-much it needs and how much it has. Every decision below follows from that
-sentence.
+Only the receiver can forgive, because only the receiver knows how much it
+needs and how much it has.
 
-v2 adds two capabilities and corrects one defect.
-
-| # | change | reason |
+| change | what | why |
 | --- | --- | --- |
-| A | The exemption revokes on a budget refusal, not on any repair | The receiver emits the same repair request from three sites and only one of them consults the ledger, so two thirds of the revocation paths mean nothing about the allowance. See section 3. |
-| B | The receiver may forgive bytes the sender has not sent | A forgiven trimmed byte was already carried and destroyed, so forgiving it saves only the repair. Forgiving an unsent byte saves the transmission too. |
-| C | `shed` leaves the receiver's budget law | `shed` is the sender deciding without knowing either quantity. It belongs to the admission domain, which is the thing this protocol is defined against. |
+| P | pacing: the receiver may decline a forgivable trim so that allowance remains for later in the step | the cap binds at the headline budget, utilisation 81 % at 0.1, and first come first served spends it on the first burst |
+| S | straggler stop: the receiver forgives a flow's unsent remainder once the flow has gone quiet | a forgiven trimmed byte saves its repair; a forgiven unsent byte saves its transmission too |
+
+Both spend the same allowance under the same law. P reserves it, S is
+what the reserve is for.
 
 ## 2. Domain model
 
 ```cpp
-// One receiving rank's allowance for one training step.
+// One receiving rank's allowance for one step. Dense table by (dst, step),
+// unchanged from v1. eligible accumulates as messages launch, which is
+// itself a weak pacing and stays.
 struct StepLedger {
-    uint64_t eligible  = 0;   // bytes this rank is owed for this step
-    uint64_t delivered = 0;   // arrived and kept
-    uint64_t forgiven  = 0;   // the receiver agreed never to see these
+    uint64_t eligible  = 0;   // bytes launched toward this rank this step
+    uint64_t shed      = 0;   // admission domain only; zero here
+    uint64_t forgiven  = 0;   // trimmed and remainder bytes together
+    uint64_t delivered = 0;   // bytes of completed messages, less their forgiven bytes
     bool     closed    = false;
 };
+// Invariants: every counter is monotone; forgiven + delivered <= eligible;
+// closed never unsets; a closed cell refuses every query.
+
+// The pacing rule is a closed sum. A Bernoulli probability is meaningful only
+// under Bernoulli, so it lives inside that alternative and nowhere else.
+struct NoPacing {};
+struct Bernoulli { uint64_t threshold; };   // p * kDecisionScale
+struct Vesting   {};
+using Pacing = std::variant<NoPacing, Bernoulli, Vesting>;
+
+// Straggler stop. idle_ns == 0 means ask at every arrival, which is MLT's
+// stop-at-(1-p) contract as the degenerate point of ours.
+struct Straggler { std::optional<uint64_t> idle_ns; };  // nullopt: disabled
 ```
 
-Invariants:
+**Cap under each rule.** With `t` the step's threshold in `kDecisionScale`
+units, a forgiveness of `b` bytes is affordable when
 
-- `delivered + forgiven + outstanding == eligible`, where
-  `outstanding = eligible - delivered - forgiven`
-- `forgiven * kDecisionScale <= eligible * threshold(step)`
-- `delivered` and `forgiven` never decrease, and `closed` never unsets
-- once `closed`, every query answers refuse and every update is a no-op
+| rule | condition |
+| --- | --- |
+| NoPacing | `(forgiven + b) * S <= eligible * t` |
+| Bernoulli | the NoPacing condition, and `coin(flow, start) < threshold` |
+| Vesting | `(forgiven + b) * S <= delivered * t` |
 
-**Decision: `eligible` is fixed when the cell opens, not accumulated.**
-Today `register_eligible` adds bytes as each message is admitted, so
-`eligible` is final only once the step is over. Goal B needs `outstanding`
-during the step, and `outstanding` means nothing while its denominator is
-still growing. The collective library supplies the total in advance:
-`ncclAllReduce` takes count and datatype at launch, DDP fixes bucket sizes
-at bucket-formation time, and a ring or direct schedule makes the per-peer
-split deterministic. So the receiver opens the cell with its final
-`eligible`, and the accumulating path becomes a consistency check rather
-than the source of truth.
+Vesting is strictly tighter than NoPacing because `delivered <= eligible`,
+so the ceiling is unchanged and only its availability moves. The remainder
+forgiveness of change S uses the same condition without the coin: the coin
+reserves, the stop consumes the reserve.
 
-**Decision: the table stays dense, indexed by `(dst, step)`.** Unchanged
-from v1, and the measured sizes justify it: 1280 cells at 64 ranks and 20
-steps, under a megabyte in total, one multiply-add per access.
+**The coin.** `coin(flow, start) = hash_combine(flow.decision_hash, start)
+% kDecisionScale`. Deterministic per range, so a range the coin refuses
+stays refused on re-trim and "forgive a fraction `p` of trimmed ranges" is
+exact rather than geometric. No ns-3 random stream is consumed, so paired
+arms stay paired.
 
-## 3. The verdict
+**Profile shape.**
 
-The wire enum must not drift from `RdmaHw::RecoveryVerdict`, so it keeps
-its three cases and gains no fourth.
-
-```cpp
-enum class RecoveryVerdict : uint8_t { Pull = 0, Forgive = 1, PullPriority = 2 };
-```
-
-**Decision: the wire says acknowledge or repair, plus one bit on the
-repair.** The sender does not need to know why the receiver forgave. Both kinds of
-forgiveness produce the same sender action, which is to advance and send
-nothing, and the sender can tell them apart itself by comparing the
-acknowledged range against `snd_nxt`. The one question a sender must
-answer is whether to re-engage congestion control, that question only
-arises on a repair request, and section 3 shows why the receiver has to
-answer it rather than leaving the sender to guess.
-
-One receiver-side distinction earns its keep, and it never reaches a
-header:
-
-```cpp
-enum class ForgiveKind : uint8_t {
-    Trimmed,      // the fabric destroyed these bytes; do not ask again
-    Outstanding,  // the sender has not sent these bytes; do not send them
-};
-```
-
-It exists because the whole point of Goal B is bytes that never reach the
-wire, and no existing counter can see them. Split the telemetry into
-`forgiven_trimmed_bytes` and `forgiven_outstanding_bytes` and the saving
-is readable; leave them merged and it is invisible.
-
-A matching enum for the refusal side would earn nothing. The sender needs
-one fact, whether the allowance is spent, and that is one bit. Naming its
-complement adds a symbol without adding a decision.
-
-**Decision: the refusal bit means "the allowance is spent", and nothing
-narrower.** A critical step is not a prohibition. It sets `p_low` rather than `p_high`, and forgiveness
-does happen there: masked runs place 1.0 to 1.5 % of their forgiven bytes
-on steps 1, 2, 3 and 20. A refusal on a critical step is therefore
-`BudgetExhausted` against a lower cap. The step's only distinct effect is
-that its refusal escalates to `PullPriority` so the repair jumps the queue,
-which `evaluate_forgiveness` already does and which stays.
-
-**Decision: revocation keys on `BudgetExhausted` alone.**
-
-```cpp
-constexpr bool revokes_exemption(uint8_t verdict) {
-    return !forgave(verdict) && (verdict & kRepairExhausted);
+```json
+"selection_policy": {
+  "p_low": 0.005, "p_high": 0.1, "domain": "recovery_exempt",
+  "pacing": {"kind": "bernoulli", "p": 0.5},
+  "straggler_idle_ns": 250000
 }
 ```
 
-The reason is that a repair request does not mean what the sender assumes.
-`SendTrimNack` always stamps `kUecTrimRepairProtocol` and only the
-destination calls it, so every entry to `RecoverTrimmedQueue` is a
-destination repair request and the back-to-sender branch its comment
-mentions is dead in this build. Three receiver sites emit that request,
-and two of them never reach the ledger.
+`pacing` defaults to `{"kind": "none"}`, `straggler_idle_ns` absent means
+disabled. The parser is the one smart constructor: `p` outside `(0, 1)`,
+`p` given with a kind other than `bernoulli`, or a negative idle are
+rejected at load.
 
-| site | condition | consults the ledger |
-| --- | --- | --- |
-| `rdma-hw.cc:737` | the receive queue pair is gone, so a late trim gets a plain pull | no |
-| `rdma-hw.cc:756` | `FindPulledRange` hits, so the range already has a repair outstanding and the request is re-sent | no |
-| `rdma-hw.cc:790` | the verdict was `Pull` or `PullPriority` | yes |
+## 3. Transitions
 
-The middle row is the common one. Under selective repeat with steady
-congestion the same range is trimmed again while its repair is still in
-flight, the receiver re-sends the request without asking anything, and the
-sender revokes. That is why the mask-off arm re-arms 15,509 to 15,773
-flows of 89,600 while its allowance sits at 37 % utilisation and almost
-never refuses.
-
-Note on evidence: `priority_pull_count` is not a refusal count. It
-increments only on `FLAG_PULL_PRIORITY`, which `evaluate_forgiveness` sets
-only on a critical step, so a profile with no critical steps reports zero
-regardless of how often the receiver refused. An earlier draft of this
-document read that zero as a measurement.
-
-**Decision: the repair request carries one bit, and the sender re-arms on
-that bit alone.** The sender cannot infer the cause, because all three
-sites produce an identical packet, so the receiver has to say which one it
-is. One flag beside `FLAG_PULL_PRIORITY` in the existing header is enough,
-set only at `rdma-hw.cc:790` and only when the verdict refused for want of
-allowance.
-
-This is the smallest change that restores the stated semantics. Leaving
-the other two sites silent is not an option, since a lost repair must be
-re-requestable and a late trim must still be answered.
-
-**Decision: count the three sites separately in telemetry.** The flow
-record carries `priority_pulls` but no refusal total, so today a reader
-cannot tell a duplicate re-request from a real refusal. Add one counter
-per site. It costs three increments and it is what makes arm 2 in section
-9 readable.
-
-## 4. Transitions
+The pure core is two functions on a cell. Neither reads a clock or the
+network; the timestamp that decides idleness is the shell's business.
 
 ```cpp
-enum class EventKind : uint8_t { Arrived, Trimmed, Idle, Close };
-struct Event { EventKind kind; ByteRange range; uint64_t at_ns; };
+// Trim verdict. Total. Returns the verdict bits and the cell to store.
+// Two bits: kForgive, kAllowanceSpent (set when no further range could
+// be afforded after this decision, under the rule's own condition).
+std::pair<uint8_t, StepLedger>
+trim_verdict(StepLedger, uint64_t threshold, const Pacing&, uint64_t coin, uint64_t bytes);
 
-// Total. Returns the updated cell and the verdict to emit, if any.
-std::pair<StepLedger, std::optional<Verdict>> step(StepLedger, const Event&);
+// Remainder verdict. Total. Returns the bytes to forgive, zero to refuse.
+// Whole remainder or nothing: the receiver knows the byte count and not
+// which gradient elements matter, so it does not choose among them.
+std::pair<uint64_t, StepLedger>
+remainder_verdict(StepLedger, uint64_t threshold, const Pacing&, uint64_t remainder);
 ```
 
-| event | guard | effect | verdict |
+| event | guard | effect | result |
 | --- | --- | --- | --- |
-| Arrived | always | `delivered += len` | none |
-| Trimmed | flow ineligible, step unknown, or cell closed | none | repair, exhausted bit clear |
-| Trimmed | `forgiven + len` within the cap | `forgiven += len` | `Forgive`, kind `Trimmed` |
-| Trimmed | otherwise, critical step | none | repair, priority and exhausted bits set |
-| Trimmed | otherwise | none | repair, exhausted bit set |
-| Idle | `0 < outstanding <= cap - forgiven` | `forgiven += outstanding` | `Forgive`, kind `Outstanding` |
-| Idle | otherwise | none | none |
-| Close | always | `closed = true` | none |
+| trim | cell missing, closed, or flow ineligible | none | repair, spent bit clear |
+| trim | Bernoulli and coin refuses | `pacing_refusals++` on the flow | repair, spent bit as on every repair: set when the cap has no room |
+| trim | affordable under the rule | `forgiven += b` | forgive |
+| trim | otherwise | none | repair, spent bit set |
+| remainder | affordable under the rule and `remainder > 0` | `forgiven += remainder` | forgive `remainder` |
+| remainder | otherwise | none | refuse, nothing sent |
+| message complete | always | `delivered += size - flow.forgiven_bytes` | none |
+| collective complete | always | `closed = true` | none |
 
-**Decision: the `Idle` guard requires the whole remainder to fit.** A
-partial stop would make the receiver choose which outstanding bytes to
-sacrifice, and it has no basis for that choice: it knows the byte count but
-not which gradient elements matter. Requiring the whole remainder to fit
-keeps the stop one atomic decision and keeps the cap hard.
+A refused remainder emits nothing. The exemption revokes only on a repair
+request with the spent bit, and no repair is requested here; the next trim
+will carry the bit if the cap is spent.
 
-**Decision: `Idle` fires on a straggler, not on reaching `(1 - p)`.** The
-reason is in section 6.
+**Decision: the coin never applies to the remainder.** Pacing exists to
+keep allowance for the end of the step. Applying it at the end of the step
+would defeat its own purpose.
+
+## 4. The receiver's side of change S
+
+The rx queue pair does not know the flow's size; the frontend's
+`FlowRecord` does. So the transport asks, and the answer is the end
+offset.
+
+```cpp
+// ns-3 side, beside the existing verdict callback. Asked when the rx queue
+// pair has been idle with a gap. Returns the end offset to absorb from
+// `next_expected`, or 0 to refuse. Not a struct on the trim path: the trim
+// verdict never needs an end, and the remainder verdict never needs bits.
+typedef Callback<uint64_t, uint32_t, uint32_t, uint16_t, uint16_t, uint64_t>
+    RemainderVerdictCallback;
+```
+
+On a nonzero answer the receiver does exactly what a forgiven trim does:
+`AddOutOfOrderRange(next_expected, end)`, advance the cumulative sequence,
+send the ACK. The ACK's sequence is the flow size, so the sender's existing
+`Acknowledge` completes the flow through `IsFinished`. No new packet type
+and no new sender state.
+
+**Idle detection.** One `uint64_t m_last_arrival_ns` and one `EventId` on
+`RdmaRxQueuePair`. Each accepted data packet writes the timestamp and schedules the
+event only if none is pending. The event fires at `last_arrival + idle`;
+on firing, if `now - last_arrival < idle` it reschedules to
+`last_arrival + idle`, otherwise it asks the remainder verdict and does not
+re-arm; the next arrival will. That is O(1) per packet and at most one
+scheduler entry per open rx queue pair. Cancel the
+event where the rx queue pair is deleted. With `idle_ns == 0` there is no
+timer and the question is asked at every arrival.
+
+**Late data.** After a remainder forgiveness the sender may still have
+packets in flight, and they arrive for a five-tuple whose rx queue pair is
+gone. `ReceiveUdp` calls `GetRxQp(..., create = true)`, so today a late
+duplicate repair already resurrects an empty rx queue pair, which NACKs a
+sender that no longer exists and is ignored at `if (!qp) return 0`. v2
+adds nothing to that path and keeps the resurrected pair inert: the idle
+event is not re-armed after a refusal, an arrival arms it only when none is
+pending, and the frontend refuses because the flow is no longer registered.
+No new state, and the pre-existing leak stays pre-existing.
 
 ## 5. Effect boundary
 
-The pure core is the transition function and `revokes_exemption`. Neither
-reads a clock, allocates, or touches the network, and `Idle` passes its
-timestamp as data, so the core stays testable without a simulator.
-
 | shell effect | idempotency and scope |
 | --- | --- |
-| the idle timer that emits `Idle` | one armed timer per open cell, rearmed on `Arrived`, cancelled on `Close` |
-| emitting a forgiveness | an acknowledgement of a range the receiver never got, which is the primitive v1 already uses |
-| the sender cancelling outstanding bytes | must tolerate an acknowledgement past `snd_nxt`; the fork has precedent in the cumulative-acknowledgement clamp |
-| clearing the exemption flag | the only write, and only when `revokes_exemption` holds |
+| ledger mutation | monotone counters; a duplicate forgiveness of a settled range is a no-op because `UnsettledBytes` is zero and no verdict is asked |
+| `register_delivered` at message completion | once per message, from the queue-pair completion callback that already has `q->m_size` and `flow.forgiven_bytes` |
+| idle event | one per open rx queue pair, lazily rescheduled, cancelled at deletion |
+| remainder ACK | the ordinary ACK primitive; the sender tolerates it because `IsFinished` is `snd_una >= m_size` |
+| telemetry | `forgiven_remainder_bytes` (a subset of `forgiven_bytes`, which the remainder also increments) and `pacing_refusals` on the flow record; transport events `remainder_forgiven` (bytes) beside `trim_forgiven` |
 
-**Decision: forgiving outstanding bytes adds no packet type, but it does
-add a trigger.** The acknowledgement already exists and already covers
-ranges the receiver never received. What is new is that the receiver sends
-one unprompted rather than in response to an arrival. That changes when the
-receiver speaks, not what it says, so the claim that survives is the one
-that matters for hardware: no new header, and no new sender state beyond
-accepting an acknowledgement it did not expect.
+Trimmed-forgiven bytes are `forgiven_bytes - forgiven_remainder_bytes`,
+derived rather than counted. Cap refusals are `allowance_spent_signalled`
+from the v1 fix; coin refusals are counted because nothing else can see
+them.
 
-Idempotency falls out of monotonicity. A duplicate forgiveness for a range
-already forgiven is a no-op, because `forgiven` only grows and the range
-set is a set. Forgiving bytes already in flight is harmless: they arrive,
-the receiver discards them, and `delivered` does not move because the range
-is already forgiven.
+## 6. Complexity budget
 
-## 6. Rejected alternative: stop at `(1 - p)` delivered
-
-The obvious reading of Goal B is MLT's contract, where the receiver stops
-as soon as `(1 - p)` of the collective has arrived, so the allowance is
-always spent in full. Rejected, for a measured reason.
-
-Under v1 the loss is congestion-proportional. Run #122 spends 6.4 %, 8.5 %,
-9.4 % and 9.2 % of data-parallel bytes at budgets of 0.1, 0.2, 0.4 and 0.6,
-because the fabric stops trimming before the budget is spent, and an
-uncongested run forgives almost nothing. Stopping unconditionally converts
-the cap from a ceiling into a target, so the loss becomes exactly `p`
-whether or not the fabric is busy. That contract is also what holds MLT's
-tolerable `p` to 0.7 to 3.3 %, so adopting it would drag our headline
-budget into the same range and cost us the self-limiting result.
-
-Forgiving on a straggler keeps both properties. The receiver forgives only
-once the remaining bytes have gone quiet, which is when they sit on the
-collective's critical path, so the wire saving arrives where it is worth
-something and an uncongested step still forgives nothing.
-
-## 7. Out of scope
-
-Pacing the allowance across a step, so one congestion event cannot consume
-a cell early, is a separate change. Neither goal here causes or prevents
-it. Goal A does remove one of its consequences: with tagged revocation, a
-burst can no longer revoke exemptions through repairs that were never
-budget refusals.
-
-## 8. Open questions
-
-1. **How quiet is idle?** Default: twice the cell's observed inter-arrival
-   median, floored at one estimated round trip and capped at a quarter of
-   the retransmission timeout. One profile knob, cheap to sweep.
-2. **Do the two forgiveness kinds share one cap?** Default: yes, one cap
-   and one counter, which keeps the invariant list at four lines. A
-   reserved slice for stragglers would guarantee a tail forgiveness is
-   always affordable, at the cost of a second cap and a second exhaustion
-   path.
-3. **Can the collective library's `eligible` disagree with the accumulated
-   total?** Default: assume not, assert equality at `Close`, and fail the
-   run loudly on a mismatch, because a wrong denominator silently changes
-   every budget in that step.
-
-## 9. Arms
-
-Four arms at the worst cell of the regime map, budget 0.1, three seeds,
-isolating each change.
-
-| arm | revocation | outstanding forgiveness | answers |
+| operation | n | bound | structure |
 | --- | --- | --- | --- |
-| 1 | any repair, as in v1, with the three sites counted separately | none | the baseline, and how the revocations split |
-| 2 | budget refusals only | none | what Goal A is worth |
-| 3 | budget refusals only | on a straggler | what A and B are worth together |
-| 4 | budget refusals only | at `(1 - p)` delivered | prices the contract change in section 6 |
+| trim verdict | per trim, about 10^5 per run | O(1) | dense table, one hash_combine |
+| remainder verdict | per idle event, at most once per idle period per rx qp | O(1) plus O(log k) absorb | existing `std::map` of out-of-order ranges, k small |
+| delivered update | per message, about 10^4 per run | O(1) | one add |
+| idle timer | per packet, about 10^7 per run | O(1) write; O(log E) per fire | timestamp plus lazy reschedule |
 
+Nothing here is on a hot path that was not already there.
 
-Report for each: training time recovered, gradient forgiven as a share of
-data-parallel bytes, physical bytes on the wire, and whether the forgiven
-share still rises with congestion rather than with the budget. Arm 4
-decides whether the self-limiting property is worth defending.
+## 7. Rejected alternatives
+
+**Fix `eligible` when the cell opens, from the collective library.** The
+earlier draft wanted this so that cell-level `outstanding` existed during
+the step. Once the remainder is flow-scoped, the transport supplies
+`next_expected` and the frontend supplies the size, and no cell-level
+outstanding is needed. Fixing `eligible` would also remove the pacing that
+accumulation provides, making the burn-out problem strictly worse. Killed
+by having no consumer.
+
+**One callback returning a struct for both questions.** Every trim verdict
+would carry an end it never uses. Two callbacks, two questions.
+
+**A fresh coin per trim attempt.** Turns Bernoulli into a geometric delay
+of a few round trips rather than a reservation. Killed by not being a
+pacing rule.
+
+**Stop at `(1 - p)` delivered unconditionally, as MLT.** Converts the cap
+from ceiling to target so the loss is exactly `p` whether or not the fabric
+is busy, which is what pins MLT's tolerable `p` to 0.7 to 3.3 %. Retained
+only as the `idle_ns = 0` arm, so its price is measured rather than argued.
+
+**Adaptive idle from the observed inter-arrival distribution.** A running
+median per queue pair for one knob. One number, swept, is enough until a
+result says otherwise.
+
+## 8. Arms
+
+Receiver-policy variants only, at the worst cell (`direct7`, 4:1, DCQCN),
+3 seeds, budget 0.1 where the cap binds. Each variant is a `single` record
+running only the recovery arm, joined at the seed against the corrected v1
+wave's baselines. The harness pairs by seed, so a single arm and a
+comparison arm at the same seed and profile are the same simulation.
+
+| arm | pacing | straggler | answers |
+| --- | --- | --- | --- |
+| v1 | none | off | the reference, from the v1 wave, not re-run |
+| B50 | Bernoulli 0.5 | off | Yashar's suggestion as stated |
+| B25 | Bernoulli 0.25 | off | whether the effect is monotone in `p` |
+| V | vesting | off | the deterministic reservation |
+| S | none | 250 µs | change S alone |
+| S0 | none | 0 | MLT's contract, priced |
+| VS | vesting | 250 µs | the composed design |
+
+7 variants, 6 new, 3 seeds, 18 arms, about 3 cluster hours.
+
+**Fixture before any variant runs:** a `single` recovery arm at the base
+profile must reproduce the comparison's `recovery_policy` bundle at the
+same seed to the byte. If it does not, the join is invalid and the
+variants run as full comparisons at 4 arms each instead.
+
+Report per arm: 20-step window against fixed-low, forgiven share of
+data-parallel bytes split trimmed and remainder, coin and cap refusals,
+cells that reached the cap, and `cc_rearmed` per exempt flow.
+
+Stated in advance: V and B50 should lower cap refusals at budget 0.1 and
+cost a little time each, because a declined trim is a repair. S should
+recover time on the seeds whose worst all-reduce has a long tail and do
+nothing elsewhere. S0 should forgive close to `p` on every step and is the
+arm we expect to lose. If VS does not beat S, vesting is not worth its
+field.
+
+## 9. Open questions
+
+1. Idle threshold. Default 250 µs, a quarter of the 1 ms retransmission
+   timeout and far above the fabric's round trip. Sweep 100 µs only if S
+   is null.
+2. Headline budget, 0.1 or 0.4. At 0.4 utilisation is 30 %, the cap never
+   binds, and the pacing arms are dead by construction. Default 0.1.
+3. Whether the 18-arm single-record join is valid. Default yes, gated by the
+   fixture above.

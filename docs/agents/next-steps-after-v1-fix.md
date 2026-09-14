@@ -118,13 +118,14 @@ in a step meets a small denominator and a correspondingly small cap. How
 much pacing that provides depends on how quickly a step offers its
 messages, which we have not measured.
 
-**Section 2 of the v2 design must change.** It decides to fix `eligible`
-when the cell opens, taking the total from the collective library. That
-decision removes the pacing described above and makes Yashar's concern
-strictly worse. The resolution keeps both: `eligible` stays fixed as the
-denominator of the tolerance, and the vesting cap `p * delivered` becomes a
-second, tighter bound. Both invariants then hold, and `outstanding` stays
-computable during the step, which is what fixing `eligible` was for.
+**The v2 design no longer fixes `eligible` at cell open.** The earlier
+draft wanted the collective library's total so that cell-level
+`outstanding` existed during the step. Once the straggler stop is
+flow-scoped, with the transport supplying the next expected sequence and
+the frontend the flow size, nothing consumes a cell-level outstanding, and
+fixing `eligible` would have removed the pacing described above. The
+revised design keeps accumulation and adds vesting as `p * delivered`
+alongside it.
 
 **A probabilistic refusal is not an exhausted allowance, and the fix
 already encodes that.** Under the two-bit encoding, a refusal from a coin

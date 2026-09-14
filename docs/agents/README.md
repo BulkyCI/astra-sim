@@ -31,7 +31,7 @@ small while retaining the non-obvious project decisions.
 | Rebuilding any figure from either progress deck, or handing the numbers to someone outside the repository | [Figure data and readings](figure-data.md) |
 | Building the deck in Google Slides, or handing it to a slides-generating agent | [Google Slides build prompts](slides-prompts-google-slides.md) |
 | Drafting prose that goes out under Joe's name: the ten style invariants with paired evidence | [Writing style invariants](writing-style.md) |
-| Changing the receiver verdict: tagged exemption revocation and proactive stop, with the arms that price each | [FORGIVE v2 design](forgive-v2-design.md) |
+| Changing the receiver verdict after the v1 fix: pacing (Bernoulli, vesting) and the straggler stop, with the 18 arms that price them | [FORGIVE v2 design](forgive-v2-design.md) |
 | Picking up the next implementation task: fix the exemption revocation, then re-measure FORGIVE v1. Handoff-complete | [FORGIVE v1 revocation fix](forgive-v1-revocation-fix.md) |
 | Planning the next wave: Yashar's probabilistic forgiveness and zero-tolerance baseline, the v2 pacing revision, and the five phases | [Next steps after the v1 fix](next-steps-after-v1-fix.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |

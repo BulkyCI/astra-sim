@@ -429,6 +429,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_{tag}.json"
                 for tag in ("p01", "p02", "p06", "allsteps")
+            }
+            # The FORGIVE v2 receiver policies, each the p01 cell with one
+            # knob moved and congestion control untouched.
+            | {
+                f"regime_64_dcqcn_direct7_4to1_exempt_p01_{tag}.json"
+                for tag in ("b50", "b25", "vest", "strag", "strag0",
+                            "veststrag")
             },
         )
 
@@ -519,6 +526,102 @@ class Ring3DGeneratorTests(unittest.TestCase):
             profile_path.write_text(json.dumps(without_repair), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "selective_repair"):
                 load_profile(profile_path)
+
+    def test_the_v2_receiver_policies_reach_the_experiment_configuration(
+        self,
+    ) -> None:
+        """Both knobs cross into the simulator exactly as the profile names.
+
+        The frontend cannot read the profile, so a knob that does not reach
+        experiment.json is a variant that ran the arm beside it.
+        """
+        document = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+            ).read_text(encoding="utf-8")
+        )
+        document["selection_policy"]["pacing"] = {"kind": "bernoulli", "p": 0.25}
+        document["selection_policy"]["straggler_idle_ns"] = 250_000
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(
+            policy["selection_policy"]["pacing"],
+            {"kind": "bernoulli", "p": 0.25},
+        )
+        self.assertEqual(policy["selection_policy"]["straggler_idle_ns"], 250_000)
+
+    def test_an_unpaced_profile_still_names_its_rule(self) -> None:
+        """The default is a rule, not an absence, so it is written down."""
+        profile_path = (
+            REPOSITORY_ROOT
+            / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "experiment"
+            materialize(profile_path, output)
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(policy["selection_policy"]["pacing"], {"kind": "none"})
+        self.assertNotIn("straggler_idle_ns", policy["selection_policy"])
+
+    def test_the_v2_receiver_policies_refuse_a_malformed_profile(self) -> None:
+        """Each refusal names its field.
+
+        A probability is meaningful under Bernoulli and under nothing else, a
+        probability outside the open interval is one of the other two rules
+        spelled badly, and both policies belong to a domain whose receiver
+        decides.
+        """
+        document = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "experiments/ring_3d/profiles/forgiveness_smoke_8.json"
+            ).read_text(encoding="utf-8")
+        )
+        broken = {
+            "pacing.p": {"pacing": {"kind": "vesting", "p": 0.5}},
+            "pacing.p ": {"pacing": {"kind": "bernoulli"}},
+            "pacing.p  ": {"pacing": {"kind": "bernoulli", "p": 0.0}},
+            "pacing.p   ": {"pacing": {"kind": "bernoulli", "p": 1.0}},
+            "pacing.kind": {"pacing": {"kind": "poisson"}},
+            "straggler_idle_ns": {"straggler_idle_ns": -1},
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            for field, policy in broken.items():
+                with self.subTest(field=field.strip(), policy=policy):
+                    candidate = json.loads(json.dumps(document))
+                    candidate["selection_policy"].update(policy)
+                    profile_path.write_text(
+                        json.dumps(candidate), encoding="utf-8"
+                    )
+                    with self.assertRaisesRegex(ValueError, field.strip()):
+                        load_profile(profile_path)
+
+            # Neither policy means anything where nothing is forgiven.
+            for key, value in (
+                ("pacing", {"kind": "vesting"}),
+                ("straggler_idle_ns", 0),
+            ):
+                with self.subTest(admission=key):
+                    candidate = json.loads(json.dumps(document))
+                    candidate["selection_policy"]["domain"] = "admission"
+                    candidate["selection_policy"][key] = value
+                    profile_path.write_text(
+                        json.dumps(candidate), encoding="utf-8"
+                    )
+                    with self.assertRaisesRegex(ValueError, key):
+                        load_profile(profile_path)
 
     def test_admission_domain_writes_no_recovery_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

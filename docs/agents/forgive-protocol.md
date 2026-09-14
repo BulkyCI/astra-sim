@@ -347,14 +347,16 @@ bytes.
 Per flow, in `telemetry/flow_events.csv`, the columns added by this
 protocol in order: `timeouts`, `cnp_received`, `first_trim_ns`,
 `first_repair_ns`, `forgiven_bytes`, `forgiven_ranges`,
-`delivered_bytes`, `cc_exempt`, `cc_signal_withheld`,
-`allowance_spent_signalled`, `cc_rearmed_ns`.
+`forgiven_remainder_bytes`, `pacing_refusals`, `delivered_bytes`,
+`cc_exempt`, `cc_signal_withheld`, `allowance_spent_signalled`,
+`cc_rearmed_ns`.
 
 Per run, in `ns3/transport_summary.csv`, the events: `trim_ftd_admission`
 and `trim_ftd_lasthop_admission` (data plane, bytes trimmed),
-`trim_forgiven` (data plane, bytes forgiven), and the control-plane
-counts `rto_fired`, `cnp_taken`, `cc_signal_withheld`,
-`allowance_spent_signalled`, `cc_rearmed`, `clipped_trim`.
+`trim_forgiven` and `remainder_forgiven` (data plane, bytes forgiven),
+and the control-plane counts `rto_fired`, `cnp_taken`,
+`cc_signal_withheld`, `allowance_spent_signalled`, `cc_rearmed`,
+`clipped_trim`.
 
 `summary.json` and the report derive from these: the trim ratio W
 (trimmed bytes divided by offered bytes), the net trim ratio W' (W minus
@@ -388,6 +390,8 @@ per receiver (see the run #120 readout).
   exempt flows told their allowance was spent are exactly those that
   re-armed; every re-armed flow was exempt and took a rate cut
   afterwards; the budget rule holds.
+- `bernoulli_smoke_8`, `vesting_smoke_8` with its unpaced pair, and
+  `straggler_smoke_8` carry one v2 policy each, checked in section 15.
 - `check_refusals.py` breaks each required field in turn and checks that
   the run is refused by name and leaves no telemetry.
 
@@ -463,3 +467,90 @@ the tolerance and DCQCN assumptions are in
 | budget-rule check, trim ratios, counters | `experiments/ring_3d/analyze.py`, `report.py` |
 | test gate | `experiments/ring_3d/forgiveness_smoke.sh`, `check_forgiveness.py`, `check_refusals.py` |
 | profiles | `experiments/ring_3d/profiles/forgiveness_*_8.json`, `exempt_smoke_8.json`, `regime_64_dcqcn_*_exempt.json`, `no_incast_8_forgive.json` |
+| v2 pure core, pacing sum, remainder verdict | `astra-sim/network_frontend/ns3/ExperimentConfig.hh` |
+| v2 straggler stop, idle timer, remainder callback | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
+| v2 core law fixtures | `extern/network_backend/ns-3/scratch/rdma-range-algebra.cc` |
+| v2 single-arm join fixture | `experiments/ring_3d/check_single_arm_join.py` |
+
+## 15. Version 2: pacing and the straggler stop
+
+**Built, unmeasured.** The mechanisms below are implemented and gated by
+the smoke suite; no wave has run them, so this section states what they
+do and states no result. The design and its pre-registered estimands are
+in [forgive-v2-design.md](forgive-v2-design.md); the 18 arms wait behind
+the `forgive_v2` dispatch input.
+
+Only the receiver can forgive, because only the receiver knows how much
+it needs and how much it has. v2 adds two receiver policies on top of the
+v1 verdict and changes no sender logic.
+
+**Pacing (change P).** The cap binds at the headline budget, and first
+come first served spends it on the first burst, so the receiver may
+decline a forgivable trim to keep allowance for later in the step.
+`selection_policy.pacing` is a closed sum of three rules. Under `none`
+the cap is `(forgiven + b) / eligible <= t`, unchanged from v1. Under
+`bernoulli` the same cap applies and the range is additionally declined
+when `hash_combine(flow.decision_hash, range start) % 1000000 >= p *
+1000000`; the coin is deterministic per range, so a declined range stays
+declined on re-trim and the fraction forgiven is exact rather than
+geometric, and no ns-3 random stream is consumed, so paired arms stay
+paired. Under `vesting` the denominator is the bytes the rank has
+received rather than the bytes senders have launched, which is strictly
+tighter because delivered never exceeds eligible; the ceiling is
+unchanged and only its availability moves. A declined range is repaired,
+so pacing costs time and buys allowance. `pacing_refusals` counts only the
+ranges the coin declined that the cap could have afforded, so coin and cap
+refusals decompose without overlap.
+
+**The straggler stop (change S).** A forgiven trimmed byte saves its
+repair; a forgiven unsent byte saves its transmission too.
+`selection_policy.straggler_idle_ns` gives each receive queue pair one
+timestamp and at most one scheduler entry: a data arrival stamps it and
+arms the event when none is pending, the event reschedules itself if data
+arrived while it ran, and otherwise it asks the frontend for the end
+offset it may absorb. A grant absorbs everything from the cumulative
+sequence to the flow size and acknowledges it, so the sender completes
+through the `IsFinished` it already had, with no new packet type and no
+new sender state. The transport asks with two numbers, the cumulative
+sequence and the bytes already accepted above it, because under selective
+repeat a stalled flow keeps taking packets past the gap; the hole is the
+size less both, and charging the whole span above the cumulative sequence
+would spend the budget on bytes the receiver already holds. The answer is the whole remainder or nothing, because
+the receiver knows the byte count and not which gradient elements matter.
+An idle of zero asks at every arrival, which stops the flow as soon as
+its remainder fits the budget; that is MLT's stop-at-(1-p) contract as
+the degenerate point of this rule, and it is retained as an arm so its
+price is measured rather than argued. A refusal emits nothing, so no
+exemption ends on it.
+
+Both policies spend the same allowance under the same law, and both are
+refused outside a forgiving domain. The coin never applies to the
+remainder: pacing exists to keep allowance for the end of the step, and
+applying it at the end of the step would defeat its own purpose.
+
+**The pure core.** `trim_verdict` and `remainder_verdict` in
+`ExperimentConfig.hh` are total functions of a budget entry, a threshold,
+a pacing rule and either a coin or a remainder; they return the answer
+and the entry to store. `evaluate_forgiveness` and `evaluate_remainder`
+are shells that eliminate a missing or closed entry, draw the coin, store
+the answer back and count. `RdmaRangeAlgebra` asserts the laws directly:
+vesting never affords what `none` refuses, the coin repeats per (flow,
+range start), the remainder is whole or nothing, a coin refusal reports
+no spent allowance, and a closed entry is eliminated before any verdict
+is computed.
+
+**What the gate proves.** `bernoulli_smoke_8` must record a coin refusal
+of a range the cap could have afforded, or the rule never cost the arm a
+forgiveness. `vesting_smoke_8` must forgive something and no more than
+`vesting_smoke_8_unpaced` at the same seed; the two differ only in the
+rule, and both bucket the gradient, because vesting releases nothing until
+a message completes and a profile whose step is one All-Reduce completes
+it at the end. `straggler_smoke_8` must forgive a remainder, and its
+charged remainder bytes must equal the transport's `remainder_forgiven`
+bytes. All of them also assert `pacing_refusals == 0` wherever no
+Bernoulli rule is in force, and
+`forgiven_remainder_bytes <= forgiven_bytes` on every flow.
+`check_single_arm_join.py` asserts that one `run.py` arm at a seed
+reproduces `compare.py`'s recovery arm at the same profile and seed, byte
+for byte in the flow telemetry, which is what makes the 18 single-arm
+records joinable against the v1 wave's baselines.

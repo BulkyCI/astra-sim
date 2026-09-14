@@ -719,6 +719,12 @@ _HOST_TRANSPORT_EVENTS: Final = frozenset(
     }
 )
 
+_FORGIVEN_PAYLOAD_EVENTS: Final = frozenset(
+    {"trim_forgiven", "remainder_forgiven"}
+)
+"""The receiver's two forgivenesses. Both account for payload bytes no
+receiver was ever given, so both ride the data plane and carry their bytes."""
+
 
 def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
     path = ns3_dir / "transport_summary.csv"
@@ -758,6 +764,10 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         # A trimmed range the receiver accepted without it: the bytes are
         # undelivered, so the event accounts for them on the data plane.
         "trim_forgiven",
+        # A quiet flow's unsent remainder, taken as delivered. Those bytes
+        # never reached the wire at all, so they are separate from
+        # trim_forgiven and W does not count them.
+        "remainder_forgiven",
         # Host-transport reactions. They carry no packet, so they contribute
         # counts and no bytes, and they answer to the control plane: a
         # retransmission timeout is a missing ACK, a rate cut is a CNP.
@@ -781,7 +791,7 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
     trim_events = {
         event
         for event in valid_events
-        if event.startswith("trim_") and event != "trim_forgiven"
+        if event.startswith("trim_") and event not in _FORGIVEN_PAYLOAD_EVENTS
     }
     # The simulator aggregates in memory and emits one row per (event, plane)
     # pair at exit: a raw row per packet event grew past 100 GB per arm and
@@ -799,6 +809,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
             raise ValueError("trim conversion must account for undelivered data")
         if event in _HOST_TRANSPORT_EVENTS and plane != "control":
             raise ValueError("host transport reaction must ride the control plane")
+        if event in _FORGIVEN_PAYLOAD_EVENTS and plane != "data":
+            raise ValueError("forgiveness must account for undelivered data")
         row_events = _as_int(row, "event_count")
         row_bytes = _as_int(row, "total_bytes")
         if row_events < 0 or row_bytes < 0:
@@ -878,6 +890,8 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "clipped_trim_count": events["clipped_trim"],
         "trim_forgiven_count": events["trim_forgiven"],
         "trim_forgiven_bytes": bytes_by_event["trim_forgiven"],
+        "remainder_forgiven_count": events["remainder_forgiven"],
+        "remainder_forgiven_bytes": bytes_by_event["remainder_forgiven"],
     }
 
 
@@ -1104,6 +1118,8 @@ _COUNTER_FIELDS: Final = (
     "cnp_received",
     "forgiven_bytes",
     "forgiven_ranges",
+    "forgiven_remainder_bytes",
+    "pacing_refusals",
     "cc_signal_withheld",
     "allowance_spent_signalled",
 )
@@ -1460,6 +1476,14 @@ def summarize(
         "forgiveness": {
             "forgiven_bytes": statistics.counters["forgiven_bytes"],
             "forgiven_range_count": statistics.counters["forgiven_ranges"],
+            # The two v2 receiver policies. Remainder bytes are the subset of
+            # forgiven bytes no sender ever put on the wire, so the trimmed
+            # share is the difference; pacing refusals are forgivable trims
+            # the coin declined, which no other counter can see.
+            "forgiven_remainder_bytes": statistics.counters[
+                "forgiven_remainder_bytes"
+            ],
+            "pacing_refusal_count": statistics.counters["pacing_refusals"],
             # What the congestion exemption did: how many flows were granted
             # one, how many congestion signals they withheld, how many
             # allowance reports reached them, and how many exemptions those

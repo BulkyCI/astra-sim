@@ -56,14 +56,38 @@ entry.h::recovery_verdict()   resolves (src, dst, source_port) in the registry
         |
         v
 ExperimentConfig.hh::evaluate_forgiveness()
-  |- ineligible, unknown step, closed ledger, or exhausted budget -> repair
-  `- inside budget -> charge the ledger, count the flow's bytes, forgive
+  |- ineligible, unknown step, or closed ledger -> repair, no allowance report
+  `- trim_verdict() on the cell, under the profile's pacing rule
+       |- exhausted budget, or the Bernoulli coin refuses -> repair
+       `- inside budget -> charge the ledger, count the flow's bytes, forgive
         (either answer reports kAllowanceSpent when the cell has no room left)
         |
         v
 RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
 the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
 ```
+
+`selection_policy.straggler_idle_ns` adds a second question on the same
+budget. A receive queue pair that has gone that long without a data arrival
+asks `entry.h::remainder_verdict()`, which reaches
+`ExperimentConfig.hh::evaluate_remainder()` with the cumulative sequence and
+the bytes already accepted above it; the hole is the flow size less both. A
+grant absorbs everything from the cumulative sequence to the flow size and
+acknowledges it, so the sender completes through the `IsFinished` it already
+had. Zero asks at every arrival,
+which stops the flow as soon as its remainder fits the budget. A refusal emits
+nothing. The answer is the whole remainder or nothing, because the receiver
+knows the byte count and not which gradient elements matter.
+
+`selection_policy.pacing` picks which bytes the budget is measured against and
+whether a forgivable range may still be declined: `none` spends the cap first
+come first served, `bernoulli` declines a range whose coin
+(`hash_combine(decision_hash, range start)`) lands above `p * 1000000`, and
+`vesting` measures the cap against the bytes the rank has received rather than
+the bytes senders have launched. `pacing_refusals` counts only the ranges the
+coin declined that the cap could have afforded, so coin and cap refusals
+decompose without overlap. Both are receiver policies, so both are refused
+outside a forgiving domain.
 
 The ledger is dense over (receiving rank, step). Its law is
 `shed + forgiven <= p(step) * eligible`, with `p` the strict CLR threshold on a
@@ -152,6 +176,7 @@ fields are:
 | `timeouts` / `cnp_received` | Retransmission-timeout firings that rescheduled data, and rate cuts taken. `cnp_received` is zero unless the profile sets `network.congestion_control.mode: dcqcn` |
 | `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
 | `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
+| `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the straggler stop took before any sender put them on the wire, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
 | `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
 | `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell had no allowance left, and the simulated time one of them ended the exemption; zero means none did |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |

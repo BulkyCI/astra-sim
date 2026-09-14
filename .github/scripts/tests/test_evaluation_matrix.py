@@ -15,13 +15,21 @@ WORKFLOW = REPOSITORY_ROOT / ".github/workflows/workflow_main.yml"
 
 # Every gate the plan step selects on. Each one is a family a dispatch can run
 # alone, so each one owns a workflow_dispatch boolean and a jq selector.
-GATES = {"always", "structural", "regime_map", "forgive", "forgive_dose"}
+GATES = {
+    "always",
+    "structural",
+    "regime_map",
+    "forgive",
+    "forgive_dose",
+    "forgive_v2",
+}
 GATE_INPUTS = {
     "always": "run_always",
     "structural": "run_structural_studies",
     "regime_map": "run_regime_map",
     "forgive": "run_forgive_studies",
     "forgive_dose": "run_forgive_dose",
+    "forgive_v2": "run_forgive_v2",
 }
 # The closed sum the provision job validates and ci/dcs/evaluate.sh dispatches
 # on. Nothing downstream of that validation branches on anything else.
@@ -82,14 +90,16 @@ class EvaluationMatrixTests(unittest.TestCase):
             with self.subTest(record=record["name"]):
                 self.assertIn(record["kind"], KINDS)
 
-    def test_only_a_comparison_carries_a_seed(self) -> None:
-        """A seed selects one matched pair out of the seed set.
+    def test_a_smoke_record_carries_no_seed(self) -> None:
+        """A seed selects one simulation out of the seed set.
 
-        run.py and the smoke scripts take no seed, so a non-zero seed on
-        anything but a comparison is a value the job would silently drop.
+        A comparison runs one matched pair at it and a single arm runs the one
+        simulation that pair's matching arm runs, which is what lets a single
+        record join a comparison record. The smoke scripts take no seed, so a
+        non-zero seed there is a value the job would silently drop.
         """
         for record in records():
-            if record["kind"] == "comparison":
+            if record["kind"] != "smoke":
                 continue
             with self.subTest(record=record["name"]):
                 self.assertEqual(record["comparison_seed"], 0)

@@ -15,6 +15,8 @@
 #   SIMULATION_TIMEOUT_SECONDS  per-simulator cap (comparison, single)
 #   REQUIRE_CONGESTION          "true" adds compare.py --require-congestion
 #   COMPARISON_SEED             non-zero runs that one seed instead of the set
+#                               (comparison), or that one seed instead of the
+#                               profile's own (single)
 #
 # Every kind leaves its report at $EXPERIMENT_RUN_DIRECTORY/report.md. That one
 # name is what attest.py, the step summary, the ledger, and the archive read,
@@ -73,12 +75,21 @@ publish_comparison() {
     :
 }
 
+# A seeded single arm is the profile's own domain at one seed, which is the
+# same simulation compare.py's matching arm runs, so the two join. Without a
+# seed the profile's own seed stands, as every unseeded single record expects.
 simulate_single() {
-    uv run --locked python experiments/ring_3d/run.py \
-        --profile "${EXPERIMENT_PROFILE:?evaluate.sh single needs EXPERIMENT_PROFILE}" \
-        --output "$run_directory" \
-        --simulation-timeout-seconds "${SIMULATION_TIMEOUT_SECONDS:?evaluate.sh single needs SIMULATION_TIMEOUT_SECONDS}" \
+    local arguments=(
+        uv run --locked python experiments/ring_3d/run.py
+        --profile "${EXPERIMENT_PROFILE:?evaluate.sh single needs EXPERIMENT_PROFILE}"
+        --output "$run_directory"
+        --simulation-timeout-seconds "${SIMULATION_TIMEOUT_SECONDS:?evaluate.sh single needs SIMULATION_TIMEOUT_SECONDS}"
         --clean
+    )
+    if [[ "${COMPARISON_SEED:-0}" != "0" ]]; then
+        arguments+=(--seed "$COMPARISON_SEED")
+    fi
+    "${arguments[@]}"
 }
 
 publish_single() {

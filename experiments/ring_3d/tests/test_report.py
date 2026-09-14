@@ -477,6 +477,40 @@ class Ring3DReportTests(unittest.TestCase):
         self.assertIn("| Allowance reports | 9 |", report)
         self.assertIn("| Flows re-armed | 9 |", report)
 
+    def test_report_renders_the_v2_receiver_counters(self) -> None:
+        """The remainder split and the coin refusals are pre-registered too.
+
+        Trimmed-forgiven bytes are the difference between the total and the
+        remainder, so a reader who cannot see the remainder cannot recover
+        either part.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_dir = Path(temporary_directory) / "run"
+            self._write_completed_run(run_dir)
+            summary_path = run_dir / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["forgiveness"] = {
+                "forgiven_bytes": 78_608,
+                "forgiven_range_count": 79,
+                "forgiven_remainder_bytes": 40_960,
+                "pacing_refusal_count": 137,
+                "forgiven_bytes_by_training_step": {"2": 78_608},
+                "ledger_law": {
+                    "status": "verified",
+                    "domain": "recovery_exempt",
+                    "decision_scale": 1_000_000,
+                    "cell_count": 24,
+                    "forgiven_cell_count": 1,
+                    "violation_count": 0,
+                },
+            }
+            summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+            report = render_report(run_dir, self.profile_path)
+
+        self.assertIn("Forgiven remainder", report)
+        self.assertIn("| Pacing refusals | 137 |", report)
+
     def test_report_omits_forgiveness_for_an_admission_run(self) -> None:
         """Three zeros and a law that does not apply is not a section."""
         with tempfile.TemporaryDirectory() as temporary_directory:

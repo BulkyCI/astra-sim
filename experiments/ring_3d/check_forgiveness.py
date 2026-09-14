@@ -39,24 +39,62 @@ def _clr_steps(run_dir: Path) -> frozenset[str]:
 def _charged_equals_absorbed(
     flows: list[dict[str, str]], summary: dict[str, Any]
 ) -> list[str]:
-    """The two sinks that count forgiven bytes must agree.
+    """The two sinks that count forgiven bytes must agree, in both parts.
 
-    The transport reports every forgiven range as a ``trim_forgiven`` event as
-    it happens; the frontend charges the same clipped length to the flow record
-    the row is written from. A disagreement means a charged flow lost its row,
-    or the two sinks clipped the range differently.
+    The transport reports every forgiven range as it happens, a trimmed one as
+    ``trim_forgiven`` and a quiet flow's remainder as ``remainder_forgiven``;
+    the frontend charges the same lengths to the flow record the row is
+    written from and splits them the same way. A disagreement means a charged
+    flow lost its row, or the two sinks clipped a range differently.
     """
-    charged = sum(int(flow["forgiven_bytes"]) for flow in flows)
+    failures: list[str] = []
     transport = summary["ns3_observability"]["transport"]
     if transport.get("status") != "available":
         return ["transport event summary is unavailable, so nothing cross-checks"]
-    absorbed = int(transport["trim_forgiven_bytes"])
+    charged = sum(int(flow["forgiven_bytes"]) for flow in flows)
+    charged_remainder = sum(
+        int(flow["forgiven_remainder_bytes"]) for flow in flows
+    )
+    absorbed_remainder = int(transport.get("remainder_forgiven_bytes", 0))
+    absorbed = int(transport["trim_forgiven_bytes"]) + absorbed_remainder
     if charged != absorbed:
-        return [
+        failures.append(
             f"flows were charged {charged} B but the transport forgave "
             f"{absorbed} B"
-        ]
-    return []
+        )
+    if charged_remainder != absorbed_remainder:
+        failures.append(
+            f"flows were charged {charged_remainder} B of remainder but the "
+            f"transport forgave {absorbed_remainder} B"
+        )
+    return failures
+
+
+def _remainder_is_a_subset(flows: list[dict[str, str]]) -> list[str]:
+    """A forgiven remainder is forgiven, so it is part of the same total."""
+    return [
+        f"flow {flow['src']}->{flow['dst']} port {flow['source_port']} "
+        f"forgave {flow['forgiven_remainder_bytes']} B of remainder out of "
+        f"{flow['forgiven_bytes']} B forgiven"
+        for flow in flows
+        if int(flow["forgiven_remainder_bytes"]) > int(flow["forgiven_bytes"])
+    ]
+
+
+def check_unpaced(run_dir: Path) -> list[str]:
+    """Without a Bernoulli rule, nothing declines a forgivable trim.
+
+    The coin is the only thing that refuses a range the cap affords, and it is
+    drawn under one pacing kind. A refusal anywhere else means the rule in
+    force was not the one the profile named.
+    """
+    return [
+        f"flow {flow['src']}->{flow['dst']} port {flow['source_port']} "
+        f"recorded {flow['pacing_refusals']} pacing refusals under a profile "
+        "with no Bernoulli pacing"
+        for flow in _flows(run_dir)
+        if int(flow["pacing_refusals"])
+    ]
 
 
 def check(recovery_dir: Path, admission_dir: Path) -> list[str]:
@@ -105,6 +143,8 @@ def check(recovery_dir: Path, admission_dir: Path) -> list[str]:
             failures.append("delivered bytes do not exclude the forgiven bytes")
     if forgiven_total == 0:
         failures.append("recovery run forgave nothing; the fork never fired")
+    failures.extend(_remainder_is_a_subset(flows))
+    failures.extend(check_unpaced(recovery_dir))
     failures.extend(_charged_equals_absorbed(flows, _summary(recovery_dir)))
 
     law = _summary(recovery_dir)["forgiveness"]["ledger_law"]
@@ -155,6 +195,7 @@ def check_race(run_dir: Path) -> list[str]:
 
     if recovery["timeout_count"] == 0:
         failures.append("race fixture fired no retransmission timeout")
+    failures.extend(_remainder_is_a_subset(flows))
     failures.extend(_charged_equals_absorbed(flows, summary))
     if recovery["retransmitted_bytes"] == 0:
         failures.append("race fixture retransmitted nothing")
@@ -284,6 +325,80 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
     return failures
 
 
+def check_bernoulli_pacing(run_dir: Path) -> list[str]:
+    """A Bernoulli rule must actually decline trims the cap could afford.
+
+    The counter records only those, so a zero would mean the coin never cost
+    the arm a forgiveness, which is indistinguishable from the unpaced arm and
+    would report as a null result from a mechanism that never ran.
+    """
+    flows = _flows(run_dir)
+    refusals = sum(int(flow["pacing_refusals"]) for flow in flows)
+    forgiven = sum(int(flow["forgiven_bytes"]) for flow in flows)
+    if refusals == 0:
+        return ["Bernoulli pacing refused nothing; the coin never fired"]
+    print(
+        f"bernoulli pacing: {refusals} coin refusals, {forgiven} B still "
+        "forgiven"
+    )
+    return []
+
+
+def check_vesting(vesting_dir: Path, unpaced_dir: Path) -> list[str]:
+    """Vesting forgives something, and never more than the unpaced rule.
+
+    Its denominator is the bytes the rank has received rather than the bytes
+    senders have launched, and the former never exceeds the latter, so at one
+    seed the vesting arm cannot forgive more than the unpaced arm does. It must
+    still forgive: zero would mean the reservation never released, which is
+    indistinguishable from a rule that never ran.
+    """
+    failures = check_unpaced(vesting_dir)
+    vested = sum(int(flow["forgiven_bytes"]) for flow in _flows(vesting_dir))
+    unpaced = sum(int(flow["forgiven_bytes"]) for flow in _flows(unpaced_dir))
+    if vested == 0:
+        failures.append("vesting forgave nothing; the reservation never released")
+    if vested > unpaced:
+        failures.append(
+            f"vesting forgave {vested} B against the unpaced arm's {unpaced} B "
+            "at the same seed"
+        )
+    print(f"vesting: {vested} B forgiven against unpaced {unpaced} B")
+    return failures
+
+
+def check_straggler(run_dir: Path) -> list[str]:
+    """The straggler stop must take bytes no sender ever put on the wire.
+
+    A remainder forgiveness is the only source of those bytes, so a zero here
+    means the idle question was never asked or never granted.
+    """
+    failures = check_unpaced(run_dir)
+    summary = _summary(run_dir)
+    transport = summary["ns3_observability"]["transport"]
+    remainder = int(transport.get("remainder_forgiven_bytes", 0))
+    events = int(transport.get("remainder_forgiven_count", 0))
+    if remainder == 0:
+        failures.append("the straggler stop forgave no remainder; it never fired")
+    flows = _flows(run_dir)
+    failures.extend(_remainder_is_a_subset(flows))
+    failures.extend(_charged_equals_absorbed(flows, summary))
+    incomplete = [flow for flow in flows if flow["terminal_outcome"] != "completed"]
+    if incomplete:
+        failures.append(
+            f"{len(incomplete)} flows did not complete; the straggler stop "
+            "must not convert a transfer into a failure"
+        )
+    law = summary["forgiveness"]["ledger_law"]
+    if law["status"] != "verified":
+        failures.append(f"per-(dst, step) ledger law is {law['status']}: {law}")
+    print(
+        f"straggler stop: {remainder} B of remainder forgiven over {events} "
+        "forgivenesses"
+    )
+    return failures
+
+
 def _identical_reruns(first: Path, second: Path) -> list[str]:
     """Two runs of one profile at one seed must produce identical telemetry."""
     left = (first / "telemetry" / "flow_events.csv").read_bytes()
@@ -322,6 +437,26 @@ def main() -> int:
         type=Path,
         help="a DCQCN run whose eligible flows may ignore their rate cuts",
     )
+    parser.add_argument(
+        "--bernoulli",
+        type=Path,
+        help="a run whose pacing coin must decline forgivable trims",
+    )
+    parser.add_argument(
+        "--vesting",
+        type=Path,
+        help="a vesting run, compared against --vesting-unpaced at the same seed",
+    )
+    parser.add_argument(
+        "--vesting-unpaced",
+        type=Path,
+        help="the same profile as --vesting with no pacing rule",
+    )
+    parser.add_argument(
+        "--straggler",
+        type=Path,
+        help="a run whose receiver must forgive a quiet flow's remainder",
+    )
     arguments = parser.parse_args()
     failures = check(arguments.recovery.resolve(), arguments.admission.resolve())
     if arguments.rerun is not None:
@@ -338,6 +473,19 @@ def main() -> int:
         failures.extend(
             check_congestion_exemption(arguments.congestion_exempt.resolve())
         )
+    if arguments.bernoulli is not None:
+        failures.extend(check_bernoulli_pacing(arguments.bernoulli.resolve()))
+    if arguments.vesting is not None:
+        if arguments.vesting_unpaced is None:
+            parser.error("--vesting needs --vesting-unpaced to compare against")
+        failures.extend(
+            check_vesting(
+                arguments.vesting.resolve(),
+                arguments.vesting_unpaced.resolve(),
+            )
+        )
+    if arguments.straggler is not None:
+        failures.extend(check_straggler(arguments.straggler.resolve()))
     if failures:
         for failure in failures:
             print(f"forgiveness check failed: {failure}")

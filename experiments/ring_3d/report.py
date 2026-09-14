@@ -145,13 +145,27 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
         "(receiving rank, training step) and holds only in a forgiving "
         "domain; a violated status invalidates the arm. A CC-exempt flow "
         "withholds every congestion signal from its controller until a "
-        "receiver reports that cell's allowance spent, which re-arms it.",
+        "receiver reports that cell's allowance spent, which re-arms it. The "
+        "forgiven remainder is the part no sender put on the wire, because "
+        "the receiver took a quiet flow's unsent bytes as delivered, so the "
+        "trimmed part is the difference. Pacing refusals are forgivable trims "
+        "the receiver declined to keep allowance for later in the step.",
         "",
         *_markdown_table(
             ["Signal", "Value"],
             [
                 ["Forgiven", _format_optional_bytes(forgiven_bytes)],
                 ["Forgiven ranges", forgiveness.get("forgiven_range_count", 0)],
+                [
+                    "Forgiven remainder",
+                    _format_optional_bytes(
+                        forgiveness.get("forgiven_remainder_bytes", 0)
+                    ),
+                ],
+                [
+                    "Pacing refusals",
+                    forgiveness.get("pacing_refusal_count", 0),
+                ],
                 [
                     "CC-exempt flows",
                     forgiveness.get("cc_exempt_flow_count", 0),

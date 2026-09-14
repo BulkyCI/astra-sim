@@ -16,9 +16,12 @@ LICENSE file in the root directory of this source tree.
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <json/json.hpp>
@@ -27,6 +30,17 @@ namespace AstraSimNs3 {
 
 constexpr uint64_t kDecisionScale = 1000000;
 constexpr uint16_t kPriorityGroupCount = 8;
+
+inline uint64_t mix_hash(uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31U);
+}
+
+inline void hash_combine(uint64_t& hash, uint64_t value) {
+    hash = mix_hash(hash ^ mix_hash(value));
+}
 
 enum class FlowKind : uint8_t {
     ForegroundPayload = 0,
@@ -100,16 +114,129 @@ constexpr bool revokes_exemption(uint8_t verdict) {
     return verdict & kAllowanceSpent;
 }
 
-// One receiving rank's budget for one training step.
+// One receiving rank's budget for one training step. Every counter is
+// monotone and forgiven + delivered never exceeds eligible.
 struct StepLedger {
     uint64_t eligible = 0;
     uint64_t shed = 0;
     uint64_t forgiven = 0;
+    // Bytes of completed messages, less the bytes those messages were
+    // forgiven. Vesting measures the budget against this rather than against
+    // what was merely launched.
+    uint64_t delivered = 0;
     // Set when the rank has written its DP All-Reduce row for the step. After
     // that the step's bytes are accounted for and nothing more may be
     // forgiven against them.
     bool closed = false;
 };
+
+// The pacing rule, as a closed sum. Pacing lets the receiver decline a
+// forgivable trim so that allowance remains for later in the step, because
+// the cap binds at the headline budget and first come first served spends it
+// on the first burst. A Bernoulli probability is meaningful only under
+// Bernoulli, so it lives inside that alternative and nowhere else.
+struct NoPacing {};
+struct Bernoulli {
+    uint64_t threshold = 0;  // p * kDecisionScale
+};
+struct Vesting {};
+using Pacing = std::variant<NoPacing, Bernoulli, Vesting>;
+
+// std::visit over a lambda set. Every visit below lists all three
+// alternatives, so a fourth one fails to compile rather than defaulting.
+template <class... Cases>
+struct overloaded : Cases... {
+    using Cases::operator()...;
+};
+template <class... Cases>
+overloaded(Cases...) -> overloaded<Cases...>;
+
+// The bytes the rule measures its budget against. Vesting is strictly tighter
+// than the other two because delivered never exceeds eligible, so the ceiling
+// is unchanged and only its availability moves.
+inline uint64_t pacing_base(const StepLedger& cell, const Pacing& pacing) {
+    return std::visit(
+        overloaded{
+            [&](const NoPacing&) { return cell.eligible; },
+            [&](const Bernoulli&) { return cell.eligible; },
+            [&](const Vesting&) { return cell.delivered; },
+        },
+        pacing);
+}
+
+// Whether the rule declines a range the cap could still afford. The coin
+// reserves allowance for the end of the step; the other two rules reserve
+// nothing and never decline.
+inline bool paces_out(const Pacing& pacing, uint64_t coin) {
+    return std::visit(
+        overloaded{
+            [](const NoPacing&) { return false; },
+            [&](const Bernoulli& rule) { return coin >= rule.threshold; },
+            [](const Vesting&) { return false; },
+        },
+        pacing);
+}
+
+// The safety law, in one place: shed and forgiven bytes share one budget, and
+// the budget is the step's threshold times the rule's own denominator.
+// Absorbing: neither term ever decreases, so a range charged once is never
+// refunded.
+inline bool affords(const StepLedger& cell,
+                    uint64_t threshold,
+                    const Pacing& pacing,
+                    uint64_t bytes) {
+    const uint64_t spent = cell.shed + cell.forgiven + bytes;
+    return spent * kDecisionScale <= pacing_base(cell, pacing) * threshold;
+}
+
+// The coin one trimmed range draws. Deterministic per range, so a range the
+// coin refuses stays refused on re-trim and "forgive a fraction p of trimmed
+// ranges" is exact rather than geometric. No ns-3 random stream is consumed,
+// so paired arms stay paired.
+inline uint64_t range_coin(uint64_t decision_hash, uint64_t start) {
+    uint64_t coin = decision_hash;
+    hash_combine(coin, start);
+    return coin % kDecisionScale;
+}
+
+// Trim verdict. Pure and total: the cell, the rule and this range's coin in,
+// the two verdict bits and the cell to store out. The caller has already
+// eliminated a missing or closed cell and an ineligible flow.
+//
+// The allowance report says the cell cannot take the range in front of it.
+// After a charge the smallest further range is one byte, so that is what the
+// cell is asked about; after a refusal the refused range is its own evidence.
+inline std::pair<uint8_t, StepLedger> trim_verdict(StepLedger cell,
+                                                   uint64_t threshold,
+                                                   const Pacing& pacing,
+                                                   uint64_t coin,
+                                                   uint64_t bytes) {
+    const bool forgive =
+        affords(cell, threshold, pacing, bytes) && !paces_out(pacing, coin);
+    if (forgive) {
+        cell.forgiven += bytes;
+    }
+    const bool room = affords(cell, threshold, pacing, forgive ? 1 : bytes);
+    const uint8_t verdict = static_cast<uint8_t>((forgive ? kForgive : 0) |
+                                                 (room ? 0 : kAllowanceSpent));
+    return {verdict, cell};
+}
+
+// Remainder verdict. Pure and total: the bytes to forgive, zero to refuse.
+// Whole remainder or nothing, because the receiver knows the byte count and
+// not which gradient elements matter, so it does not choose among them. The
+// coin never applies here: pacing exists to keep allowance for the end of the
+// step, and applying it at the end of the step would defeat its own purpose.
+inline std::pair<uint64_t, StepLedger> remainder_verdict(StepLedger cell,
+                                                         uint64_t threshold,
+                                                         const Pacing& pacing,
+                                                         uint64_t remainder) {
+    if (remainder == 0 || !affords(cell, threshold, pacing, remainder)) {
+        return {uint64_t{0}, cell};
+    }
+    cell.forgiven += remainder;
+    return {remainder, cell};
+}
 
 // Dense (receiving rank, step) budget table. Ranks stay under a few hundred
 // and steps under a few hundred, so the whole table is well under a megabyte
@@ -147,32 +274,26 @@ class ForgivenessLedger {
         }
     }
 
+    // What a completed message left behind, which is what vesting spends.
+    void register_delivered(uint32_t dst, uint32_t step, uint64_t bytes) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->delivered += bytes;
+        }
+    }
+
     void close(uint32_t dst, uint32_t step) {
         if (StepLedger* cell = find(dst, step)) {
             cell->closed = true;
         }
     }
 
-    // The safety law, in one place: shed and forgiven bytes share one budget,
-    // and the budget is the step's threshold times the bytes that were
-    // eligible for it. Absorbing: neither term ever decreases, so a range
-    // charged once is never refunded.
-    bool may_forgive(uint32_t dst,
-                     uint32_t step,
-                     uint64_t bytes,
-                     uint64_t threshold) const {
-        const StepLedger* cell = find(dst, step);
-        if (cell == nullptr || cell->closed) {
-            return false;
-        }
-        const uint64_t spent = cell->shed + cell->forgiven + bytes;
-        return spent * kDecisionScale <= cell->eligible * threshold;
-    }
-
-    void charge(uint32_t dst, uint32_t step, uint64_t bytes) {
-        if (StepLedger* cell = find(dst, step)) {
-            cell->forgiven += bytes;
-        }
+    // The one eliminator for a cell a verdict may be computed on, and the
+    // only reader of `closed`. Null means the rank or step is outside the
+    // table, or the rank has already written its row for the step, and both
+    // answer "repair, with nothing to report about the allowance".
+    StepLedger* open_cell(uint32_t dst, uint32_t step) {
+        StepLedger* cell = find(dst, step);
+        return (cell != nullptr && !cell->closed) ? cell : nullptr;
     }
 
     const StepLedger* cell(uint32_t dst, uint32_t step) const {
@@ -221,6 +342,12 @@ struct ExperimentConfig {
     SheddingDomain domain = SheddingDomain::Admission;
     uint64_t p_low_threshold = 0;
     uint64_t p_high_threshold = 0;
+    // The receiver's two v2 policies. Pacing reserves allowance for later in
+    // the step; the straggler idle is how long a receive queue pair must go
+    // quiet before the receiver offers to forgive the unsent remainder, with
+    // zero meaning "ask at every arrival" and no value meaning disabled.
+    Pacing pacing = NoPacing{};
+    std::optional<uint64_t> straggler_idle_ns;
     uint32_t rank_count = 0;
     uint32_t step_count = 0;
     bool clr_mask_configured = false;
@@ -270,6 +397,14 @@ struct FlowRecord {
     // trimmed ranges that took. Recovery domain only.
     uint64_t forgiven_bytes = 0;
     uint32_t forgiven_ranges = 0;
+    // The subset of forgiven_bytes the receiver never waited for at all,
+    // because the flow went quiet with data still unsent. Trimmed-forgiven
+    // bytes are the difference, derived rather than counted.
+    uint64_t forgiven_remainder_bytes = 0;
+    // Trims the cap could have afforded and the pacing coin declined anyway.
+    // Nothing else can see them: a cap refusal is allowance_spent_signalled,
+    // and a coin refusal leaves the cap untouched.
+    uint32_t pacing_refusals = 0;
     // Congestion-exempt domain only. `cc_exempt` records the answer the
     // transport got at queue-pair creation and is never withdrawn: the flow's
     // exemption ended, but it was granted, and the telemetry is the record of
@@ -292,6 +427,17 @@ struct FlowRecord {
 inline ExperimentConfig experiment_config;
 inline ForgivenessLedger forgiveness_ledger;
 
+// Offered minus forgiven. A completed queue pair in the recovery domain
+// delivered fewer bytes than it offered, by exactly the forgiven count;
+// physical_bytes stays the offered figure so it keeps joining fct.txt and
+// keeps denominating W. The telemetry column and the vesting charge are the
+// same quantity, so they are the same function.
+inline uint64_t delivered_bytes(const FlowRecord& flow) {
+    return flow.physical_bytes >= flow.forgiven_bytes
+        ? flow.physical_bytes - flow.forgiven_bytes
+        : 0;
+}
+
 class ExperimentTelemetry {
   public:
     void initialize(const std::filesystem::path& output_dir) {
@@ -313,7 +459,8 @@ class ExperimentTelemetry {
                "trim_recovery_events,stale_trim_notifications,terminal_outcome,"
                "failure_reason,decision_hash,start_time_ns,end_time_ns,"
                "timeouts,cnp_received,first_trim_ns,first_repair_ns,"
-               "forgiven_bytes,forgiven_ranges,delivered_bytes,cc_exempt,"
+               "forgiven_bytes,forgiven_ranges,forgiven_remainder_bytes,"
+               "pacing_refusals,delivered_bytes,cc_exempt,"
                "cc_signal_withheld,allowance_spent_signalled,"
                "cc_rearmed_ns\n";
         rank_completion << "rank,completion_time_ns\n";
@@ -356,7 +503,9 @@ class ExperimentTelemetry {
                     << ',' << flow.timeouts << ',' << flow.cnp_received << ','
                     << flow.first_trim_ns << ',' << flow.first_repair_ns << ','
                     << flow.forgiven_bytes << ',' << flow.forgiven_ranges
-                    << ',' << delivered_bytes(flow) << ','
+                    << ',' << flow.forgiven_remainder_bytes << ','
+                    << flow.pacing_refusals << ',' << delivered_bytes(flow)
+                    << ','
                     << (flow.cc_exempt ? "true" : "false") << ','
                     << flow.cc_signal_withheld << ','
                     << flow.allowance_spent_signalled << ','
@@ -409,16 +558,6 @@ class ExperimentTelemetry {
     }
 
   private:
-    // Offered minus forgiven. A completed queue pair in the recovery domain
-    // delivered fewer bytes than it offered, by exactly the forgiven count;
-    // physical_bytes stays the offered figure so it keeps joining fct.txt and
-    // keeps denominating W.
-    static uint64_t delivered_bytes(const FlowRecord& flow) {
-        return flow.physical_bytes >= flow.forgiven_bytes
-            ? flow.physical_bytes - flow.forgiven_bytes
-            : 0;
-    }
-
     static const char* flow_kind_name(FlowKind kind) {
         switch (kind) {
         case FlowKind::ForegroundPayload:
@@ -508,17 +647,6 @@ inline void validate_priority_group(uint16_t priority_group,
     }
 }
 
-inline uint64_t mix_hash(uint64_t value) {
-    value += 0x9e3779b97f4a7c15ULL;
-    value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-    value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
-    return value ^ (value >> 31U);
-}
-
-inline void hash_combine(uint64_t& hash, uint64_t value) {
-    hash = mix_hash(hash ^ mix_hash(value));
-}
-
 inline uint64_t stable_operation_hash(const AstraSim::sim_request& request,
                                       int src,
                                       int dst,
@@ -581,41 +709,107 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
     return decision;
 }
 
-// The verdict the transport asks for, and the only place the budget moves.
-// The transport is semantics-blind: it supplies a flow and a byte count, and
-// learns nothing about steps, phases, or budgets. Total by construction, since
-// this runs on the packet path: an unknown step, a closed ledger, or an
-// exhausted budget all answer "repair".
-//
-// The allowance bit rides on whatever the answer is, because a sender cannot
-// read a budget entry every other sender to that rank shares. It reports
-// remaining == 0 exactly: a one byte remainder keeps an exemption alive one
-// more event, which costs one event's congestion signals.
-inline uint8_t evaluate_forgiveness(FlowRecord& flow, uint64_t bytes) {
-    if (!experiment_config.enabled || !forgives(experiment_config.domain) ||
-        flow.kind != FlowKind::ForegroundPayload || !flow.admission_eligible) {
-        return 0;
-    }
-    const uint32_t step = flow.operation.training_step;
-    const auto clr = experiment_config.clr_mask_by_step.find(step);
+// The step's threshold for one flow, and zero when the mask does not define
+// its step. Zero is free as that sentinel because the parser refuses a
+// p_low of zero and p_high is never below it. Both verdict shells resolve
+// the threshold the same way, so they resolve it through the same function.
+inline uint64_t step_threshold(const FlowRecord& flow) {
+    const auto clr =
+        experiment_config.clr_mask_by_step.find(flow.operation.training_step);
     if (clr == experiment_config.clr_mask_by_step.end()) {
         return 0;
     }
-    const uint64_t threshold = clr->second ? experiment_config.p_low_threshold
-                                           : experiment_config.p_high_threshold;
-    const uint32_t dst = static_cast<uint32_t>(flow.dst);
-    if (!forgiveness_ledger.may_forgive(dst, step, bytes, threshold)) {
-        return kAllowanceSpent;
+    return clr->second ? experiment_config.p_low_threshold
+                       : experiment_config.p_high_threshold;
+}
+
+// Whether the experiment layer may answer a receiver's question about this
+// flow at all. Shared by both verdicts, because both ask the same thing of
+// the flow; the exemption asks a narrower one and keeps its own guard.
+inline bool forgivable(const FlowRecord& flow) {
+    return experiment_config.enabled && forgives(experiment_config.domain) &&
+           flow.kind == FlowKind::ForegroundPayload && flow.admission_eligible;
+}
+
+// The trim verdict the transport asks for. The transport is semantics-blind:
+// it supplies a flow, a range start and a byte count, and learns nothing
+// about steps, phases, or budgets. A thin shell over trim_verdict: it
+// eliminates the cell, draws the coin, stores the answer back, and counts.
+//
+// The allowance bit rides on whatever the answer is, because a sender cannot
+// read a budget entry every other sender to that rank shares.
+inline uint8_t evaluate_forgiveness(FlowRecord& flow,
+                                    uint64_t start,
+                                    uint64_t bytes) {
+    if (!forgivable(flow)) {
+        return 0;
     }
-    forgiveness_ledger.charge(dst, step, bytes);
-    flow.forgiven_bytes += bytes;
-    flow.forgiven_ranges++;
-    // One byte is the smallest range a further trim could carry, so a cell
-    // that cannot take it has nothing left for anyone.
-    return kForgive |
-           (forgiveness_ledger.may_forgive(dst, step, 1, threshold)
-                ? 0
-                : kAllowanceSpent);
+    const uint64_t threshold = step_threshold(flow);
+    if (threshold == 0) {
+        return 0;
+    }
+    StepLedger* cell = forgiveness_ledger.open_cell(
+        static_cast<uint32_t>(flow.dst), flow.operation.training_step);
+    if (cell == nullptr) {
+        return 0;
+    }
+    const uint64_t coin = range_coin(flow.decision_hash, start);
+    // Only a range the cap could still have afforded: that is the forgiveness
+    // the coin cost, and it makes the two refusals decompose without overlap,
+    // the cap's into allowance_spent_signalled and the coin's into this.
+    if (paces_out(experiment_config.pacing, coin) &&
+        affords(*cell, threshold, experiment_config.pacing, bytes)) {
+        flow.pacing_refusals++;
+    }
+    const auto answer =
+        trim_verdict(*cell, threshold, experiment_config.pacing, coin, bytes);
+    *cell = answer.second;
+    if (forgave(answer.first)) {
+        flow.forgiven_bytes += bytes;
+        flow.forgiven_ranges++;
+    }
+    return answer.first;
+}
+
+// The straggler stop. The receive queue pair knows how far its cumulative
+// sequence has reached and how much arrived above it, and not how large the
+// flow is; this knows the size. The hole is what is left, and the answer is
+// the end offset to absorb, or zero to refuse.
+//
+// Under selective repeat a stalled flow keeps accepting packets past the gap,
+// so `accepted_above` is usually nonzero and charging the whole span above the
+// cumulative sequence would spend the budget on bytes the receiver holds.
+//
+// forgiven_ranges stays untouched: it counts the trims a forgiveness spared a
+// repair, and a remainder was never trimmed. That keeps one rate cut per trim
+// as the identity a fixture can assert.
+inline uint64_t evaluate_remainder(FlowRecord& flow,
+                                   uint64_t next_expected,
+                                   uint64_t accepted_above) {
+    if (!forgivable(flow) ||
+        flow.physical_bytes < next_expected + accepted_above) {
+        return 0;
+    }
+    const uint64_t remainder =
+        flow.physical_bytes - next_expected - accepted_above;
+    const uint64_t threshold = step_threshold(flow);
+    if (remainder == 0 || threshold == 0) {
+        return 0;
+    }
+    StepLedger* cell = forgiveness_ledger.open_cell(
+        static_cast<uint32_t>(flow.dst), flow.operation.training_step);
+    if (cell == nullptr) {
+        return 0;
+    }
+    const auto answer = remainder_verdict(*cell, threshold,
+                                          experiment_config.pacing, remainder);
+    *cell = answer.second;
+    if (answer.first == 0) {
+        return 0;
+    }
+    flow.forgiven_bytes += answer.first;
+    flow.forgiven_remainder_bytes += answer.first;
+    return flow.physical_bytes;
 }
 
 // Whether one queue pair may ignore congestion signals for as long as the
@@ -637,9 +831,11 @@ inline bool evaluate_congestion_exemption(FlowRecord& flow) {
     if (clr == experiment_config.clr_mask_by_step.end() || clr->second) {
         return false;
     }
-    const uint32_t dst = static_cast<uint32_t>(flow.dst);
-    if (!forgiveness_ledger.may_forgive(dst, step, 0,
-                                        experiment_config.p_high_threshold)) {
+    const StepLedger* cell =
+        forgiveness_ledger.open_cell(static_cast<uint32_t>(flow.dst), step);
+    if (cell == nullptr ||
+        !affords(*cell, experiment_config.p_high_threshold,
+                 experiment_config.pacing, 0)) {
         return false;
     }
     flow.cc_exempt = true;
@@ -727,6 +923,67 @@ inline void require_scaled_threshold(const nlohmann::json& policy,
             std::to_string(value.get<uint64_t>()) + " but the probability "
             "beside it rounds to " + std::to_string(rounded));
     }
+}
+
+// The one smart constructor for the pacing rule. A probability outside the
+// open interval is not a pacing rule: zero forgives nothing, which is the
+// admission domain, and one declines nothing, which is no pacing. A
+// probability beside any other kind is a value that would be read by nothing.
+inline void parse_pacing(const nlohmann::json& policy) {
+    if (!policy.contains("pacing")) {
+        return;
+    }
+    const auto& pacing = policy.at("pacing");
+    if (!pacing.is_object()) {
+        throw std::runtime_error("selection_policy.pacing must be an object");
+    }
+    reject_unknown_keys(pacing, {"kind", "p"}, "selection_policy.pacing");
+    if (!pacing.contains("kind") || !pacing.at("kind").is_string()) {
+        throw std::runtime_error("selection_policy.pacing requires kind");
+    }
+    const std::string kind = pacing.at("kind").get<std::string>();
+    if (kind == "bernoulli") {
+        if (!pacing.contains("p")) {
+            throw std::runtime_error(
+                "selection_policy.pacing kind 'bernoulli' requires p");
+        }
+        const uint64_t threshold = parse_probability_threshold(
+            pacing.at("p"), "selection_policy.pacing.p");
+        if (threshold == 0 || threshold >= kDecisionScale) {
+            throw std::runtime_error(
+                "selection_policy.pacing.p must be strictly between 0 and 1");
+        }
+        experiment_config.pacing = Bernoulli{threshold};
+        return;
+    }
+    if (pacing.contains("p")) {
+        throw std::runtime_error(
+            "selection_policy.pacing.p belongs to kind 'bernoulli' alone");
+    }
+    if (kind == "none") {
+        experiment_config.pacing = NoPacing{};
+        return;
+    }
+    if (kind == "vesting") {
+        experiment_config.pacing = Vesting{};
+        return;
+    }
+    throw std::runtime_error(
+        "selection_policy.pacing.kind must be none, bernoulli, or vesting");
+}
+
+// Absent disables the straggler stop; zero enables it and asks at every
+// arrival, which is stop-at-(1-p) as the degenerate point of this rule.
+inline void parse_straggler_idle(const nlohmann::json& policy) {
+    if (!policy.contains("straggler_idle_ns")) {
+        return;
+    }
+    const auto& idle = policy.at("straggler_idle_ns");
+    if (!idle.is_number_unsigned()) {
+        throw std::runtime_error(
+            "selection_policy.straggler_idle_ns must be a nonnegative integer");
+    }
+    experiment_config.straggler_idle_ns = idle.get<uint64_t>();
 }
 
 inline void configure_clr_mask(const std::string& configuration_path) {
@@ -944,7 +1201,8 @@ inline void configure_experiment(const std::string& configuration_path,
         }
         reject_unknown_keys(policy,
                             {"semantics", "p_low", "p_high", "p_low_threshold",
-                             "p_high_threshold", "domain", "transport"},
+                             "p_high_threshold", "domain", "transport",
+                             "pacing", "straggler_idle_ns"},
                             "selection_policy");
         if (policy.contains("domain")) {
             const auto& domain = policy.at("domain");
@@ -1030,6 +1288,19 @@ inline void configure_experiment(const std::string& configuration_path,
             throw std::runtime_error(
                 "selection_policy.p_high must be at least p_low");
         }
+        // Both v2 policies belong to the receiver, and only a forgiving
+        // domain has a receiver that decides anything.
+        if (!forgives(experiment_config.domain)) {
+            for (const char* key : {"pacing", "straggler_idle_ns"}) {
+                if (policy.contains(key)) {
+                    throw std::runtime_error(
+                        std::string("selection_policy.") + key +
+                        " requires a forgiving domain");
+                }
+            }
+        }
+        parse_pacing(policy);
+        parse_straggler_idle(policy);
         experiment_config.selection_policy_configured = true;
     }
 

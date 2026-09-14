@@ -51,6 +51,8 @@ FLOW_FIELDS = [
     "first_repair_ns",
     "forgiven_bytes",
     "forgiven_ranges",
+    "forgiven_remainder_bytes",
+    "pacing_refusals",
     "delivered_bytes",
     "cc_exempt",
     "cc_signal_withheld",
@@ -157,6 +159,8 @@ class Ring3DAnalysisTests(unittest.TestCase):
             "first_repair_ns": "0",
             "forgiven_bytes": "0",
             "forgiven_ranges": "0",
+            "forgiven_remainder_bytes": "0",
+            "pacing_refusals": "0",
             "delivered_bytes": "64",
         }
 
@@ -429,6 +433,56 @@ class Ring3DAnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "control plane"):
                 summarize(telemetry, ns3_dir=ns3)
 
+    def test_a_forgiven_remainder_must_account_for_undelivered_data(
+        self,
+    ) -> None:
+        """Its bytes were never put on the wire, so they are data-plane bytes.
+
+        On the control plane they would be counted beside acknowledgements and
+        rate cuts, where a byte count means something else entirely.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\n"
+                "remainder_forgiven,control,1,4096\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "undelivered data"):
+                summarize(telemetry, ns3_dir=ns3)
+
+    def test_forgiven_remainder_bytes_stay_out_of_the_trimmed_load(self) -> None:
+        """W counts what the fabric trimmed, and a remainder was never sent."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(telemetry, self.valid_shed_flow())
+            ns3 = root / "ns3"
+            ns3.mkdir()
+            (ns3 / "transport_summary.csv").write_text(
+                "event,plane,event_count,total_bytes\n"
+                "trim_ftd_admission,data,2,8192\n"
+                "trim_forgiven,data,1,4096\n"
+                "remainder_forgiven,data,3,12288\n",
+                encoding="utf-8",
+            )
+
+            summary = summarize(telemetry, ns3_dir=ns3)
+
+        transport = summary["ns3_observability"]["transport"]
+        self.assertEqual(transport["remainder_forgiven_count"], 3)
+        self.assertEqual(transport["remainder_forgiven_bytes"], 12_288)
+        self.assertEqual(transport["packet_trimming"]["conversion_count"], 2)
+        self.assertEqual(
+            transport["packet_trimming"]["trimmed_payload_bytes"], 8_192
+        )
+        self.assertEqual(summary["network_health"]["forgiven_bytes"], 4_096)
+
     def eligible_flow(
         self,
         dst: str,
@@ -574,6 +628,33 @@ class Ring3DAnalysisTests(unittest.TestCase):
         self.assertEqual(forgiveness["cc_rearmed_flow_count"], 1)
         self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
         self.assertEqual(forgiveness["ledger_law"]["domain"], "recovery_exempt")
+
+    def test_v2_receiver_counters_reach_the_summary(self) -> None:
+        """The remainder split and the coin refusals, both summed by column.
+
+        A forgiven remainder is a subset of the forgiven bytes, so the total
+        does not move and the split is the only new information; a coin
+        refusal is visible nowhere else, because it leaves the cap untouched.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            straggler.update(
+                {"forgiven_remainder_bytes": "60", "pacing_refusals": "3"}
+            )
+            paced = self.eligible_flow("5", "2", 1_000, 0, "10002")
+            paced.update({"pacing_refusals": "4"})
+            self.write_telemetry(telemetry, [straggler, paced])
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+        forgiveness = summary["forgiveness"]
+        self.assertEqual(forgiveness["forgiven_bytes"], 100)
+        self.assertEqual(forgiveness["forgiven_remainder_bytes"], 60)
+        self.assertEqual(forgiveness["pacing_refusal_count"], 7)
+        self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
 
     def test_ledger_law_rejects_a_cell_over_its_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

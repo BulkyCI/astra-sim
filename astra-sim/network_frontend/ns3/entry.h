@@ -219,7 +219,6 @@ uint8_t recovery_verdict(uint32_t sip,
                          uint64_t seq,
                          uint32_t length) {
     (void)dport;
-    (void)seq;
     const uint32_t src = ip_to_node_id(Ipv4Address(sip));
     const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
     const FlowKey key = make_flow_key(sport, static_cast<int>(src),
@@ -228,7 +227,33 @@ uint8_t recovery_verdict(uint32_t sip,
     if (active == active_flow_registry.end()) {
         return 0;
     }
-    return AstraSimNs3::evaluate_forgiveness(active->second, length);
+    return AstraSimNs3::evaluate_forgiveness(active->second, seq, length);
+}
+
+// The transport's remainder-verdict callback, asked when a receive queue pair
+// has gone quiet with data still unsent. It resolves the flow the way the
+// verdict callback does, and answers with the end offset to absorb. The
+// transport supplies both edges of the hole, the cumulative sequence and the
+// bytes accepted above it; only this side knows the flow's size. An unknown
+// five-tuple refuses, which is what keeps a receive queue pair resurrected by
+// late data inert: its flow is no longer registered.
+uint64_t remainder_verdict(uint32_t sip,
+                           uint32_t dip,
+                           uint16_t sport,
+                           uint16_t dport,
+                           uint64_t next_expected,
+                           uint64_t accepted_above) {
+    (void)dport;
+    const uint32_t src = ip_to_node_id(Ipv4Address(sip));
+    const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
+    const FlowKey key = make_flow_key(sport, static_cast<int>(src),
+                                      static_cast<int>(dst));
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        return 0;
+    }
+    return AstraSimNs3::evaluate_remainder(active->second, next_expected,
+                                           accepted_above);
 }
 
 // The transport's congestion-exemption callback, asked once per queue pair at
@@ -511,6 +536,14 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     AstraSimNs3::FlowRecord flow = active->second;
     copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
+    // What the receiving rank actually holds for the step, which is what
+    // vesting spends. Same eligibility condition as register_eligible, so the
+    // two sides of the ratio cover the same population.
+    if (flow.admission_eligible && flow.dst >= 0) {
+        AstraSimNs3::forgiveness_ledger.register_delivered(
+            static_cast<uint32_t>(flow.dst), flow.operation.training_step,
+            AstraSimNs3::delivered_bytes(flow));
+    }
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
         account_physical_bytes(sid, did, q->m_size);
@@ -620,8 +653,13 @@ int setup_ns3_simulation(string network_configuration) {
             return -1;
         }
     }
+    // The straggler stop is on exactly when the profile named an idle, and the
+    // callback being null is what tells the transport it is off.
+    const auto& straggler_idle = AstraSimNs3::experiment_config.straggler_idle_ns;
     if (!SetupNetwork(qp_finish, qp_fail, recovery_verdict, recovery_domain,
-                      congestion_exemption, congestion_exempt)) {
+                      congestion_exemption, congestion_exempt,
+                      straggler_idle.has_value() ? remainder_verdict : nullptr,
+                      straggler_idle.value_or(0))) {
         return -1;
     }
     // The experiment's scale sizes the forgiveness ledger and bounds every

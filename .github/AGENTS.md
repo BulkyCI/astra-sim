@@ -272,10 +272,13 @@ the `evaluations` matrix maps `ns3-evaluation.yml` over the result.
    `single` for one run and its report, `smoke` for the four smoke scripts and
    the 16-rank trace. `ci/dcs/evaluate.sh` dispatches on it; the `provision`
    job rejects anything else before a runner is minted.
-2. Only a `comparison` may carry a non-zero `comparison_seed` or
-   `require_congestion: true`. `arm_count` is 1 for `single` and `smoke`, 3 for
-   a comparison, and 4 when the profile's `selection_policy.domain` is
-   `recovery` or `recovery_exempt`.
+2. Only a `comparison` may carry `require_congestion: true`. A `comparison`
+   and a `single` may carry a non-zero `comparison_seed`, which runs that one
+   seed; a `single` at the seed of a comparison of the same profile runs the
+   same simulation as that comparison's matching arm, which is what lets the
+   two join. `arm_count` is 1 for `single` and `smoke`, 3 for a comparison,
+   and 4 when the profile's `selection_policy.domain` is `recovery` or
+   `recovery_exempt`.
 3. `ledger_key`, `artifact_name`, and `run_directory` are unique across the
    file, and `ledger_key` is stable across re-runs.
 4. `simulation_timeout_seconds` stays under `execution_timeout_minutes * 60`.

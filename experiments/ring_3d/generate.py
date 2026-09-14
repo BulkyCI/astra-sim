@@ -204,6 +204,51 @@ FORGIVING_DOMAINS: frozenset[SheddingDomain] = frozenset(
 )
 """The domains that decide after the trim, and so need the trimming transport."""
 
+class PacingKind(StrEnum):
+    """The receiver's rule for declining a forgivable trim.
+
+    ``none`` forgives whatever the cap affords, first come first served.
+    ``bernoulli`` forgives a fixed fraction of forgivable ranges, drawn from a
+    coin that is deterministic per range, so allowance survives the first
+    burst. ``vesting`` measures the same cap against the bytes the rank has
+    received rather than the bytes senders have launched, which releases the
+    budget as the step proceeds.
+    """
+
+    NONE = "none"
+    BERNOULLI = "bernoulli"
+    VESTING = "vesting"
+
+
+@dataclass(frozen=True)
+class Pacing:
+    """A pacing rule and, under Bernoulli alone, its probability.
+
+    The invariant is the whole type: a probability is meaningful under
+    Bernoulli and under nothing else, so it is present exactly there.
+    """
+
+    kind: PacingKind = PacingKind.NONE
+    p: float | None = None
+
+    def __post_init__(self) -> None:
+        if (self.kind is PacingKind.BERNOULLI) != (self.p is not None):
+            raise ValueError(
+                "selection_policy.pacing.p is required by kind 'bernoulli' "
+                "and rejected by every other kind"
+            )
+        if self.p is not None and not 0.0 < self.p < 1.0:
+            raise ValueError(
+                "selection_policy.pacing.p must be strictly between 0 and 1"
+            )
+
+    def document(self) -> dict[str, Any]:
+        """The object the simulator's parser reads back."""
+        if self.p is None:
+            return {"kind": self.kind.value}
+        return {"kind": self.kind.value, "p": self.p}
+
+
 SELECTION_SEMANTICS: dict[SheddingDomain, str] = {
     SheddingDomain.ADMISSION: "logical_admission_selection",
     SheddingDomain.RECOVERY: "recovery_forgiveness",
@@ -224,6 +269,11 @@ class SelectionPolicy:
     p_low: float
     p_high: float
     domain: SheddingDomain = SheddingDomain.ADMISSION
+    # The two receiver policies of FORGIVE v2, both meaningful only where the
+    # receiver decides. ``straggler_idle_ns`` None disables the straggler
+    # stop; zero enables it and asks at every arrival.
+    pacing: Pacing = Pacing()
+    straggler_idle_ns: int | None = None
 
     @property
     def semantics(self) -> str:
@@ -308,12 +358,52 @@ def scaled_threshold(probability: float) -> int:
     return int(scaled.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
+def _load_pacing(policy: dict[str, Any]) -> Pacing:
+    """The one smart constructor for the pacing rule.
+
+    The kind is a closed sum, so an unknown one is refused rather than
+    defaulting to none; ``Pacing`` itself owns the probability invariant.
+    """
+    value = policy.get("pacing")
+    if value is None:
+        return Pacing()
+    if not isinstance(value, dict) or not set(value) <= {"kind", "p"}:
+        raise ValueError(
+            "selection_policy.pacing must be an object with kind and, under "
+            "'bernoulli', p"
+        )
+    kind_value = value.get("kind")
+    if kind_value not in tuple(kind.value for kind in PacingKind):
+        raise ValueError(
+            "selection_policy.pacing.kind must be one of "
+            f"{sorted(kind.value for kind in PacingKind)}"
+        )
+    if "p" not in value:
+        return Pacing(kind=PacingKind(kind_value))
+    return Pacing(
+        kind=PacingKind(kind_value),
+        p=_probability(value["p"], "selection_policy.pacing.p"),
+    )
+
+
+def _load_straggler_idle_ns(policy: dict[str, Any]) -> int | None:
+    """Absent disables the straggler stop; zero asks at every arrival."""
+    value = policy.get("straggler_idle_ns")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            "selection_policy.straggler_idle_ns must be a nonnegative integer"
+        )
+    return value
+
+
 def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     policy = document.get("selection_policy")
     if not isinstance(policy, dict):
         raise ValueError("selection_policy must be an object")
     required_keys = {"p_low", "p_high"}
-    optional_keys = {"domain"}
+    optional_keys = {"domain", "pacing", "straggler_idle_ns"}
     if not required_keys <= set(policy) <= required_keys | optional_keys:
         raise ValueError(
             f"selection_policy must contain exactly {sorted(required_keys)} "
@@ -333,8 +423,24 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
             "selection_policy.domain must be one of "
             f"{sorted(domain.value for domain in SheddingDomain)}"
         )
+    domain = SheddingDomain(domain_value)
+    pacing = _load_pacing(policy)
+    straggler_idle_ns = _load_straggler_idle_ns(policy)
+    # Both v2 policies belong to the receiver, and only a forgiving domain has
+    # a receiver that decides anything. Accepting them elsewhere would write a
+    # profile whose knob moves nothing.
+    if domain not in FORGIVING_DOMAINS:
+        for key in ("pacing", "straggler_idle_ns"):
+            if key in policy:
+                raise ValueError(
+                    f"selection_policy.{key} requires a forgiving domain"
+                )
     return SelectionPolicy(
-        p_low=p_low, p_high=p_high, domain=SheddingDomain(domain_value)
+        p_low=p_low,
+        p_high=p_high,
+        domain=domain,
+        pacing=pacing,
+        straggler_idle_ns=straggler_idle_ns,
     )
 
 
@@ -1415,6 +1521,8 @@ def resolve_selection_policy(
         domain=(
             profile.selection_policy.domain if domain is None else domain
         ),
+        pacing=profile.selection_policy.pacing,
+        straggler_idle_ns=profile.selection_policy.straggler_idle_ns,
     )
 
 
@@ -1454,6 +1562,14 @@ def write_experiment_config(
             "selective_repair": True,
             "packet_trimming_ftd": True,
         }
+        # The receiver's two v2 policies. An arm that overrides the domain to
+        # admission drops both, because the simulator refuses them there and
+        # neither would move anything if it did not.
+        policy_document["pacing"] = selection_policy.pacing.document()
+        if selection_policy.straggler_idle_ns is not None:
+            policy_document["straggler_idle_ns"] = (
+                selection_policy.straggler_idle_ns
+            )
     policy = {
         "schema_version": 1,
         "enabled": True,

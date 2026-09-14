@@ -574,7 +574,7 @@ Readings.
 Chart: line or bar against budget. Useful as a backup slide when someone
 asks why the front saturates.
 
-| profile | budget | seeds | forgiven GB | notifications ignored, M | acted on, M | ignored share | flows re-armed | timeouts | receiver refusals |
+| profile | budget | seeds | forgiven GB | notifications ignored, M | acted on, M | ignored share | flows re-armed | timeouts | priority pulls |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | p01 | 0.1 | 3 | 12.1 to 12.5 | 7.84 to 7.92 | 7.89 to 8.41 | 48.4 to 50.1 % | 19 442 to 20 644 | 5 415 to 6 104 | 1.09 to 1.19 M |
 | p02 | 0.2 | 3 | 16.1 to 16.5 | 9.63 to 10.01 | 6.79 to 7.08 | 58.2 to 59.2 % | 15 392 to 15 888 | 3 899 to 4 100 | 1.04 to 1.20 M |
@@ -590,13 +590,17 @@ Readings.
 - Timeouts fall monotonically as the budget rises, from 6 104 at 0.1 to
   2 955 at 0.6, and to about 1 200 with the mask off. Forgiveness removes
   the repairs that were waiting to time out.
-- With the mask off the receiver never refuses a single range: the budget
-  is never exhausted anywhere, so the refusal counter is exactly zero in
-  all three seeds. That is the cleanest evidence that the budget, not the
-  policy, is what binds in the masked runs.
-- Flows re-arm on the first repair of any kind, not only on a refusal,
-  which is why the mask-off runs still show about 15 500 re-arms with
-  zero refusals.
+- The last column counts priority pulls, not refusals. `m_priority_pulls`
+  increments only when `FLAG_PULL_PRIORITY` is set, and
+  `evaluate_forgiveness` sets that flag only on a critical step, so the
+  mask-off profile reports zero because it has no critical steps rather
+  than because the receiver never refused. There is no counter for total
+  refusals in these bundles. Do not read this column as one.
+- Flows re-arm on any repair request, not only on a refusal. The receiver
+  emits an identical request from three sites in `rdma-hw.cc` and only the
+  one at line 790 consulted the allowance, so these re-arm counts overstate
+  how often the budget actually ran out. That defect is specified for
+  correction in `forgive-v1-revocation-fix.md`.
 
 ---
 

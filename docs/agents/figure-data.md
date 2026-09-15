@@ -15,7 +15,9 @@ Sources are release bundles in `BulkyCI/astra-sim`: run #117
 `zuihrl5stp6ulacoogghyp4loy7xsjpj`, #120
 `uwlaookzhemmwabtbwfe2yhyxepupnmw`, #121
 `b363b3rri7pbgbaudfh3tbnysiranl66`, #122
-`rt4732ejzjqe2hkar2bturuv3qav6pv3`.
+`rt4732ejzjqe2hkar2bturuv3qav6pv3`. Run #123 is workflow run
+`34867374086`, and its exempt-arm numbers replace the ones runs #121 and
+#122 published.
 
 ---
 
@@ -25,9 +27,11 @@ Vocabulary, so captions stay consistent. An *arm* is one simulated
 configuration. A *comparison* is a set of arms sharing a seed and a
 random selection stream, so their results can be subtracted. A *run* is
 one dispatch of many comparisons to the cluster, numbered #117, #120,
-#121, #122. A *cell* is one point of the eight-point fabric map. The two
-sender-side arms are both shedding: *phase-aware shedding* protects the
-critical steps, *unmasked shedding* does not. Quantities marked
+#121, #122, #123. A *cell* is one point of the eight-point fabric map.
+Runs #121 and #122 measured the code before the revocation fix at commit
+`c6855f0`, so every exempt-arm number in this file comes from run #123.
+The two sender-side arms are both shedding: *phase-aware shedding*
+protects the critical steps, *unmasked shedding* does not. Quantities marked
 **derived** below were computed from measured counters under a stated
 assumption; everything else is read directly from a bundle.
 
@@ -63,7 +67,7 @@ assumption; everything else is read directly from a bundle.
 
 ## 1. Timeline of the work
 
-Chart: two-band timeline, July 20 to September 9 2026. One band for what
+Chart: two-band timeline, July 20 to September 15 2026. One band for what
 was built, one for what was run.
 
 Fork point: upstream ASTRA-sim commit `518bd51`, 26 March 2026. First
@@ -83,6 +87,7 @@ Build events:
 | 2026-08-22 | the 16-rank configuration scaled to sixteen pi-derived seeds |
 | 2026-09-05 | DCQCN knob and rate-cut telemetry; receiver forgiveness verdict in the transport |
 | 2026-09-07 | congestion exemption for a forgiven flow |
+| 2026-09-14 | report a spent allowance and revoke the exemption on it |
 
 Cluster waves:
 
@@ -92,10 +97,11 @@ Cluster waves:
 | 2026-09-06 | #120 | 8 cells | regime map |
 | 2026-09-07 | #121 | 6 comparisons, 24 arms | forgiveness with congestion exemption |
 | 2026-09-08 | #122 | 14 comparisons, 56 arms | loss-budget sweep and phase-mask ablation |
+| 2026-09-14 | #123 | 21 comparisons, 84 arms | the same front with the revocation corrected |
 
 Readings. Six weeks of the seven went into the instrument, because the
 backend ASTRA-sim ships with is lossless RoCEv2 and models none of the
-fabric the questions are about. The four waves all land in the last nine
+fabric the questions are about. The first four waves all land inside nine
 days, which is what a working cluster path bought.
 
 ---
@@ -325,39 +331,43 @@ Readings.
 
 ---
 
-## 6. FORGIVE at one operating point, run #121
+## 6. FORGIVE at one operating point, run #123
 
 Chart: grouped table or a four-bar comparison. No axes needed.
 
-Worst cell of the map (DCQCN, fan-in 7, 4:1), three seeds, budget 0.4.
+Worst cell of the map (DCQCN, fan-in 7, 4:1), budget 0.4, the three seeds
+run #121 used. Run #123 re-measured all four arms on the corrected code,
+so every row below comes from the one wave.
 
 | arm | training window | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | bytes re-sent after trims |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tight baseline | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
-| sender-side shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
-| FORGIVE with exemption, 0.4 | 1459 to 1468 ms | 20 to 21 ms | 36 to 37 ms | 8.8 to 9.5 % | 1 % |
-| loose baseline, 0.4 | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
+| tight baseline | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
+| sender-side shedding, 0.4 | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
+| FORGIVE with exemption, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
+| loose baseline, 0.4 | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
 
-Per seed the exempt arm ignored 10.4 to 10.9 million rate cuts, acted on
-6.0 to 6.4 million, and re-armed 12 to 13 thousand of its 71 680 exempt
-flows. The budget rule held in every ledger entry.
+Per seed the exempt arm withheld 25.4 to 25.7 million rate cuts, acted on
+3.58 to 3.69 million, and re-armed 5 049 to 5 447 of its 71 680 exempt
+flows. The flows that received an allowance report are the flows that
+re-armed, to the flow, in all three seeds, and the budget rule held in
+every ledger entry.
 
 Readings.
 
 - FORGIVE reaches a shorter window than sender-side shedding while
-  discarding about a third as much gradient.
-- Its critical steps do not move, while the loose baseline's critical
-  steps speed up by a third. That difference is the safety property being
-  sold, visible in a single row.
+  discarding two thirds as much gradient.
+- FORGIVE's critical steps stay within 2.4 ms of the tight baseline,
+  while the loose baseline's critical steps speed up by a third. That
+  difference is the safety property being sold, visible in a single row.
 - Context from the map: the same cell without congestion control runs in
-  1367 ms, so DCQCN's bill here is about 320 ms and the exempt arm gives
-  back 225 of them. That comparison crosses two runs and the
+  1367 ms, so DCQCN's bill here is about 330 ms and the exempt arm gives
+  back all of it. That comparison crosses two runs and the
   no-congestion-control figure is a single seed, so quote it as a scale
   rather than a measurement.
 
 ---
 
-## 7. The loss-budget sweep, run #122
+## 7. The loss-budget sweep, run #123
 
 Chart: scatter with two connected series. Horizontal axis is gradient
 bytes lost as a share of all data-parallel bytes, 0 to 50 %. Vertical
@@ -365,48 +375,48 @@ axis is training time recovered, 0 to 18 %. Label each point with its
 budget. Optionally shade 0.7 to 3.3 % and mark 10 % on the horizontal
 axis, which are MLT's published tolerance bounds.
 
-Worst cell of the map, three seeds per budget except 0.4 which has two
-new seeds here and three more in run #121.
+Worst cell of the map, three seeds per budget except 0.4, which has two
+seeds in this table and three more at the same cell in section 6.
 
-Per-seed, all fourteen records:
+Per-seed, the fourteen records that carry a shedding partner:
 
 | profile | seed | budget | baseline ms | FORGIVE % | shedding % | loose baseline % | FORGIVE loss, % of DP bytes | shedding loss, % of DP bytes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| p01 | 9550582 | 0.1 | 1697 | 10.39 | 3.12 | 3.93 | 6.34 | 7.65 |
-| p01 | 23172535 | 0.1 | 1697 | 10.52 | 2.45 | 2.64 | 6.51 | 7.70 |
-| p01 | 94081284 | 0.1 | 1701 | 10.90 | 3.28 | 3.06 | 6.46 | 7.68 |
-| p02 | 9550582 | 0.2 | 1697 | 12.02 | 4.86 | 7.22 | 8.48 | 15.67 |
-| p02 | 23172535 | 0.2 | 1697 | 12.61 | 5.52 | 7.20 | 8.64 | 15.77 |
-| p02 | 94081284 | 0.2 | 1701 | 12.96 | 5.45 | 6.65 | 8.43 | 15.77 |
-| base | 28410270 | 0.4 | 1688 | 13.05 | 10.97 | 12.99 | 9.40 | 31.42 |
-| base | 81117450 | 0.4 | 1710 | 13.47 | 11.78 | 14.27 | 9.32 | 31.62 |
-| p06 | 9550582 | 0.6 | 1697 | 12.82 | 16.23 | 20.18 | 9.15 | 47.77 |
-| p06 | 23172535 | 0.6 | 1697 | 12.93 | 15.95 | 20.30 | 9.29 | 47.98 |
-| p06 | 94081284 | 0.6 | 1701 | 13.17 | 16.38 | 20.77 | 9.28 | 47.76 |
-| allsteps | 9550582 | 0.4 | 1697 | 16.33 | 14.90 | 14.90 | 11.69 | 39.76 |
-| allsteps | 23172535 | 0.4 | 1697 | 16.62 | 14.42 | 14.42 | 11.68 | 39.88 |
-| allsteps | 94081284 | 0.4 | 1701 | 16.48 | 13.15 | 13.15 | 11.64 | 39.66 |
+| p01 | 9550582 | 0.1 | 1697 | 12.90 | 3.12 | 3.93 | 6.75 | 7.65 |
+| p01 | 23172535 | 0.1 | 1697 | 14.10 | 2.45 | 2.64 | 6.89 | 7.70 |
+| p01 | 94081284 | 0.1 | 1701 | 13.23 | 3.28 | 3.06 | 6.84 | 7.68 |
+| p02 | 9550582 | 0.2 | 1697 | 16.67 | 4.86 | 7.22 | 12.19 | 15.67 |
+| p02 | 23172535 | 0.2 | 1697 | 16.73 | 5.52 | 7.20 | 11.80 | 15.77 |
+| p02 | 94081284 | 0.2 | 1701 | 15.95 | 5.45 | 6.65 | 11.07 | 15.77 |
+| base | 28410270 | 0.4 | 1688 | 19.55 | 10.97 | 12.99 | 21.30 | 31.42 |
+| base | 81117450 | 0.4 | 1710 | 20.96 | 11.78 | 14.27 | 21.78 | 31.62 |
+| p06 | 9550582 | 0.6 | 1697 | 24.26 | 16.23 | 20.18 | 38.11 | 47.77 |
+| p06 | 23172535 | 0.6 | 1697 | 23.99 | 15.95 | 20.30 | 38.59 | 47.98 |
+| p06 | 94081284 | 0.6 | 1701 | 23.72 | 16.38 | 20.77 | 37.65 | 47.76 |
+| allsteps | 9550582 | 0.4 | 1697 | 25.43 | 14.90 | 14.90 | 25.88 | 39.76 |
+| allsteps | 23172535 | 0.4 | 1697 | 25.27 | 14.42 | 14.42 | 26.03 | 39.88 |
+| allsteps | 94081284 | 0.4 | 1701 | 25.56 | 13.15 | 13.15 | 25.60 | 39.66 |
 
 Plot points, seed ranges:
 
 | budget | mask | FORGIVE time | FORGIVE loss | shedding time | shedding loss |
 | ---: | --- | --- | --- | --- | --- |
-| 0.1 | on | 10.4 to 10.9 % | 6.3 to 6.5 % | 2.4 to 3.3 % | 7.7 % |
-| 0.2 | on | 12.0 to 13.0 % | 8.4 to 8.6 % | 4.9 to 5.5 % | 15.7 % |
-| 0.4 | on | 13.0 to 13.5 % | 9.3 to 9.4 % | 11.0 to 11.8 % | 31.5 % |
-| 0.6 | on | 12.8 to 13.2 % | 9.2 to 9.3 % | 16.0 to 16.4 % | 47.9 % |
-| 0.4 | off | 16.3 to 16.6 % | 11.6 to 11.7 % | 13.2 to 14.9 % | 39.8 % |
+| 0.1 | on | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 7.7 % |
+| 0.2 | on | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 15.7 % |
+| 0.4 | on | 19.6 to 21.0 % | 21.3 to 21.8 % | 11.0 to 11.8 % | 31.5 % |
+| 0.6 | on | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 47.9 % |
+| 0.4 | off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 39.8 % |
 
 Efficiency, points of training time recovered per percent of gradient
 lost:
 
 | budget | FORGIVE | shedding |
 | ---: | ---: | ---: |
-| 0.1 | 1.6 to 1.7 | 0.3 to 0.4 |
-| 0.2 | 1.4 to 1.5 | 0.3 |
-| 0.4 | 1.4 | 0.3 to 0.4 |
-| 0.6 | 1.4 | 0.3 |
-| 0.4, mask off | 1.4 | 0.3 to 0.4 |
+| 0.1 | 1.9 to 2.1 | 0.3 to 0.4 |
+| 0.2 | 1.4 | 0.3 |
+| 0.4 | 0.9 to 1.0 | 0.3 to 0.4 |
+| 0.6 | 0.6 | 0.3 |
+| 0.4, mask off | 1.0 | 0.3 to 0.4 |
 
 Budget utilisation, **derived**. The eligible share of DP bytes is 0.79,
 read off the shedding arm whose loss is linear in the budget at that
@@ -414,32 +424,38 @@ slope, so the cap is 79 x budget, in percent of DP bytes:
 
 | budget | cap | FORGIVE spends | utilisation |
 | ---: | ---: | ---: | ---: |
-| 0.1 | 7.9 % | 6.4 % | 81 % |
-| 0.2 | 15.8 % | 8.5 % | 54 % |
-| 0.4 | 31.6 % | 9.4 % | 30 % |
-| 0.6 | 47.4 % | 9.2 % | 19 % |
+| 0.1 | 7.9 % | 6.8 % | 86 % |
+| 0.2 | 15.8 % | 11.7 % | 74 % |
+| 0.4 | 31.6 % | 21.5 % | 68 % |
+| 0.6 | 47.4 % | 38.1 % | 80 % |
 
 Readings.
 
-- The curve saturates above budget 0.2. Budget 0.1 already buys 80 % of
-  the gain at two thirds of the loss, so the headline budget should be 0.1,
-  not 0.4. That also puts the spent loss inside the range MLT profiles as
-  tolerable.
-- Aimed loss self-limits; blind loss does not. Sender-side shedding
+- Forgiven loss is roughly proportional to the cap. Sender-side shedding
   discards 0.79 x budget at every setting, exactly what its hash was told
-  to do. FORGIVE converges to about 9.3 % and stops, because the fabric
-  stops trimming.
-- Efficiency is a flat constant across the whole front: four to five
-  times, whatever the budget and whether or not the mask is on.
-- Shedding only overtakes on time past a budget of about 0.45, where it
-  is discarding a third of every gradient. No published tolerance result
-  reaches there.
-- Run #121's three seeds at budget 0.4 read 12.9, 13.1 and 13.5 %, so
-  that point now rests on five seeds spanning 12.9 to 13.5.
+  to do; the exempt arm spends 68 to 86 % of the same cap, with no
+  ceiling anywhere on the front.
+- FORGIVE's efficiency falls with the budget, 1.96 at 0.1 to 0.63 at 0.6,
+  while shedding's stays at 0.33 to 0.45. The two are furthest apart at
+  the smallest budget, 5.3 times at 0.1, and closest at the largest, 1.9
+  times at 0.6.
+- The headline budget is 0.1: 12.9 to 14.1 % of training time for 6.75 to
+  6.89 % of gradient bytes.
+- Loss at 0.1 is above the 0.7 to 3.3 % that MLT profiles as tolerable
+  for its workloads. A budget of 0.05 has not been run; it is the
+  cheapest addition to the front and the point most likely to land inside
+  that range.
+- Shedding does not overtake on time anywhere on the front. At budget 0.6
+  it recovers 16.0 to 16.4 % against FORGIVE's 23.7 to 24.3 %, and it
+  discards 47.4 % of data-parallel bytes against FORGIVE's 37.7 to
+  38.6 %.
+- Budget 0.4 rests on five seeds. The two in the table read 19.55 and
+  20.96 %, the three in section 6 read 20.00, 20.03 and 21.00 %, so the
+  point spans 19.6 to 21.0 %.
 
 ---
 
-## 8. What the phase mask costs and whether it holds, run #122
+## 8. What the phase mask costs and whether it holds, run #123
 
 Chart: two panels, or a table. Panel A is the cost, panel B is the
 integrity check.
@@ -448,72 +464,76 @@ Cost of the mask, budget 0.4, three seeds each:
 
 | arm | training time recovered | gradient lost |
 | --- | ---: | ---: |
-| mask on, protects steps 1, 2, 3, 20 | 13.0 to 13.5 % | 9.3 to 9.4 % |
-| mask off, budget 0.4 everywhere | 16.3 to 16.6 % | 11.6 to 11.7 % |
-| difference | 3.2 points | 2.3 points |
+| mask on, protects steps 1, 2, 3, 20 | 19.6 to 21.0 % | 21.3 to 21.8 % |
+| mask off, budget 0.4 everywhere | 25.3 to 25.6 % | 25.6 to 26.0 % |
+| difference, paired on the three shared seeds | 5.1 points | 4.4 points |
 
 Integrity, share of forgiven bytes placed on the four critical steps.
 A uniform policy would place 4/20, that is 20 %, there:
 
 | profile | budget | critical-step share of forgiven bytes | ledger violations |
 | --- | ---: | ---: | ---: |
-| p01 | 0.1 | 1.45 to 1.53 % | 0 |
-| p02 | 0.2 | 1.11 to 1.14 % | 0 |
-| base | 0.4 | 1.02 to 1.03 % | 0 |
-| p06 | 0.6 | 1.02 to 1.04 % | 0 |
-| allsteps | 0.4 | 19.28 to 20.80 % | 0 |
+| p01 | 0.1 | 1.39 to 1.44 % | 0 |
+| p02 | 0.2 | 0.80 to 0.85 % | 0 |
+| base | 0.4 | 0.44 to 0.45 % | 0 |
+| p06 | 0.6 | 0.25 % | 0 |
+| allsteps | 0.4 | 19.16 to 20.45 % | 0 |
 
-The budget law verified with zero violations in all fourteen records,
-1280 ledger cells each.
+The budget law verified with zero violations in all 21 records of run
+#123, 1280 ledger cells in each of the 20 congested ones.
 
 Per-step all-reduce span, seed 9550582, budget 0.1, milliseconds. Steps
 1, 2, 3 and 20 are the protected ones:
 
 | step | baseline | FORGIVE | shedding | FORGIVE % | shedding % |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 34.5 | 35.1 | 34.5 | -1.7 | 0.0 |
-| 2 | 34.9 | 36.4 | 34.9 | -4.2 | 0.0 |
-| 3 | 37.4 | 38.8 | 37.4 | -3.8 | 0.0 |
-| 4 | 39.3 | 21.1 | 33.5 | 46.2 | 14.7 |
-| 5 | 40.0 | 23.9 | 35.1 | 40.3 | 12.3 |
-| 6 | 36.7 | 21.2 | 32.2 | 42.3 | 12.3 |
-| 7 | 36.1 | 27.6 | 30.9 | 23.3 | 14.3 |
-| 8 | 37.3 | 24.2 | 35.3 | 35.1 | 5.5 |
-| 9 | 32.7 | 24.5 | 32.6 | 25.0 | 0.2 |
-| 10 | 35.8 | 23.0 | 33.7 | 35.8 | 6.0 |
-| 11 | 39.3 | 24.9 | 31.7 | 36.8 | 19.4 |
-| 12 | 36.5 | 29.3 | 31.0 | 19.8 | 15.1 |
-| 13 | 39.0 | 23.7 | 33.5 | 39.2 | 14.1 |
-| 14 | 34.3 | 23.3 | 35.0 | 31.9 | -2.2 |
-| 15 | 39.4 | 24.4 | 32.6 | 38.1 | 17.2 |
-| 16 | 35.6 | 23.8 | 33.2 | 33.2 | 6.7 |
-| 17 | 35.8 | 20.7 | 33.5 | 42.2 | 6.4 |
-| 18 | 33.7 | 24.0 | 32.5 | 28.7 | 3.4 |
-| 19 | 36.5 | 32.4 | 40.8 | 11.3 | -11.7 |
-| 20 | 37.6 | 34.1 | 37.9 | 9.3 | -0.6 |
+| 1 | 34.5 | 33.1 | 34.5 | 4.0 | 0.0 |
+| 2 | 34.9 | 38.3 | 34.9 | -9.8 | 0.0 |
+| 3 | 37.4 | 33.9 | 37.4 | 9.4 | 0.0 |
+| 4 | 39.3 | 24.6 | 33.5 | 37.3 | 14.7 |
+| 5 | 40.0 | 17.6 | 35.1 | 55.9 | 12.3 |
+| 6 | 36.7 | 19.5 | 32.2 | 46.8 | 12.3 |
+| 7 | 36.1 | 19.1 | 30.9 | 47.2 | 14.3 |
+| 8 | 37.3 | 19.4 | 35.3 | 47.9 | 5.5 |
+| 9 | 32.7 | 19.5 | 32.6 | 40.3 | 0.2 |
+| 10 | 35.8 | 22.0 | 33.7 | 38.7 | 6.0 |
+| 11 | 39.3 | 21.6 | 31.7 | 45.1 | 19.4 |
+| 12 | 36.5 | 21.8 | 31.0 | 40.4 | 15.1 |
+| 13 | 39.0 | 19.7 | 33.5 | 49.5 | 14.1 |
+| 14 | 34.3 | 22.2 | 35.0 | 35.2 | -2.2 |
+| 15 | 39.4 | 22.5 | 32.6 | 42.8 | 17.2 |
+| 16 | 35.6 | 19.3 | 33.2 | 45.9 | 6.7 |
+| 17 | 35.8 | 21.5 | 33.5 | 40.0 | 6.4 |
+| 18 | 33.7 | 19.6 | 32.5 | 41.7 | 3.4 |
+| 19 | 36.5 | 26.4 | 40.8 | 27.5 | -11.7 |
+| 20 | 37.6 | 35.8 | 37.9 | 4.9 | -0.6 |
 
 Same seed with the mask removed, for contrast:
 
 | step | baseline | FORGIVE | FORGIVE % |
 | ---: | ---: | ---: | ---: |
-| 1 | 34.5 | 20.5 | 40.6 |
-| 2 | 34.9 | 26.8 | 23.2 |
-| 3 | 37.4 | 19.1 | 49.0 |
-| 20 | 37.6 | 22.0 | 41.7 |
+| 1 | 34.5 | 12.8 | 63.0 |
+| 2 | 34.9 | 13.2 | 62.2 |
+| 3 | 37.4 | 11.4 | 69.4 |
+| 20 | 37.6 | 11.1 | 70.6 |
 
 Readings.
 
-- The mask costs 3.2 points of training time and buys back 2.3 points of
+- The mask costs 5.1 points of training time and buys back 4.4 points of
   gradient loss on four steps out of twenty. That is the price of the
   safety property, and it is now a number rather than an assertion.
 - Prove the mask with the ledger, not with the clock. Masked runs place
-  1.0 to 1.5 % of forgiven bytes on the protected steps against the 19 to
-  21 % a uniform policy puts there.
+  0.25 to 1.44 % of forgiven bytes on the protected steps against the 19
+  to 20 % a uniform policy puts there.
 - Per-step timings carry a noise floor of roughly plus or minus 13 % at
   one seed. Within a seed, steps 1 to 3 read identically at budgets 0.1,
   0.2 and 0.6, which shows the scatter is arm-level randomness rather
   than a budget effect. The one signal well above that floor is the
-  mask-off run's 23 to 49 % on those same steps.
+  mask-off run's 62 to 71 % on those same steps.
+- Forgiven bytes spread evenly over the permissive steps, 5 to 7 % of the
+  total on each, and the microburst step 18 takes 5 to 7 % like any
+  other, so the fabric is congested throughout rather than only during
+  the burst.
 - Sanity check worth mentioning if anyone doubts the mask is wired up:
   the exempt flow count is 71 680 with the mask and 89 600 without, a
   ratio of exactly 20/16.
@@ -533,7 +553,7 @@ non-critical steps. Worst cell of the map, budget 0.1, seed 9550582.
 | baseline, 0.5 % everywhere | 588 ms | 152.3 GB | 259 GB/s | 4 194 316 B |
 | sender-side shedding at 0.1 | 537 ms | 137.8 GB | 257 GB/s | 4 194 316 B |
 | loose baseline at 0.1 | 525 ms | 134.1 GB | 255 GB/s | 4 194 316 B |
-| FORGIVE with exemption | 392 ms | 153.3 GB | 391 GB/s | 4 194 268 B |
+| FORGIVE with exemption | 336 ms | 153.3 GB | 456 GB/s | 4 194 268 B |
 
 Control-plane counters for the same four arms:
 
@@ -542,7 +562,7 @@ Control-plane counters for the same four arms:
 | baseline | 12.99 M | 12.99 M | 0 | 16 382 | 23.8 | 23.8 | 10 110 |
 | shedding at 0.1 | 11.53 M | 11.53 M | 0 | 14 822 | 21.0 | 21.0 | 8 964 |
 | loose baseline | 11.56 M | 11.56 M | 0 | 14 926 | 20.2 | 20.2 | 8 041 |
-| FORGIVE | 15.81 M | 7.89 M | 7.92 M | 9 944 | 25.3 | 13.2 | 5 415 |
+| FORGIVE | 18.57 M | 8.37 M | 10.20 M | 10 548 | 33.1 | 20.3 | 7 279 |
 
 Readings.
 
@@ -555,52 +575,54 @@ Readings.
   controller pins the denominator, so it moves fewer bytes at the
   baseline's rate, one percent slower if anything.
 - FORGIVE attacks the denominator. It puts 0.6 % *more* bytes on the
-  wire, provokes 22 % more notifications than the baseline, acts on 39 %
-  fewer, and moves the same payload 51 % faster. It also halves the
-  timeouts, because a forgiven byte range never waits for a repair.
+  wire, provokes 43 % more notifications than the baseline, acts on 36 %
+  fewer, and moves the same payload 75 % faster. It also cuts the
+  timeouts by 28 %, because a forgiven byte range never waits for a
+  repair.
 - Structural version of the same point: the load is a seven-way fan-in,
   and congestion at an incast is set by how many senders arrive at once.
   Uniform shedding removes bytes from all seven senders and never removes
   a sender. Seven-to-one becomes 6.3-to-one.
-- The window arithmetic closes with no residue. The all-reduce is about
-  42 % of an 85 ms step and 16 of 20 steps are eligible, so shedding's
-  8.7 % span cut predicts 2.9 % of the window against 3.1 % measured, and
-  FORGIVE's 33 % predicts 11 % against 10.4 % measured.
+- The window arithmetic almost closes. The all-reduce is about 42 % of an
+  85 ms step and 16 of 20 steps are eligible, so shedding's 8.7 % span
+  cut predicts 2.9 % of the window against 3.1 % measured, while
+  FORGIVE's 42.8 % predicts 14.4 % against 12.9 % measured. The 1.5-point
+  residue on the FORGIVE side is the exempt arm's slower critical steps,
+  which the arithmetic assumes untouched.
 
 ---
 
-## 10. Exemption counters across the front, run #122
+## 10. Exemption counters across the front, run #123
 
 Chart: line or bar against budget. Useful as a backup slide when someone
-asks why the front saturates.
+asks how much congestion control the exemption actually suppresses.
 
-| profile | budget | seeds | forgiven GB | notifications ignored, M | acted on, M | ignored share | flows re-armed | timeouts | priority pulls |
+| profile | budget | seeds | forgiven GB | notifications ignored, M | acted on, M | ignored share | flows re-armed | timeouts | flows given an allowance report |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| p01 | 0.1 | 3 | 12.1 to 12.5 | 7.84 to 7.92 | 7.89 to 8.41 | 48.4 to 50.1 % | 19 442 to 20 644 | 5 415 to 6 104 | 1.09 to 1.19 M |
-| p02 | 0.2 | 3 | 16.1 to 16.5 | 9.63 to 10.01 | 6.79 to 7.08 | 58.2 to 59.2 % | 15 392 to 15 888 | 3 899 to 4 100 | 1.04 to 1.20 M |
-| base | 0.4 | 2 | 17.8 to 18.0 | 10.78 to 10.94 | 6.10 to 6.37 | 62.9 to 64.2 % | 12 185 to 12 291 | 3 112 to 3 466 | 1.07 to 1.26 M |
-| p06 | 0.6 | 3 | 17.5 to 17.8 | 10.76 to 11.00 | 5.70 to 5.99 | 64.2 to 65.5 % | 10 900 to 11 532 | 2 955 to 3 267 | 1.00 to 1.23 M |
-| allsteps | 0.4 | 3 | 22.3 to 22.4 | 13.74 to 13.77 | 4.15 to 4.31 | 76.1 to 76.8 % | 15 509 to 15 773 | 1 182 to 1 257 | 0 |
+| p01 | 0.1 | 3 | 12.8 to 13.1 | 10.20 to 10.44 | 7.92 to 8.37 | 54.9 to 56.8 % | 25 212 to 26 153 | 6 430 to 7 279 | 25 212 to 26 153 |
+| p02 | 0.2 | 3 | 21.1 to 23.2 | 16.26 to 16.73 | 5.58 to 5.81 | 74.1 to 74.5 % | 14 156 to 15 863 | 5 142 to 5 306 | 14 156 to 15 863 |
+| base | 0.4 | 5 | 40.6 to 41.5 | 25.38 to 25.82 | 3.47 to 3.75 | 87.3 to 88.1 % | 4 907 to 5 447 | 3 073 to 3 419 | 4 907 to 5 447 |
+| p06 | 0.6 | 3 | 71.7 to 73.5 | 36.70 to 37.27 | 2.80 to 2.93 | 92.6 to 92.9 % | 177 to 246 | 2 461 to 2 552 | 177 to 246 |
+| allsteps | 0.4 | 3 | 48.8 to 49.6 | 31.41 to 31.87 | 1.08 to 1.13 | 96.5 to 96.7 % | 6 552 to 6 727 | 1 179 to 1 259 | 6 552 to 6 727 |
 
 Readings.
 
-- The share of rate cuts a sender can ignore ceilings at 64 to 65 % from
-  budget 0.4 upward. That ceiling is the mechanical reason the time curve
-  saturates, and it also caps the loss.
-- Timeouts fall monotonically as the budget rises, from 6 104 at 0.1 to
-  2 955 at 0.6, and to about 1 200 with the mask off. Forgiveness removes
+- The share of rate cuts a sender can ignore rises with the budget, from
+  55 % at 0.1 to 93 % at 0.6, and reaches no ceiling.
+- Timeouts fall monotonically as the budget rises, from 7 279 at 0.1 to
+  2 461 at 0.6, and to about 1 200 with the mask off. Forgiveness removes
   the repairs that were waiting to time out.
-- The last column counts priority pulls, not refusals. `m_priority_pulls`
-  increments only when `FLAG_PULL_PRIORITY` is set, and
-  `evaluate_forgiveness` sets that flag only on a critical step, so the
-  mask-off profile reports zero because it has no critical steps rather
-  than because the receiver never refused. There is no counter for total
-  refusals in these bundles. Do not read this column as one.
-- Flows re-arm on any repair request, not only on a refusal. The receiver
-  emits an identical request from three sites in `rdma-hw.cc` and only the
-  one at line 790 consulted the allowance, so these re-arm counts overstate
-  how often the budget actually ran out. That defect is specified for
-  correction in `forgive-v1-revocation-fix.md`.
+- The re-arm column is the pacing question in one number. At budget 0.1,
+  35 to 37 % of exempt flows reached a spent cell and lost their
+  exemption; at 0.6 almost none did, so the cap binds exactly where we
+  intend to operate.
+- The last two columns are equal profile by profile and seed by seed.
+  Every flow that received an allowance report re-armed and no other flow
+  did, which is how run #123 verifies that the exemption ends on a spent
+  allowance and on nothing else. The `priority_pull_count` that run #122
+  reported in this position is gone; `pacing_refusal_count` replaces it
+  and reads zero in all 21 records, because v1 refuses on a spent cell
+  rather than on a draw.
 
 ---
 

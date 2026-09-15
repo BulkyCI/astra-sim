@@ -49,14 +49,14 @@ Three things came out of it, in this order.
 3. **A mechanism that buys that time back, and a first result.** Let the
    receiver forgive what the fabric trimmed, and let a flow with an
    unspent loss budget ignore rate cuts until the receiver refuses it.
-   At the worst cell of our map this recovers 10.4 to 10.9 % of training
-   time for 6.3 % of gradient bytes, against 2.4 to 3.3 % for
+   At the worst cell of our map this recovers 12.9 to 14.1 % of training
+   time for 6.75 to 6.89 % of gradient bytes, against 2.4 to 3.3 % for
    sender-side shedding at the same budget.
 
 The interesting part is not the percentage. It is that loss aimed by the
-fabric's own trim signal recovers four to five times more time per unit
-of gradient discarded than loss aimed by a hash, at every budget we
-tested, and that it stops on its own when the congestion stops.
+fabric's own trim signal recovers 5.3 times more time per unit of
+gradient discarded than loss aimed by a hash at the budget we publish,
+and that the advantage is largest exactly where the loss is smallest.
 
 ---
 
@@ -303,72 +303,76 @@ the protocol. Nothing new goes on the wire.
 
 ---
 
-## 12. Run #121, 7 September: does it work
+## 12. Run #123, 14 September: does it work
 
-Worst cell of the map, three seeds, four matched arms each.
+Worst cell of the map, three seeds, four matched arms each, budget 0.4.
+Runs #121 and #122 measured the exempt arm before the revocation fix at
+commit `c6855f0`, so every FORGIVE number in this deck replaces what we
+showed then.
 
 | run | training time | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | bytes re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tight baseline, 0.5 % everywhere | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
-| phase-aware shedding, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
-| FORGIVE with exemption, 0.4 | 1459 to 1468 ms | 20 to 21 ms | 36 to 37 ms | 8.8 to 9.5 % | 1 % |
-| unmasked shedding, 0.4 everywhere | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
+| tight baseline, 0.5 % everywhere | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
+| phase-aware shedding, 0.4 | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
+| FORGIVE with exemption, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
+| unmasked shedding, 0.4 everywhere | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
 
 Both shedding arms drop messages at the sender; they differ only in
 whether the critical steps are protected. Read the last two columns
 together. FORGIVE reaches a shorter window than phase-aware shedding
-while discarding about a third as much gradient, and its critical steps
-do not move while the unmasked arm's critical steps speed up by a third,
-which is exactly the protection being sold.
+while discarding two thirds as much gradient, and its critical steps stay
+within 2.4 ms of the tight baseline while the unmasked arm's critical
+steps speed up by a third, which is exactly the protection being sold.
 
-Per seed the exempt run ignored 10.4 to 10.9 million rate cuts, acted on
-6.0 to 6.4 million, and re-armed 12 to 13 thousand of its 71 680 exempt
-flows. The budget rule held in every ledger entry.
+Per seed the exempt run ignored 25.4 to 25.7 million rate cuts, acted on
+3.58 to 3.69 million, and re-armed 5 049 to 5 447 of its 71 680 exempt
+flows. The flows that received an allowance report are the flows that
+re-armed, to the flow, and the budget rule held in every ledger entry.
 
 Set against the map: the same fabric with no congestion control ran in
-1367 ms, so DCQCN's bill here is about 320 ms and the exempt run gives
-back 225 of them, a little over two thirds. That comparison crosses two
-runs and the no-congestion-control number is a single seed, so treat it
-as a scale rather than a measurement.
+1367 ms, so DCQCN's bill here is about 330 ms and the exempt run gives
+back all of it. That comparison crosses two runs and the
+no-congestion-control number is a single seed, so treat it as a scale
+rather than a measurement.
 
 ---
 
-## 13. Run #122, read this morning: the budget sweep
+## 13. Run #123: the budget sweep
 
 ![Budget sweep](figures/dose-front.svg)
 
-Fourteen comparisons, 56 arms: budgets 0.1, 0.2 and 0.6 at three seeds,
-two more seeds at 0.4, and a mask-off ablation at three seeds.
+Twenty-one comparisons, 84 arms: budgets 0.1, 0.2, 0.4 and 0.6, a
+mask-off ablation, a mild cell and a no-incast control.
 
 Three readings, in order of how much they change the story.
 
-**The curve saturates, so the budget comes down.** Budget 0.1 already
-buys 80 % of the gain at two thirds of the loss. Our headline budget
-moves from 0.4 to 0.1, which puts the loss we actually spend inside the range MLT
-profiles as tolerable.
+**The budget we publish is 0.1, because that is where the mechanism is
+most efficient.** At 0.1 FORGIVE recovers 12.9 to 14.1 % of training time
+for 6.75 to 6.89 % of data-parallel bytes. Raising the budget to 0.6
+recovers 23.7 to 24.3 % but spends 37.7 to 38.6 %, so each further point
+of loss returns less time than the one before it.
 
-**Aimed loss is self-limiting; hash-aimed loss is not.** Sender-side
+**Forgiven loss is roughly proportional to the cap.** Sender-side
 shedding discards 0.79 x p of all data-parallel bytes at every budget,
 where 0.79 is the share of those bytes sitting on non-critical steps.
 That is exactly what its hash was told to do and it does not depend on
-congestion at all. FORGIVE converges to about 9.3 % and stops. The
-proximate reason is visible in the counters: the share of rate cuts a
-sender can ignore ceilings at 64 to 65 %. Budget utilisation across the
-sweep falls 81 %, 54 %, 30 %, 19 %, so above 0.2 the binding constraint
-is no longer the budget, it is how often the fabric trims.
+congestion at all. FORGIVE spends 86, 74, 68 and 80 % of the same cap
+across the four budgets, so the cap binds everywhere on the front and the
+budget bounds the loss.
 
-**Efficiency is a constant.** Divide the percentage of training time
-recovered by the percentage of data-parallel bytes discarded: 1.4 to 1.7
-for FORGIVE, 0.3 to 0.4 for shedding, at every budget and with the mask
-on or off. Shedding only overtakes on time past a budget of about 0.45,
-where it is discarding a third of every gradient.
+**Efficiency is largest where the loss is smallest.** Divide the
+percentage of training time recovered by the percentage of data-parallel
+bytes discarded: FORGIVE falls from 1.96 at budget 0.1 to 0.63 at 0.6,
+while shedding stays at 0.33 to 0.45. The gap is 5.3 times at 0.1 and
+1.9 times at 0.6, and shedding never overtakes on time anywhere on the
+front.
 
 The mask ablation prices the safety property. Removing the protection on
-steps 1, 2, 3 and 20 buys 3.2 more points of time for 2.3 more points of
+steps 1, 2, 3 and 20 buys 5.1 more points of time for 4.4 more points of
 loss. The mask is proved by the ledger rather than by the clock: masked
-runs put 1.0 to 1.5 % of their forgiven bytes on those steps against the
-19 to 21 % an unmasked run puts there, and the budget law verified with
-zero violations in all fourteen comparisons.
+runs put 0.25 to 1.44 % of their forgiven bytes on those steps against
+the 19 to 20 % an unmasked run puts there, and the budget law verified
+with zero violations in all 21 comparisons.
 
 ---
 
@@ -392,9 +396,9 @@ Time is bytes over rate. Shedding attacks the numerator and the
 controller pins the denominator, so it moves fewer bytes at the
 baseline's rate: 537 ms against 588 ms for 10 % fewer bytes, which is
 proportional to what it threw away and nothing more. FORGIVE attacks the
-denominator. It finishes the same payload in 392 ms, half again as fast,
-while putting 0.6 % *more* bytes on the wire, provoking 22 % more
-notifications than the baseline and acting on 39 % fewer. Panel B of the
+denominator. It finishes the same payload in 336 ms, 75 % faster, while
+putting 0.6 % *more* bytes on the wire, provoking 43 % more
+notifications than the baseline and acting on 36 % fewer. Panel B of the
 figure converts those times into a wire rate, which needs one assumption:
 that physical bytes per logical byte is uniform across steps.
 
@@ -412,7 +416,7 @@ oversubscribed by the same factor.
 | --- | --- | --- |
 | 1 | Sparsification | Separated, deliberately. We model pure drop with no error feedback, and we wrote down why mixing it with an error-feedback compressor is a second uncontrolled lossy layer: the optimiser's residual does not know which updates never arrived. The tolerance question is now a designed experiment rather than an assumption, and the literature gives us bounds to hit: MLT profiles 0.7 to 3.3 % at equal rounds, OptiReduce reports accuracy surviving 1 %. |
 | 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the communication window, so what we report is exposed communication time inside a training window, not blocking transfer time. This is the confound that made us stop quoting 24.8 %. |
-| 3 | CLR identification | Split into two halves. The detector is out of scope for a simulator with no gradients, so we pinned a schedule from independent literature with a written circularity guard. What we can now do, and did this week, is price it: the mask costs 3.2 points of time and holds to the byte in the ledger. |
+| 3 | CLR identification | Split into two halves. The detector is out of scope for a simulator with no gradients, so we pinned a schedule from independent literature with a written circularity guard. What we can now do, and did this week, is price it: the mask costs 5.1 points of time and holds to the byte in the ledger. |
 | 4 | Topology, centralized against ring | Turned from a threat into two measured axes. DP fan-in and spine oversubscription are knobs on the regime map, and they are the two things that actually set the trim ratio, multiplying it 2.7x and 5.5x. Hub-and-spoke pressure at one NIC is our fan-in 7 cell, and it is the worst cell of the map. |
 
 ---
@@ -427,7 +431,7 @@ the negative result on selective repeat; the regime map's shape; DCQCN's
 gain and its loss cost; the budget law; the mask's price and its
 integrity.
 
-**Assumed, and named as assumed:** that a real model tolerates the 6.3 %
+**Assumed, and named as assumed:** that a real model tolerates the 6.8 %
 we spend at budget 0.1. Nothing in a network simulator can test this.
 Our defence is a plan, not a result.
 
@@ -524,9 +528,10 @@ Every figure and table above recomputes from a release bundle in
 | #120 | 6 Sep | `uwlaookzhemmwabtbwfe2yhyxepupnmw` | eight-cell regime map |
 | #121 | 7 Sep | `b363b3rri7pbgbaudfh3tbnysiranl66` | FORGIVE with exemption, two cells, three seeds |
 | #122 | 8 Sep | `rt4732ejzjqe2hkar2bturuv3qav6pv3` | budget sweep and mask ablation, 56 arms |
+| #123 | 14 Sep | run `34867374086` | the same front with the revocation corrected, 84 arms |
 
 Supporting documents in this directory: `forgive-protocol.md` is the
 specification, `forgive-related-work.md` the positioning,
 `roadmap-to-full-paper.md` the plan, and the per-run readouts
 `run-117-readout.md`, `run-120-regime-map.md`,
-`run-121-cc-exempt-readout.md`.
+`run-121-cc-exempt-readout.md` and `run-123-readout.md`.

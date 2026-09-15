@@ -6,6 +6,13 @@ six of six comparisons collected, three seeds per cell. The protocol as built is
 [run-120-regime-map.md](run-120-regime-map.md).
 Written 2026-09-08.
 
+This wave measured the exempt arm before the revocation fix at commit
+`c6855f0`, where any repair request ended an exemption rather than only a
+spent allowance. Run #123 re-measured the same cells on the corrected
+code, and [run-123-readout.md](run-123-readout.md) carries the figures
+that replace every exempt-arm number below. The body is kept as the
+record of what run #121 measured.
+
 ## The claim
 
 An overloaded fabric makes a sender pay one way or another. Without

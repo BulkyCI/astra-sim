@@ -25,14 +25,15 @@ small while retaining the non-obvious project decisions.
 | Understanding or changing the forgive protocol: domains, ledger law, receiver verdict, congestion exemption, telemetry, gate | [Forgive protocol](forgive-protocol.md) |
 | Planning the next phases toward a full paper: promises, open questions, phase order, kill tests | [Roadmap to a full paper](roadmap-to-full-paper.md) |
 | Positioning the forgive protocol against MLT, trimmable gradients, OptiReduce, partial-reliability transports, and deadline-aware congestion control | [Forgive related work](forgive-related-work.md) |
-| Reading what runs #120 and #121 measured: the regime map and the congestion-exempt wave | [Run #120 regime map](run-120-regime-map.md), [Run #121 readout](run-121-cc-exempt-readout.md) |
+| Reading what runs #120 and #121 measured: the regime map and the congestion-exempt wave, whose exempt-arm figures run #123 supersedes | [Run #120 regime map](run-120-regime-map.md), [Run #121 readout](run-121-cc-exempt-readout.md) |
 | Briefing someone who has not followed the work: the chronological progress review from the May DBLP draft to run #122, with figures | [September 2026 progress slides](slides-2026-09-progress.md) |
 | Presenting the go-back-N results as the centre, with FORGIVE as future work: the results-first variant of the progress review | [September 2026 results-first slides](slides-2026-09-results-first.md) |
 | Rebuilding any figure from either progress deck, or handing the numbers to someone outside the repository | [Figure data and readings](figure-data.md) |
 | Building the deck in Google Slides, or handing it to a slides-generating agent | [Google Slides build prompts](slides-prompts-google-slides.md) |
 | Drafting prose that goes out under Joe's name: the ten style invariants with paired evidence | [Writing style invariants](writing-style.md) |
 | Changing the receiver verdict after the v1 fix: pacing (Bernoulli, vesting) and the straggler stop, with the 18 arms that price them | [FORGIVE v2 design](forgive-v2-design.md) |
-| Reading what the exemption revocation fix changed and why. Merged at c6855f0; its wave is not yet dispatched | [FORGIVE v1 revocation fix](forgive-v1-revocation-fix.md) |
+| Reading what the exemption revocation fix changed and why. Merged at c6855f0; run #123 is its wave | [FORGIVE v1 revocation fix](forgive-v1-revocation-fix.md) |
+| Reading run #123, FORGIVE v1 with the revocation corrected: the 9.3 % ceiling retired, the headline moved to budget 0.1 | [Run #123 readout](run-123-readout.md) |
 | Planning the next wave: Yashar's probabilistic forgiveness and zero-tolerance baseline, the v2 pacing revision, and the five phases | [Next steps after the v1 fix](next-steps-after-v1-fix.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |

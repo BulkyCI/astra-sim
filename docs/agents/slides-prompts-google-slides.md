@@ -405,35 +405,36 @@ at 34px bold on its own line above 20px body text.
   congested configuration while reducing switch-trimmed bytes 8x. Rate
   reductions create the slowdown rather than repair."
 
-  "10.4 to 10.9 %"
+  "12.9 to 14.1 %"
   "FORGIVE recovers time when the receiver accepts trimmed loss and senders
   with budget remaining ignore rate reductions until the receiver refuses.
-  FORGIVE uses 6.3 % of data-parallel bytes."
+  FORGIVE uses 6.75 to 6.89 % of data-parallel bytes at a budget of 0.1."
 
-  "4 to 5x"
-  "FORGIVE recovers more time per discarded gradient percent than sender
-  drop at every budget we tested."
+  "5.3x"
+  "At a budget of 0.1, FORGIVE recovers 5.3 times more time per discarded
+  gradient percent than sender drop. The margin falls to 1.9 times at a
+  budget of 0.6."
 
 RIGHT HALF: a scatter chart with two connected series, under a section
 label reading "PRELIMINARY: 3 SEEDS, 1 FABRIC, 1 CONGESTION
 CONTROLLER". Horizontal axis "Gradient bytes discarded (% of all
 data-parallel bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
-recovered (%)", ticks at 0, 3, 6, 9, 12, 15 and 18. Shade the band from
+recovered (%)", ticks at 0, 4, 8, 12, 16, 20 and 24. Shade the band from
 0.7 % to 3.3 % in ink-12, labelled at 14px "MLT (NSDI 2024) reports
 models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
 10 %, labelled "MLT's ceiling at a fixed quality target".
 
   Series A, ink-100, solid line with filled circles, labelled directly
   "FORGIVE", points as (x, y):
-    (6.4, 10.6)   (8.5, 12.5)   (9.4, 13.3)   (9.2, 13.0)
+    (6.8, 13.4)   (11.7, 16.5)   (21.5, 20.3)   (38.1, 24.0)
 
   Series B, ink-55, solid line with hollow circles, labelled directly
   "Sender drop", points as (x, y):
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
 CLOSING LINE:
-  "Above a budget of 0.2, training-time recovery flattens, and discarded gradient bytes
-  level off near 9.3 % because trimming stops before the budget is spent."
+  "Discarded gradient bytes stay proportional to the budget, 68 to 86 % of
+  the cap at every setting, so the budget bounds the loss."
 
 SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
 as: further right means more gradient thrown away, higher means more
@@ -443,9 +444,10 @@ already trusts: the receiver drives
 repair the way selective acknowledgement does, the budget is a ledger
 rather than a probability, and the exemption revokes itself on the
 receiver's first refusal, so it cannot outlive what justified it.
-Dropping at the sender only overtakes on time past a budget of about
-0.45, where it is throwing away a third of every gradient, and no
-published tolerance result reaches there."
+Dropping at the sender never overtakes on time across the budgets we
+ran: at a budget of 0.6 it recovers 16.0 to 16.4 % while throwing away
+47.4 % of every gradient, against FORGIVE's 23.7 to 24.3 % for 37.7 to
+38.6 %."
 
 ===============================================================
 SLIDE 8 of 8
@@ -510,9 +512,9 @@ stream, and ephemeral DCS runners archive both results. Selective repeat
 reduces DBLP's 3.9 to 11.1 % go-back-N relief to 0.78 %, which defines the
 result's scope. FORGIVE applies DBLP under congestion control.
 
-Context, in case a caption needs it. The numbers come from four cluster
+Context, in case a caption needs it. The numbers come from five cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto
-cluster, between 1 and 8 September 2026. Each result is a pair of
+cluster, between 1 and 14 September 2026. Each result is a pair of
 simulated runs that share a seed and a random stream, so their times can
 be subtracted. Trimming is a switch discarding a packet's payload and
 forwarding its header, which is how this fabric signals congestion.

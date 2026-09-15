@@ -283,15 +283,18 @@ This is the piece we would present as ongoing, not as a result.
 
 ![Budget sweep](figures/dose-front.svg)
 
-Two waves this week, on the worst cell of the map, three seeds each.
+One wave, 84 arms on the worst cell of the map, three seeds per budget.
+The two waves before it measured this arm before the revocation fix at
+commit `c6855f0`, so these figures replace theirs.
 
-At a loss budget of 0.1 the exempt arm recovers 10.4 to 10.9 % of the
-training window for 6.3 % of data-parallel bytes, against 2.4 to 3.3 %
-for sender-side shedding at the same budget. The curve saturates above
-0.2 and the loss self-limits near 9.3 %, because the fabric stops
-trimming before the budget runs out. Dividing time recovered by bytes
-discarded, both in percent, gives a flat 1.4 to 1.7 for forgiveness
-against 0.3 to 0.4 for shedding, at every budget.
+At a loss budget of 0.1 the exempt arm recovers 12.9 to 14.1 % of the
+training window for 6.75 to 6.89 % of data-parallel bytes, against 2.4 to
+3.3 % for sender-side shedding at the same budget. Forgiven loss stays
+roughly proportional to the cap, 68 to 86 % of it at every budget, so the
+budget bounds the loss. Dividing time recovered by bytes
+discarded, both in percent, gives 1.96 for forgiveness at budget 0.1
+against 0.37 for shedding, and the gap narrows to 1.9 times at budget
+0.6.
 
 Three seeds, one cell, one congestion controller, per-flow ECMP rather
 than packet spraying. Preliminary is the right word. But it says the
@@ -357,6 +360,7 @@ put in doubt.
 | #120 | 6 Sep | `uwlaookzhemmwabtbwfe2yhyxepupnmw` | eight-cell regime map |
 | #121 | 7 Sep | `b363b3rri7pbgbaudfh3tbnysiranl66` | FORGIVE with congestion exemption |
 | #122 | 8 Sep | `rt4732ejzjqe2hkar2bturuv3qav6pv3` | budget sweep and phase-mask ablation |
+| #123 | 14 Sep | run `34867374086` | the same front with the revocation corrected |
 
 Every figure recomputes from a bundle. Per-seed values for slides 5 and 7
 come from the sixteen `llama3-70b-16-comparison` bundles of run #117;
@@ -364,7 +368,7 @@ confidence intervals are Student t at fifteen degrees of freedom on the
 paired per-seed differences.
 
 Supporting documents: `run-117-readout.md` for the full run,
-`run-120-regime-map.md` for the map, `forgive-protocol.md` for the
-specification, `roadmap-to-full-paper.md` for the longer plan. The
-companion deck `slides-2026-09-progress.md` presents the same work with
+`run-120-regime-map.md` for the map, `run-123-readout.md` for the
+corrected FORGIVE figures, `forgive-protocol.md` for the specification,
+`roadmap-to-full-paper.md` for the longer plan. The companion deck `slides-2026-09-progress.md` presents the same work with
 FORGIVE as the centre.

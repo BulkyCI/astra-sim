@@ -124,10 +124,13 @@ whenever a range it is already repairing is trimmed again, which says
 nothing about the budget.
 
 **What it measured.** On the most congested configuration, over three
-seeds, forgiveness with exemption shortened training by 13 % relative to
-DCQCN alone. Critical steps were untouched. It lost 9 % of the gradient
-bytes, against 32 % for sender-side suppression at the same budget, and
-its training time was shorter. Section 8 has the table.
+seeds at budget 0.4, forgiveness with exemption shortened training by 20
+to 21 % relative to DCQCN alone, and its critical steps stayed within
+2.4 ms of DCQCN's. It lost 21.3 to 21.5 % of the gradient bytes, against
+32 % for sender-side suppression at the same budget, and its training
+time was shorter. At budget 0.1, the budget we publish, it shortened
+training by 12.9 to 14.1 % for 6.75 to 6.89 % of the gradient bytes.
+Section 8 has the table.
 
 ## 3. Who decides what
 
@@ -317,30 +320,31 @@ receiver-side runs treat as forgivable.
 | forgiveness (`recovery_policy`) | receiver, per the profile | same as phase-aware suppression |
 | loose baseline (`fixed_p_high_baseline`) | sender | `p_high` on every step |
 
-Run #121 used the most congested fabric of the regime map: DCQCN,
+Run #123 used the most congested fabric of the regime map: DCQCN,
 direct all-reduce with seven-way fan-in, and a spine oversubscribed 4:1.
 Three seeds. "Training time" is the makespan of 20 training steps.
 "All-reduce time" is measured from the first rank's start to the last
-rank's completion.
+rank's completion. Runs #121 and #122 measured the code before the
+revocation fix at commit `c6855f0`, where any repair request ended an
+exemption, so the figures below replace the ones those runs published.
 
 | run | training time | all-reduce time, non-critical steps | all-reduce time, critical steps | gradient bytes lost | bytes re-sent after trims |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tight baseline | 1686 to 1690 ms | 36 ms | 37 ms | 0.5 % | 3 % |
-| phase-aware suppression, 0.4 | 1480 to 1509 ms | 24 to 26 ms | 35 to 37 ms | 32 % | 2 % |
-| forgiveness with exemption, 0.4 | 1459 to 1468 ms | 20 to 21 ms | 36 to 37 ms | 8.8 to 9.5 % | 1 % |
-| loose baseline, 0.4 | 1433 to 1466 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1 % |
+| tight baseline | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
+| phase-aware suppression, 0.4 | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
+| forgiveness with exemption, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
+| loose baseline, 0.4 | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
 
-Per seed, the exempt run withheld 10.4 to 10.9 million congestion
-signals, delivered 6.0 to 6.4 million, and re-armed 12 to 13 thousand of
-its 71 680 exempt flows. Runs #121 and #122 measured the code before the
-revocation fix, where any repair request ended an exemption, so the
-exempt arm's figures here are due a re-run. The budget rule held in every
-entry. The same fabric without any congestion control ran in 1367 ms and
-re-sent 24 % of its bytes after trims (run #120, one seed). The
-exemption is therefore a third way to pay for an overloaded fabric: its
-training time lies between the no-congestion-control and the DCQCN
-results, its re-sent bytes match DCQCN's, and it loses 2.2 % of all
-bytes.
+Per seed, the exempt run withheld 25.4 to 25.7 million congestion
+signals, delivered 3.58 to 3.69 million, and re-armed 5 049 to 5 447 of
+its 71 680 exempt flows. The flows that received an allowance report are
+the flows that re-armed, to the flow, which is the invariant of section 6
+measured rather than assumed. The budget rule held in every entry. The
+same fabric without any congestion control ran in 1367 ms and re-sent
+24 % of its bytes after trims (run #120, one seed). The exemption is
+therefore a third way to pay for an overloaded fabric: it finishes below
+the no-congestion-control result, its re-sent bytes stay near DCQCN's,
+and it loses 5.1 % of all bytes.
 
 ## 9. Telemetry
 
@@ -413,7 +417,7 @@ overall because forgiven ranges are never retransmitted.
 ## 12. Limits and open items
 
 - Tolerance is assumed, not demonstrated. That a current model survives
-  losing 9 % of its gradient bytes on non-critical steps rests on the
+  losing 6.8 % of its gradient bytes on non-critical steps rests on the
   DBLP paper (EfficientNet, ResNet) and on Weintraub et al. 2025 (10 %
   uniform loss on Llama 2 7B, with no phase dependence tested). A real
   training run is needed.

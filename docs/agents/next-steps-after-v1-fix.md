@@ -33,8 +33,11 @@ sender that keeps re-engaging congestion control would produce. The
 measured ceiling may be the protocol's property or the defect's signature,
 and the corrected re-run is what separates them.
 
-Until that wave is read, state the saturation as measured and do not
-attribute it.
+Run #123 separated them and the kill test fired: at budget 0.4 the exempt
+arm forgives 21.3 to 21.8 % of data-parallel bytes against the 9.2 to
+9.4 % the test named, so the sentence is retired and
+[run-123-readout.md](run-123-readout.md) replaces every exempt-arm number
+above.
 
 ## 2. Yashar's two suggestions
 
@@ -55,11 +58,11 @@ guards against cannot occur; the within-step ordering problem underneath it
 can.
 
 **The cell already binds at the budget we intend to publish.** Utilisation
-is 81 % at budget 0.1, 54 % at 0.2, 30 % at 0.4 and 19 % at 0.6. Run #122
-recommends 0.1 as the headline, because it recovers 80 % of the gain at two
-thirds of the loss. Yashar's concern is therefore live precisely at the
-operating point we want, and slack only at the budgets where we do not
-intend to operate.
+is 86 % at budget 0.1, 74 % at 0.2, 68 % at 0.4 and 80 % at 0.6. Run #123
+recommends 0.1 as the headline, because the mechanism recovers 5.3 times
+more time per gradient byte there than shedding does. At that budget 35 to
+37 % of exempt flows reached a spent cell, against 6.8 to 7.6 % at 0.4, so
+Yashar's concern is live precisely at the operating point we want.
 
 **We cannot currently count exhaustion.** No refusal counter exists.
 `priority_pulls` increments only on `FLAG_PULL_PRIORITY`, which
@@ -171,9 +174,10 @@ kill test.
 ## Target
 
 FORGIVE recovers training time by spending a bounded, phase-aware loss
-allowance at the receiver, the allowance self-limits with congestion rather
-than with its own size, and the exemption it grants congestion control ends
-only when the allowance is spent.
+allowance at the receiver, the allowance spends 68 to 86 % of its cap and
+returns 5.3 times more time per gradient byte than shedding at budget 0.1,
+and the exemption it grants congestion control ends only when the
+allowance is spent.
 
 ## Phases
 
@@ -182,10 +186,10 @@ phase 5 on phase 4's cap policy.
 
 | # | phase | claim | instrument | kill test | cost | unlocks |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Correct the revocation, re-measure v1 | The exemption ends only on a spent allowance, and the 9.3 % ceiling belongs to the fabric | The 17 edits, then gates `forgive` and `forgive_dose`, 21 comparisons at 4 arms | The forgiven share at budget 0.4 moves outside 9.2 to 9.4 % by more than the seed spread of about 0.5 points, which retires the sentence in section 1 | 2 engineer days, 84 arms, about 1 cluster day | every later phase, and `allowance_spent_signalled` |
+| 1 | Correct the revocation, re-measure v1 | The exemption ends only on a spent allowance, and the 9.3 % ceiling belongs to the fabric | The 17 edits, then gates `forgive` and `forgive_dose`, 21 comparisons at 4 arms | The forgiven share at budget 0.4 moves outside 9.2 to 9.4 % by more than the seed spread of about 0.5 points, which retires the sentence in section 1 | 2 engineer days, 84 arms, about 1 cluster day | every later phase, and `allowance_spent_signalled`. Done, run #123: the kill test fired and the ceiling belonged to the defect |
 | 2 | Zero-tolerance reference | Relief is measured against unmodified lossy RDMA under DCQCN | 9 `single` records at `p_low = p_high = 0`, gate `forgive`, one per (fabric, seed) | The reference differs from `fixed_p_low_baseline` by more than 0.5 points of training time, which invalidates every published delta | 9 arms inside phase 1's wave | the baseline sentence, and Yashar's second question |
 | 3 | Congestion-neutral recovery reference | The exemption, not forgiveness alone, produces the gain | 5 `single` records at `domain = recovery`, worst cell, budgets 0.1 and 0.4 | The neutral arm reaches within 1 point of the exempt arm, which makes the exemption unnecessary and the protocol smaller | 5 arms inside phase 1's wave | the answer to "how much of this is just turning congestion control off" |
-| 4 | Pacing | Reserving allowance for later in the step beats spending it first come first served, at the budget we publish | 4 arms at budget 0.1, worst cell, 3 seeds: P = 1.0, P = 0.5, P = 0.25, vesting at `p * delivered` | No arm shortens training time at equal or lower forgiven share, and cells that exhaust under P = 1.0 are rare, which retires pacing and answers Yashar with a measurement | one knob plus a `delivered` counter, 48 arms, about half a cluster day | phase 5's cap policy |
+| 4 | Pacing | Reserving allowance for later in the step beats spending it first come first served, at the budget we publish | 4 arms at budget 0.1, worst cell, 3 seeds: P = 1.0, P = 0.5, P = 0.25, vesting at `p * delivered` | No arm shortens training time at equal or lower forgiven share, and cells that exhaust under P = 1.0 are rare, which retires pacing and answers Yashar with a measurement | one knob plus a `delivered` counter, 48 arms, about half a cluster day. Run #123 re-armed 35 to 37 % of exempt flows at budget 0.1, so cells do exhaust where we operate | phase 5's cap policy |
 | 5 | Straggler forgiveness | Forgiving a quiet remainder saves transmission, not only repair | v2 arms 3 and 4 under the cap policy phase 4 selected | Forgiving outstanding bytes does not shorten the collective beyond the trimmed-only arm by more than the seed spread | the transition function and the idle timer, about 1 cluster day | the wire-saving claim, and the reply to MLT |
 
 Phases 2 and 3 cost 14 arms against phase 1's 84, so the wave grows by
@@ -203,11 +207,9 @@ seeds, and no-incast at 1.
   compatibility, until phase 4 reports.
 - The unconditional stop at `(1 - p)` delivered, v2 arm 4, until phase 4
   shows whether the cap binds; adopting it would convert the cap from a
-  ceiling into a target and cost us the self-limiting result.
+  ceiling into a target.
 - NSCC, and with it the enumeration in section 4 of the fix document that
   proves an exempt flow runs no controller.
-- Any statement to Yashar attributing the 9.3 % ceiling to the fabric,
-  until phase 1 reports.
 
 ## Out of scope
 
@@ -220,6 +222,6 @@ so rather than implying the simulation covers it.
 
 ## Ask
 
-Is the headline budget 0.1 or 0.4? Phase 4 exists because the cap binds at
-0.1, where utilisation is 81 %. At 0.4, utilisation is 30 % and pacing is
-dead by construction, so phase 4 should not run at all.
+Is the headline budget 0.1 or 0.4? Phase 4 exists because cells exhaust at
+0.1, where 35 to 37 % of exempt flows reached a spent cell. At 0.4 only 6.8
+to 7.6 % did, so phase 4 answers a question that barely arises there.

@@ -92,3 +92,51 @@ Late data arriving for a forgiven flow is discarded and is not counted;
 its upper bound is the "already attempted" share of the remainder. A
 counter would need the transport to remember completed five-tuples, which
 is state for one number, so the bound stands in for it.
+
+## 4. The contract as a hard guarantee
+
+Added 2026-09-16 after Joe's review of change A. Relaxing the per-flow
+law was right, because the contract is not per flow: it is that every
+receiving rank gets at least `(1 - p(step))` of what it is owed for every
+step, `shed + forgiven <= p(step) x eligible` per (rank, step), with the
+remainder counted inside `forgiven`. The analyzer computes that law today
+and only reports it, so a violated or unverifiable arm still yields a
+summary and a report. Three changes make it a guarantee.
+
+**E. The analyzer fails on the law.** In a forgiving domain, `violated`
+raises and so does `not_available` (a forgiving run whose mask or policy
+cannot be read is not a result); `not_applicable` stays for admission, and
+`no_eligible_traffic` stays for runs with no DP payload. The ledger law
+joins `primary_analysis_eligibility` for forgiving domains. The
+`ledger_law` result gains `min_delivered_share`, the smallest
+`1 - (shed + forgiven) / eligible` over cells with eligible bytes, so a
+reader sees "every rank received at least X % of every step" as one
+number, and `worst_cell` names its rank and step.
+
+**F. The simulator asserts it at close.** `ForgivenessLedger::close`
+throws `std::runtime_error` naming the rank, step, and the three counters
+when `(shed + forgiven) x kDecisionScale > eligible x threshold(step)`.
+`affords` makes this unreachable, because `eligible` only grows and every
+charge was checked against it; the throw is the guarantee that a future
+change to `affords`, to the remainder path, or to the ledger cannot ship a
+run that breaks the contract. The threshold comes from the same
+`clr_mask_by_step` and `p_*_threshold` the verdicts use; a step outside
+the mask has no cell to close.
+
+**G. Certify the bundles already in hand.** Run the strengthened analyzer
+locally over the 18 arms of run #124 and the 21 recovery arms of run
+#123, with each bundle's own `clr_mask.csv`; record `min_delivered_share`
+per arm. A single violation retires the arm from every table. When round 2
+arrives, the same pass runs before any number is read.
+
+## 5. Certification of runs #123 and #124
+
+Run 2026-09-16 with the analyzer of change E over all 39 forgiving arms in
+hand, each against its own `clr_mask.csv`. No arm raised. The worst cell's
+delivered share is the contract's floor to four decimals wherever the cap
+binds: 0.9000 at budget 0.1 (v1, B25, B50, S, S0), 0.8000 at 0.2, 0.600 to
+0.622 at 0.4, 0.415 to 0.444 at 0.6, 0.611 to 0.620 with the mask off.
+Vesting and the vesting-plus-straggler arms leave 1.0 to 1.1 points
+unspent at their worst cell (0.910 to 0.911), the `direct2` cell 0.928 to
+0.940, and the no-incast control 1.000. Every rank received at least
+`1 - p(step)` of every step in every arm published so far.

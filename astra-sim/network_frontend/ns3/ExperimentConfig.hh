@@ -281,11 +281,10 @@ class ForgivenessLedger {
         }
     }
 
-    void close(uint32_t dst, uint32_t step) {
-        if (StepLedger* cell = find(dst, step)) {
-            cell->closed = true;
-        }
-    }
+    // Closing a cell also asserts the contract on it; the definition sits
+    // beside the verdicts, below, because the threshold it holds the cell to
+    // comes from the same mask they charged it against.
+    void close(uint32_t dst, uint32_t step);
 
     // The one eliminator for a cell a verdict may be computed on, and the
     // only reader of `closed`. Null means the rank or step is outside the
@@ -709,18 +708,55 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
     return decision;
 }
 
-// The step's threshold for one flow, and zero when the mask does not define
-// its step. Zero is free as that sentinel because the parser refuses a
-// p_low of zero and p_high is never below it. Both verdict shells resolve
+// The step's threshold, and zero when the mask does not define the step. Zero
+// is free as that sentinel because the parser refuses a p_low of zero and
+// p_high is never below it. Both verdict shells and the closing check resolve
 // the threshold the same way, so they resolve it through the same function.
-inline uint64_t step_threshold(const FlowRecord& flow) {
-    const auto clr =
-        experiment_config.clr_mask_by_step.find(flow.operation.training_step);
+inline uint64_t step_threshold(uint32_t step) {
+    const auto clr = experiment_config.clr_mask_by_step.find(step);
     if (clr == experiment_config.clr_mask_by_step.end()) {
         return 0;
     }
     return clr->second ? experiment_config.p_low_threshold
                        : experiment_config.p_high_threshold;
+}
+
+inline uint64_t step_threshold(const FlowRecord& flow) {
+    return step_threshold(flow.operation.training_step);
+}
+
+// The contract, asserted where a cell stops changing: the receiving rank kept
+// at least 1 - p(step) of what the step owed it. `affords` makes the throw
+// unreachable, since eligible only grows and every charge was measured
+// against it; the throw is what stops a later change to `affords`, to the
+// remainder path, or to the ledger from shipping a run that broke the
+// contract.
+//
+// close resolves the threshold rather than receiving one, because a caller
+// that supplied it could measure a cell against a budget the cell was never
+// charged under, and because the two-argument call keeps close total in what
+// a caller knows: a rank and a step name a cell or they name nothing, and
+// naming nothing closes nothing. A step the mask does not define resolves to
+// zero, which is the budget its verdicts already used, so a cell that spent
+// nothing under it closes and one that spent anything throws.
+inline void ForgivenessLedger::close(uint32_t dst, uint32_t step) {
+    StepLedger* cell = find(dst, step);
+    if (cell == nullptr) {
+        return;
+    }
+    const uint64_t threshold = step_threshold(step);
+    const uint64_t spent = cell->shed + cell->forgiven;
+    if (spent * kDecisionScale > cell->eligible * threshold) {
+        throw std::runtime_error(
+            "forgiveness ledger broke the budget law at rank " +
+            std::to_string(dst) + " step " + std::to_string(step) +
+            ": eligible " + std::to_string(cell->eligible) + " B, shed " +
+            std::to_string(cell->shed) + " B, forgiven " +
+            std::to_string(cell->forgiven) + " B, threshold " +
+            std::to_string(threshold) + " of " +
+            std::to_string(kDecisionScale));
+    }
+    cell->closed = true;
 }
 
 // Whether the experiment layer may answer a receiver's question about this

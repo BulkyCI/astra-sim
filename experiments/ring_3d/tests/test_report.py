@@ -423,6 +423,14 @@ class Ring3DReportTests(unittest.TestCase):
                     "cell_count": 24,
                     "forgiven_cell_count": 1,
                     "violation_count": 0,
+                    "min_delivered_share": 0.9715,
+                    "worst_cell": {
+                        "dst": "17",
+                        "training_step": "6",
+                        "eligible_bytes": 2_756_608,
+                        "shed_bytes": 0,
+                        "forgiven_bytes": 78_608,
+                    },
                 },
             }
             summary_path.write_text(json.dumps(summary), encoding="utf-8")
@@ -434,6 +442,13 @@ class Ring3DReportTests(unittest.TestCase):
         self.assertIn("| Ledger law | verified |", report)
         self.assertIn("W' (repaired per offered byte)", report)
         self.assertIn("Forgiven bytes by training step", report)
+        self.assertIn(
+            "| Worst cell delivered | 97.15% (rank 17, step 6) |", report
+        )
+        self.assertLess(
+            report.index("| Violating cells |"),
+            report.index("| Worst cell delivered |"),
+        )
 
     def test_report_renders_the_exemption_counters_for_an_exempt_run(
         self,
@@ -473,6 +488,8 @@ class Ring3DReportTests(unittest.TestCase):
 
         self.assertIn("### Forgiveness", report)
         self.assertIn("| CC-exempt flows | 42 |", report)
+        # A summary written before the law reported a share still renders.
+        self.assertIn("| Worst cell delivered | not available |", report)
         self.assertIn("| CC signals withheld | 1337 |", report)
         self.assertIn("| Allowance reports | 9 |", report)
         self.assertIn("| Flows re-armed | 9 |", report)

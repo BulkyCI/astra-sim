@@ -116,6 +116,22 @@ _FORGIVING_DOMAINS = frozenset({"recovery", "recovery_exempt"})
 """The domains the ledger law binds, and so the ones this section describes."""
 
 
+def _format_worst_cell(law: dict[str, Any]) -> str:
+    """The contract as a reader states it, with the cell that decides it.
+
+    The share is a percentage because the contract is one: the rank that did
+    worst still received this much of what its step owed it.
+    """
+    share = law.get("min_delivered_share")
+    cell = law.get("worst_cell")
+    if not isinstance(share, (int, float)) or not isinstance(cell, dict):
+        return "not available"
+    return (
+        f"{share * 100:.2f}% (rank {cell.get('dst', 'unknown')}, "
+        f"step {cell.get('training_step', 'unknown')})"
+    )
+
+
 def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
     """Render what the recovery domain spent, and whether it stayed lawful.
 
@@ -143,7 +159,9 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
         "with those bytes removed: the trimmed load the transport still had "
         "to carry again. The ledger law caps shed plus forgiven bytes per "
         "(receiving rank, training step) and holds only in a forgiving "
-        "domain; a violated status invalidates the arm. A CC-exempt flow "
+        "domain; a violated status invalidates the arm. The worst cell is the "
+        "receiving rank and step left with the smallest share of what it was "
+        "owed, and that share is the contract the run kept. A CC-exempt flow "
         "withholds every congestion signal from its controller until a "
         "receiver reports that cell's allowance spent, which re-arms it. The "
         "forgiven remainder is what the receiver took from a quiet flow, and "
@@ -196,6 +214,7 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
                 ["Ledger law", law.get("status", "not_available")],
                 ["Cells with a forgiven byte", law.get("forgiven_cell_count", 0)],
                 ["Violating cells", law.get("violation_count", 0)],
+                ["Worst cell delivered", _format_worst_cell(law)],
             ],
         ),
         *(

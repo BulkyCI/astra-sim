@@ -10,6 +10,7 @@ from array import array
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from math import ceil
 from pathlib import Path
 from typing import Any, Final
@@ -406,6 +407,30 @@ _FORGIVING_DOMAINS: Final = frozenset({"recovery", "recovery_exempt"})
 rather than a per-cell budget, so the law caps nothing there."""
 
 
+def _shedding_domain(manifest: dict[str, Any] | None) -> Any:
+    """The domain the run declared, or None when its manifest declares none.
+
+    One reader for that field, because the law's own result and the refusal
+    acting on it must agree about which arm is forgiving.
+    """
+    policy = (manifest or {}).get("selection_policy")
+    return policy.get("domain") if isinstance(policy, dict) else None
+
+
+def _delivered_share(cell: dict[str, int]) -> Fraction:
+    """The share of one cell's eligible bytes its receiving rank was left.
+
+    Exact rather than floating, because the simulator enforced this share in
+    integers and a float ratio of two byte counts can put a boundary cell on
+    the wrong side of it. The caller eliminates cells with no eligible bytes,
+    which are owed nothing and so have no share.
+    """
+    return Fraction(
+        cell["eligible_bytes"] - cell["shed_bytes"] - cell["forgiven_bytes"],
+        cell["eligible_bytes"],
+    )
+
+
 def _check_ledger_law(
     cells: dict[tuple[str, str], dict[str, int]],
     manifest: dict[str, Any] | None,
@@ -432,8 +457,15 @@ def _check_ledger_law(
     policy = (manifest or {}).get("selection_policy")
     clr_steps = _clr_steps(manifest)
     if not isinstance(policy, dict) or clr_steps is None:
-        return {"status": "not_available", "cell_count": len(cells)}
-    domain = policy.get("domain")
+        return {
+            "status": "not_available",
+            "reason": (
+                "the run manifest carries no readable selection policy "
+                "and CLR mask"
+            ),
+            "cell_count": len(cells),
+        }
+    domain = _shedding_domain(manifest)
     if domain not in _FORGIVING_DOMAINS:
         return {
             "status": "not_applicable",
@@ -445,6 +477,10 @@ def _check_ledger_law(
     except (KeyError, TypeError, ValueError):
         return {
             "status": "not_available",
+            "reason": (
+                "the selection policy carries no readable decision scale "
+                "and thresholds"
+            ),
             "domain": domain,
             "cell_count": len(cells),
         }
@@ -467,11 +503,25 @@ def _check_ledger_law(
         if (cell["shed_bytes"] + cell["forgiven_bytes"]) * scale
         > cell["eligible_bytes"] * (low if step in clr_steps else high)
     ]
+    # The contract as one number, and the cell that decides it: every
+    # receiving rank was left at least this share of every step it was owed.
+    shares = [
+        (_delivered_share(cell), dst, step, cell)
+        for (dst, step), cell in sorted(cells.items())
+        if cell["eligible_bytes"]
+    ]
+    worst = min(shares, key=lambda entry: entry[0], default=None)
     return {
         "status": "violated" if violations or shed_cells else "verified",
         "domain": domain,
         "decision_scale": scale,
         "cell_count": len(cells),
+        "min_delivered_share": float(worst[0]) if worst is not None else None,
+        "worst_cell": (
+            {"dst": worst[1], "training_step": worst[2], **worst[3]}
+            if worst is not None
+            else None
+        ),
         "forgiven_cell_count": sum(
             1 for cell in cells.values() if cell["forgiven_bytes"]
         ),
@@ -482,6 +532,35 @@ def _check_ledger_law(
         "admission_shed_cells": shed_cells[:10],
         "admission_shed_cell_count": len(shed_cells),
     }
+
+
+def _require_lawful_ledger(
+    law: dict[str, Any], manifest: dict[str, Any] | None
+) -> None:
+    """Refuse a forgiving arm whose contract is broken or unverifiable.
+
+    The contract is that every receiving rank keeps at least `1 - p(step)` of
+    what its step owes it, so an arm that broke it is not a result, and an arm
+    whose mask or policy cannot be read is not one either. Admission keeps its
+    `not_applicable` and a run with no DP payload keeps its
+    `no_eligible_traffic`, because neither one made the promise.
+    """
+    if _shedding_domain(manifest) not in _FORGIVING_DOMAINS:
+        return
+    status = law["status"]
+    if status == "violated":
+        # Either list is evidence of the same broken budget, and the law sets
+        # this status only when one of them is nonempty.
+        first = (law["violations"] or law["admission_shed_cells"])[0]
+        raise ValueError(
+            f"forgiving run broke the ledger law, status {status}, "
+            f"first offending cell {first}"
+        )
+    if status == "not_available":
+        raise ValueError(
+            f"forgiving run cannot verify the ledger law, status {status}, "
+            f"because {law['reason']}"
+        )
 
 
 def _load_manifest(path: Path) -> dict[str, Any] | None:
@@ -1427,12 +1506,21 @@ def summarize(
         statistics.total_physical_bytes,
         statistics.background_window,
     )
+    ledger_law = _check_ledger_law(statistics.ledger, manifest)
+    _require_lawful_ledger(ledger_law, manifest)
     primary_eligible = (
         expected_rank_count is not None
         and not statistics.failed_count
         and rank_completion_status["status"] == "verified"
         and collective_completion["status"] == "available"
         and fct_join["status"] == "verified"
+        # A forgiving arm promised every rank a share of every step, so its
+        # numbers are readable only once the ledger law confirms it kept the
+        # promise. Every other domain promised nothing to confirm.
+        and (
+            _shedding_domain(manifest) not in _FORGIVING_DOMAINS
+            or ledger_law["status"] == "verified"
+        )
     )
     return {
         "flow_count": statistics.flow_count,
@@ -1520,7 +1608,7 @@ def summarize(
             "forgiven_bytes_by_training_step": _forgiven_by_step(
                 statistics.ledger
             ),
-            "ledger_law": _check_ledger_law(statistics.ledger, manifest),
+            "ledger_law": ledger_law,
         },
         "fct_join": fct_join,
         "flow_control_regime": _flow_control_regime(manifest),
@@ -1533,6 +1621,7 @@ def summarize(
             "rank_completion_status": rank_completion_status["status"],
             "collective_completion_status": collective_completion["status"],
             "fct_join_status": fct_join["status"],
+            "ledger_law_status": ledger_law["status"],
         },
         "by_training_step": dict(
             sorted(

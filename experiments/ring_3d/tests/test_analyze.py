@@ -737,6 +737,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
                         summarize(telemetry, manifest_path=manifest)
 
     def test_ledger_law_rejects_a_cell_over_its_budget(self) -> None:
+        """A broken contract refuses the summary rather than annotating it."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             telemetry = root / "telemetry"
@@ -747,14 +748,74 @@ class Ring3DAnalysisTests(unittest.TestCase):
             )
             manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
 
+            with self.assertRaisesRegex(
+                ValueError, "broke the ledger law, status violated"
+            ) as refusal:
+                summarize(telemetry, manifest_path=manifest)
+
+        message = str(refusal.exception)
+        self.assertIn("'dst': '4'", message)
+        self.assertIn("'training_step': '1'", message)
+
+    def test_a_forgiving_run_without_its_mask_is_refused(self) -> None:
+        """An arm whose mask cannot be read has verified nothing.
+
+        The domain still promised every rank a share of every step, and a
+        summary that cannot check the promise is not a result.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(
+                telemetry, [self.eligible_flow("4", "2", 1_000, 100, "10001")]
+            )
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+            (root / "clr_mask.csv").unlink()
+
+            with self.assertRaisesRegex(
+                ValueError, "cannot verify the ledger law, status not_available"
+            ):
+                summarize(telemetry, manifest_path=manifest)
+
+    def test_the_ledger_law_names_the_worst_cell_and_its_share(self) -> None:
+        """Two cells at step 2, where the budget is 10% of 1000 B.
+
+        The first cell spends its cap to the byte and leaves its rank 90% of
+        what the step owed it, the second spends nothing, and a third rank is
+        owed no bytes at all, so it has no share to report and no division to
+        perform. The reported share is the smallest of the two the law
+        measures, and the worst cell is the one that set it.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            self.write_telemetry(
+                telemetry,
+                [
+                    self.eligible_flow("4", "2", 1_000, 100, "10001"),
+                    self.eligible_flow("5", "2", 1_000, 0, "10002"),
+                    self.eligible_flow("6", "2", 0, 0, "10003"),
+                ],
+            )
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
             law = summarize(telemetry, manifest_path=manifest)["forgiveness"][
                 "ledger_law"
             ]
 
-        self.assertEqual(law["status"], "violated")
-        self.assertEqual(law["violation_count"], 1)
-        self.assertEqual(law["violations"][0]["dst"], "4")
-        self.assertEqual(law["violations"][0]["training_step"], "1")
+        self.assertEqual(law["status"], "verified")
+        self.assertEqual(law["cell_count"], 3)
+        self.assertEqual(law["min_delivered_share"], 0.9)
+        self.assertEqual(
+            law["worst_cell"],
+            {
+                "dst": "4",
+                "training_step": "2",
+                "eligible_bytes": 1_000,
+                "shed_bytes": 0,
+                "forgiven_bytes": 100,
+            },
+        )
 
     def test_ledger_law_uses_the_integer_law_the_simulator_used(self) -> None:
         """Two cells the float law misjudges, one in each direction.
@@ -792,13 +853,12 @@ class Ring3DAnalysisTests(unittest.TestCase):
             )
             manifest = self.write_recovery_manifest(root, ("1",), 5e-7, 1.2e-6)
 
-            law = summarize(telemetry, manifest_path=manifest)["forgiveness"][
-                "ledger_law"
-            ]
+            with self.assertRaisesRegex(
+                ValueError, "broke the ledger law, status violated"
+            ) as refusal:
+                summarize(telemetry, manifest_path=manifest)
 
-        self.assertEqual(law["status"], "violated")
-        self.assertEqual(law["violation_count"], 1)
-        self.assertEqual(law["violations"][0]["threshold"], 1)
+        self.assertIn("'threshold': 1", str(refusal.exception))
 
     def test_ledger_law_does_not_apply_to_the_admission_domain(self) -> None:
         """Admission shedding is a per-flow hash draw, not a per-cell cap.
@@ -836,13 +896,12 @@ class Ring3DAnalysisTests(unittest.TestCase):
             self.write_telemetry(telemetry, [shed])
             manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
 
-            law = summarize(telemetry, manifest_path=manifest)["forgiveness"][
-                "ledger_law"
-            ]
+            with self.assertRaisesRegex(
+                ValueError, "broke the ledger law, status violated"
+            ) as refusal:
+                summarize(telemetry, manifest_path=manifest)
 
-        self.assertEqual(law["status"], "violated")
-        self.assertEqual(law["admission_shed_cell_count"], 1)
-        self.assertEqual(law["admission_shed_cells"][0]["shed_bytes"], 1_048_576)
+        self.assertIn("'shed_bytes': 1048576", str(refusal.exception))
 
     def test_ledger_law_is_unavailable_without_the_mask_and_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

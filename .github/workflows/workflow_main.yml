@@ -43,7 +43,7 @@ on:
         default: false
         type: boolean
       run_forgive_v2:
-        description: Run the FORGIVE v2 pacing and straggler-stop variants
+        description: Run the FORGIVE v2 pacing, cap-base and step-stop variants
         required: false
         default: false
         type: boolean
@@ -57,6 +57,11 @@ on:
         required: false
         default: false
         type: boolean
+      record_filter:
+        description: Regular expression on ledger_key; empty runs every record the gates select
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -337,6 +342,10 @@ jobs:
         INCLUDE_FORGIVE_V2: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_v2 }}
         INCLUDE_FORGIVE_R2: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_r2 }}
         INCLUDE_FORGIVE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_ref }}
+        # Narrows what the gates selected, and nothing else: a record the
+        # gates left out stays out, so a subset of a gate dispatches without
+        # a gate of its own.
+        RECORD_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.record_filter || '' }}
       run: |
         set -euo pipefail
         matrix="$(jq -c \
@@ -347,7 +356,8 @@ jobs:
           --arg forgive_dose "$INCLUDE_FORGIVE_DOSE" \
           --arg forgive_v2 "$INCLUDE_FORGIVE_V2" \
           --arg forgive_r2 "$INCLUDE_FORGIVE_R2" \
-          --arg forgive_ref "$INCLUDE_FORGIVE_REF" '
+          --arg forgive_ref "$INCLUDE_FORGIVE_REF" \
+          --arg record_filter "$RECORD_FILTER" '
           [ .[]
             | select((.gate == "always" and $always == "true")
                      or (.gate == "structural" and $structural == "true")
@@ -357,6 +367,8 @@ jobs:
                      or (.gate == "forgive_v2" and $forgive_v2 == "true")
                      or (.gate == "forgive_r2" and $forgive_r2 == "true")
                      or (.gate == "forgive_ref" and $forgive_ref == "true"))
+            | select($record_filter == ""
+                     or (.ledger_key | test($record_filter)))
             | del(.gate, .notes) ]
         ' .github/workflows/evaluation-matrix.json)"
         echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"

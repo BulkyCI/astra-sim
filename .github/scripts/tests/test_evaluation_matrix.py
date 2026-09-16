@@ -138,6 +138,24 @@ class EvaluationMatrixTests(unittest.TestCase):
                 self.assertIn(f"{GATE_INPUTS[gate]}:", workflow)
                 self.assertIn(f'.gate == "{gate}"', workflow)
 
+    def test_the_record_filter_narrows_the_gate_selection(self) -> None:
+        """The filter is an input, not a gate.
+
+        It is tested after the gate clause and only ever removes records, so
+        a gate no dispatch enabled cannot be widened by naming a record of
+        it. A gate of its own is what a family needs; this is what a subset
+        of one needs.
+        """
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("record_filter:", workflow)
+        self.assertIn('--arg record_filter "$RECORD_FILTER"', workflow)
+        self.assertIn(
+            '| select($record_filter == ""\n'
+            "                     or (.ledger_key | test($record_filter)))",
+            workflow,
+        )
+        self.assertNotIn("record_filter", set(GATE_INPUTS.values()))
+
     def test_the_arm_count_matches_the_profile_the_record_names(self) -> None:
         """The record must say how many arms its job runs.
 

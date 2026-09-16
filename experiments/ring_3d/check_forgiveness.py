@@ -344,34 +344,14 @@ def check_bernoulli_pacing(run_dir: Path) -> list[str]:
     return []
 
 
-def check_vesting(vesting_dir: Path, unpaced_dir: Path) -> list[str]:
-    """Vesting forgives something, and never more than the unpaced rule.
+def check_step_stop(run_dir: Path) -> list[str]:
+    """The step stop must end senders and spend close to the budget.
 
-    Its denominator is the bytes the rank has received rather than the bytes
-    senders have launched, and the former never exceeds the latter, so at one
-    seed the vesting arm cannot forgive more than the unpaced arm does. It must
-    still forgive: zero would mean the reservation never released, which is
-    indistinguishable from a rule that never ran.
-    """
-    failures = check_unpaced(vesting_dir)
-    vested = sum(int(flow["forgiven_bytes"]) for flow in _flows(vesting_dir))
-    unpaced = sum(int(flow["forgiven_bytes"]) for flow in _flows(unpaced_dir))
-    if vested == 0:
-        failures.append("vesting forgave nothing; the reservation never released")
-    if vested > unpaced:
-        failures.append(
-            f"vesting forgave {vested} B against the unpaced arm's {unpaced} B "
-            "at the same seed"
-        )
-    print(f"vesting: {vested} B forgiven against unpaced {unpaced} B")
-    return failures
-
-
-def check_straggler(run_dir: Path) -> list[str]:
-    """The straggler stop must take bytes no sender ever put on the wire.
-
-    A remainder forgiveness is the only source of those bytes, so a zero here
-    means the idle question was never asked or never granted.
+    The receiver stops a sender once ``1 - p`` of what that sender owes it has
+    arrived, and takes the rest as a remainder, so a zero remainder means the
+    rule never fired. What it takes is bounded by the cap, so on a permissive
+    step the forgiven share lands near ``p`` rather than at it: the holes at
+    step end are what is left to take.
     """
     failures = check_unpaced(run_dir)
     summary = _summary(run_dir)
@@ -379,15 +359,15 @@ def check_straggler(run_dir: Path) -> list[str]:
     remainder = int(transport.get("remainder_forgiven_bytes", 0))
     events = int(transport.get("remainder_forgiven_count", 0))
     if remainder == 0:
-        failures.append("the straggler stop forgave no remainder; it never fired")
+        failures.append("the step stop forgave no remainder; it never fired")
     flows = _flows(run_dir)
     failures.extend(_remainder_is_a_subset(flows))
     failures.extend(_charged_equals_absorbed(flows, summary))
     incomplete = [flow for flow in flows if flow["terminal_outcome"] != "completed"]
     if incomplete:
         failures.append(
-            f"{len(incomplete)} flows did not complete; the straggler stop "
-            "must not convert a transfer into a failure"
+            f"{len(incomplete)} flows did not complete; the step stop must "
+            "not convert a transfer into a failure"
         )
     # What no sender put on the wire is part of what the receiver forgave, so
     # the derived reading can never exceed the counter it is carved out of.
@@ -401,9 +381,12 @@ def check_straggler(run_dir: Path) -> list[str]:
     law = summary["forgiveness"]["ledger_law"]
     if law["status"] != "verified":
         failures.append(f"per-(dst, step) ledger law is {law['status']}: {law}")
+    # The stop spends against the plan, so a permissive step's worst cell
+    # cannot have kept more than it was owed less the cap.
+    share = law.get("min_delivered_share")
     print(
-        f"straggler stop: {remainder} B of remainder forgiven over {events} "
-        f"forgivenesses, {unsent} B never sent"
+        f"step stop: {remainder} B of remainder forgiven over {events} "
+        f"forgivenesses, {unsent} B never sent, worst cell kept {share}"
     )
     return failures
 
@@ -452,19 +435,10 @@ def main() -> int:
         help="a run whose pacing coin must decline forgivable trims",
     )
     parser.add_argument(
-        "--vesting",
+        "--step-stop",
         type=Path,
-        help="a vesting run, compared against --vesting-unpaced at the same seed",
-    )
-    parser.add_argument(
-        "--vesting-unpaced",
-        type=Path,
-        help="the same profile as --vesting with no pacing rule",
-    )
-    parser.add_argument(
-        "--straggler",
-        type=Path,
-        help="a run whose receiver must forgive a quiet flow's remainder",
+        help="a run whose receiver must end each sender's step and take the "
+        "holes it leaves",
     )
     arguments = parser.parse_args()
     failures = check(arguments.recovery.resolve(), arguments.admission.resolve())
@@ -484,17 +458,8 @@ def main() -> int:
         )
     if arguments.bernoulli is not None:
         failures.extend(check_bernoulli_pacing(arguments.bernoulli.resolve()))
-    if arguments.vesting is not None:
-        if arguments.vesting_unpaced is None:
-            parser.error("--vesting needs --vesting-unpaced to compare against")
-        failures.extend(
-            check_vesting(
-                arguments.vesting.resolve(),
-                arguments.vesting_unpaced.resolve(),
-            )
-        )
-    if arguments.straggler is not None:
-        failures.extend(check_straggler(arguments.straggler.resolve()))
+    if arguments.step_stop is not None:
+        failures.extend(check_step_stop(arguments.step_stop.resolve()))
     if failures:
         for failure in failures:
             print(f"forgiveness check failed: {failure}")

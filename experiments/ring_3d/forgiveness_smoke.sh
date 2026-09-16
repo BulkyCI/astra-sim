@@ -13,9 +13,7 @@ RACE_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/forgiveness_race_8"
 DCQCN_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/forgiveness_dcqcn_8"
 EXEMPT_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/exempt_smoke_8"
 BERNOULLI_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/bernoulli_smoke_8"
-VESTING_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/vesting_smoke_8"
-VESTING_UNPACED_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/vesting_smoke_8_unpaced"
-STRAGGLER_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/straggler_smoke_8"
+STEPSTOP_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/stepstop_smoke_8"
 REPRODUCTION_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/forgiveness_join_8"
 COMPARISON_OUTPUT="$REPOSITORY_ROOT/runs/ring_3d/forgiveness_join_8_comparison"
 # Deliberately not the profile's own seed: the claim under test is that both
@@ -66,28 +64,18 @@ uv --project "$REPOSITORY_ROOT" run --locked python "$SCRIPT_DIR/run.py" \
   --profile "$SCRIPT_DIR/profiles/exempt_smoke_8.json" \
   --output "$EXEMPT_OUTPUT" --clean
 
-# The three FORGIVE v2 receiver policies, one profile each and nothing else
+# The two FORGIVE v2 receiver policies, one profile each and nothing else
 # changed.
 uv --project "$REPOSITORY_ROOT" run --locked python "$SCRIPT_DIR/run.py" \
   --profile "$SCRIPT_DIR/profiles/bernoulli_smoke_8.json" \
   --output "$BERNOULLI_OUTPUT" --clean
 
-# Vesting needs its own pair. It measures the budget against what a rank has
-# received, so it releases nothing until a message completes, and the other
-# smoke profiles send one DP All-Reduce per step that completes at the end of
-# it. This pair buckets the gradient instead, and the two profiles differ only
-# in the pacing rule.
+# The step stop, on the owed base: the receiver ends a sender's step once
+# 1 - p of what that sender owes it has arrived, and the same bucketed
+# gradient as the recovery run above supplies the arrivals.
 uv --project "$REPOSITORY_ROOT" run --locked python "$SCRIPT_DIR/run.py" \
-  --profile "$SCRIPT_DIR/profiles/vesting_smoke_8.json" \
-  --output "$VESTING_OUTPUT" --clean
-
-uv --project "$REPOSITORY_ROOT" run --locked python "$SCRIPT_DIR/run.py" \
-  --profile "$SCRIPT_DIR/profiles/vesting_smoke_8_unpaced.json" \
-  --output "$VESTING_UNPACED_OUTPUT" --clean
-
-uv --project "$REPOSITORY_ROOT" run --locked python "$SCRIPT_DIR/run.py" \
-  --profile "$SCRIPT_DIR/profiles/straggler_smoke_8.json" \
-  --output "$STRAGGLER_OUTPUT" --clean
+  --profile "$SCRIPT_DIR/profiles/stepstop_smoke_8.json" \
+  --output "$STEPSTOP_OUTPUT" --clean
 
 uv --project "$REPOSITORY_ROOT" run --locked python \
   "$SCRIPT_DIR/check_forgiveness.py" "$OUTPUT" "$ADMISSION_OUTPUT" \
@@ -95,9 +83,7 @@ uv --project "$REPOSITORY_ROOT" run --locked python \
   --congestion-neutral "$DCQCN_OUTPUT" \
   --congestion-exempt "$EXEMPT_OUTPUT" \
   --bernoulli "$BERNOULLI_OUTPUT" \
-  --vesting "$VESTING_OUTPUT" \
-  --vesting-unpaced "$VESTING_UNPACED_OUTPUT" \
-  --straggler "$STRAGGLER_OUTPUT"
+  --step-stop "$STEPSTOP_OUTPUT"
 
 # The v2 arms run as single records joined against the v1 wave's comparison
 # arms, so a single run.py arm must reproduce compare.py's recovery arm at the

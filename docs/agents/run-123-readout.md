@@ -2,10 +2,11 @@
 
 Run 34867374086, dispatched 2026-09-14, read 2026-09-15. Gates `forgive`
 and `forgive_dose`, 21 records, 84 arms, every experiment job green. The
-code is main `c6855f0` with ns-3 `9717200cc`, the fix specified in
-[forgive-v1-revocation-fix.md](forgive-v1-revocation-fix.md). The numbers
-here replace those of runs #121 and #122 for the exempt arm; the other
-three arms are unchanged and reproduce exactly.
+code is main `c6855f0` with ns-3 `9717200cc`, which corrects the
+exemption revocation: a spent allowance ends the exemption through the
+receiver's report rather than through every repair request. Every
+exempt-arm figure below comes from this run; the other three arms are
+unchanged and reproduce exactly.
 
 Joe Fang's work in collaboration with Zechen Ma.
 
@@ -30,12 +31,11 @@ the revocation corrected, the exempt arm at budget 0.4 forgives 21.3 to
 kill test stated in advance was a move outside 9.2 to 9.4 % by more than
 the seed spread of 0.5 points; the move is 12 points at 0.4 and 29 at 0.6.
 
-The mechanism is the one section 1 of
-[next-steps-after-v1-fix.md](next-steps-after-v1-fix.md) named as the
-alternative cause. Under the defect a sender re-engaged DCQCN on almost
-every repair request, slowed down, and stopped causing trims; the ceiling
-was the sender giving up its exemption, not the fabric running out of
-congestion. The sentence given to Zechen is retired.
+The alternative cause we named before the run is the mechanism. Under the
+defect a sender re-engaged DCQCN on almost every repair request, slowed
+down, and stopped causing trims; the ceiling was the sender giving up its
+exemption, not the fabric running out of congestion. The sentence given to
+Zechen is withdrawn.
 
 What replaces it: forgiven loss is now roughly proportional to the cap.
 With the eligible share of data-parallel bytes at 0.79, the cap is
@@ -98,7 +98,7 @@ The no-incast control forgives nothing and moves nothing, as before.
 
 | claim | before #123 | after #123 |
 | --- | --- | --- |
-| aimed loss self-limits | 9.3 % ceiling at every budget above 0.2 | retired; loss is 68 to 86 % of the cap |
+| aimed loss self-limits | 9.3 % ceiling at every budget above 0.2 | withdrawn; loss is 68 to 86 % of the cap |
 | FORGIVE beats shedding per byte lost | 4 to 5 times, flat across the front | 5.3 times at 0.1, falling to 1.9 times at 0.6 |
 | the mask protects critical steps | 1.0 to 1.5 % of forgiven bytes | unchanged, 1.4 % at 0.1 |
 | the exemption ends on a refusal | measured under a defect | ends on the allowance report, verified by the counter identity on 21 records |
@@ -112,9 +112,7 @@ fabric limiting the loss is gone.
 The v2 wave, run 35007858082, was dispatched 2026-09-15 on gate
 `forgive_v2`: 18 single arms at budget 0.1 on this cell, joined by seed
 against the recovery arm of this run. It answers whether pacing recovers
-the 35 to 37 % of exempt flows that hit a spent cell, and what the
-straggler stop is worth.
+the 35 to 37 % of exempt flows that hit a spent cell.
 
-Then, in this order: update `figure-data.md`, `run-121-cc-exempt-readout.md`
-and the two slide decks to these numbers, and add a budget 0.05 record to
-the dose front.
+Then, in this order: update `figure-data.md` and the two slide decks to
+these numbers, and add a budget 0.05 record to the dose front.

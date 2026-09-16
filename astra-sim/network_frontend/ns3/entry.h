@@ -256,6 +256,26 @@ uint64_t remainder_verdict(uint32_t sip,
                                            accepted_above);
 }
 
+// The transport's report that a receiving NIC accepted payload bytes. It
+// resolves the flow the way the verdict callbacks do; an unknown five-tuple is
+// a flow the experiment layer no longer holds, and nothing is credited to it.
+void data_accepted(uint32_t sip,
+                   uint32_t dip,
+                   uint16_t sport,
+                   uint16_t dport,
+                   uint64_t bytes) {
+    (void)dport;
+    const uint32_t src = ip_to_node_id(Ipv4Address(sip));
+    const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
+    const FlowKey key = make_flow_key(sport, static_cast<int>(src),
+                                      static_cast<int>(dst));
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        return;
+    }
+    AstraSimNs3::note_delivered(active->second, bytes);
+}
+
 // The transport's congestion-exemption callback, asked once per queue pair at
 // creation. It resolves the flow the way the verdict callback does. An unknown
 // five-tuple obeys congestion control: an exemption belongs to a flow the
@@ -536,13 +556,19 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     AstraSimNs3::FlowRecord flow = active->second;
     copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
-    // What the receiving rank actually holds for the step, which is what
-    // vesting spends. Same eligibility condition as register_eligible, so the
-    // two sides of the ratio cover the same population.
-    if (flow.admission_eligible && flow.dst >= 0) {
-        AstraSimNs3::forgiveness_ledger.register_delivered(
-            static_cast<uint32_t>(flow.dst), flow.operation.training_step,
-            AstraSimNs3::delivered_bytes(flow));
+    // The receiver credited every byte as it arrived, so by completion its
+    // account must equal what the sender offered less what it was forgiven. A
+    // mismatch means an arrival was counted twice or a forgiven range was
+    // counted as data, either of which would move the budget the contract is
+    // measured against.
+    if (flow.accepted_bytes != AstraSimNs3::delivered_bytes(flow)) {
+        throw runtime_error(
+            "Receiver accepted " + to_string(flow.accepted_bytes) +
+            " B for flow " + to_string(flow.src) + "->" + to_string(flow.dst) +
+            " port " + to_string(flow.source_port) + " step " +
+            to_string(flow.operation.training_step) + ", against " +
+            to_string(q->m_size) + " B offered less " +
+            to_string(flow.forgiven_bytes) + " B forgiven");
     }
 
     if (flow.kind == AstraSimNs3::FlowKind::BackgroundMicroburst) {
@@ -653,13 +679,14 @@ int setup_ns3_simulation(string network_configuration) {
             return -1;
         }
     }
-    // The straggler stop is on exactly when the profile named an idle, and the
+    // The step stop is on exactly when the profile asked for it, and the
     // callback being null is what tells the transport it is off.
-    const auto& straggler_idle = AstraSimNs3::experiment_config.straggler_idle_ns;
     if (!SetupNetwork(qp_finish, qp_fail, recovery_verdict, recovery_domain,
                       congestion_exemption, congestion_exempt,
-                      straggler_idle.has_value() ? remainder_verdict : nullptr,
-                      straggler_idle.value_or(0))) {
+                      AstraSimNs3::experiment_config.step_stop
+                          ? remainder_verdict
+                          : nullptr,
+                      data_accepted)) {
         return -1;
     }
     // The experiment's scale sizes the forgiveness ledger and bounds every

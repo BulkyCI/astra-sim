@@ -241,7 +241,7 @@ off or DCQCN, DP fan-in 2 or 7, spine oversubscription 2:1 or 4:1.
 
 The worst cell reaches a trim ratio of 0.24, and the worst burst excess
 is 0.62 % of the window. The rule returns the negative branch. We
-retired the episode-shortening claim the same day.
+withdrew the episode-shortening claim the same day.
 
 Two things the map did establish. Trimming is a steady-state property of
 how the fabric is provisioned, not of the burst: it multiplies about
@@ -306,9 +306,7 @@ the protocol. Nothing new goes on the wire.
 ## 12. Run #123, 14 September: does it work
 
 Worst cell of the map, three seeds, four matched arms each, budget 0.4.
-Runs #121 and #122 measured the exempt arm before the revocation fix at
-commit `c6855f0`, so every FORGIVE number in this deck replaces what we
-showed then.
+Every FORGIVE number in this deck comes from run #123.
 
 | run | training time | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | bytes re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -533,5 +531,4 @@ Every figure and table above recomputes from a release bundle in
 Supporting documents in this directory: `forgive-protocol.md` is the
 specification, `forgive-related-work.md` the positioning,
 `roadmap-to-full-paper.md` the plan, and the per-run readouts
-`run-117-readout.md`, `run-120-regime-map.md`,
-`run-121-cc-exempt-readout.md` and `run-123-readout.md`.
+`run-117-readout.md`, `run-120-regime-map.md` and `run-123-readout.md`.

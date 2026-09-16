@@ -640,13 +640,13 @@ class Ring3DAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             telemetry = root / "telemetry"
-            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
-            straggler.update(
+            stopped_early = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            stopped_early.update(
                 {"forgiven_remainder_bytes": "60", "pacing_refusals": "3"}
             )
             paced = self.eligible_flow("5", "2", 1_000, 0, "10002")
             paced.update({"pacing_refusals": "4"})
-            self.write_telemetry(telemetry, [straggler, paced])
+            self.write_telemetry(telemetry, [stopped_early, paced])
             manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
 
             summary = summarize(telemetry, manifest_path=manifest)
@@ -658,7 +658,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
         self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
 
     def test_a_forgiven_remainder_covers_the_bytes_no_sender_attempted(self) -> None:
-        """The straggler stop completes a flow whose sender stopped early.
+        """The step stop completes a flow whose sender was stopped early.
 
         The receiver takes the unsent tail as delivered, so the sender never
         attempts it and the flow still completes. The gap is the part of the
@@ -668,15 +668,15 @@ class Ring3DAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             telemetry = root / "telemetry"
-            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
-            straggler.update(
+            stopped_early = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            stopped_early.update(
                 {
                     "data_attempted_bytes": "940",
                     "forgiven_remainder_bytes": "60",
                 }
             )
             attempted_in_full = self.eligible_flow("5", "2", 1_000, 0, "10002")
-            self.write_telemetry(telemetry, [straggler, attempted_in_full])
+            self.write_telemetry(telemetry, [stopped_early, attempted_in_full])
             manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
 
             summary = summarize(telemetry, manifest_path=manifest)
@@ -694,14 +694,14 @@ class Ring3DAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             telemetry = root / "telemetry"
-            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
-            straggler.update(
+            stopped_early = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            stopped_early.update(
                 {
                     "data_attempted_bytes": "990",
                     "forgiven_remainder_bytes": "60",
                 }
             )
-            self.write_telemetry(telemetry, straggler)
+            self.write_telemetry(telemetry, stopped_early)
             manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
 
             summary = summarize(telemetry, manifest_path=manifest)

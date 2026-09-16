@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-veststrag",
+  "name": "ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-owed-stepstop",
   "parallelism": {
     "tp": 8,
     "pp": 1,
@@ -26,10 +26,8 @@
     "p_low": 0.005,
     "p_high": 0.1,
     "domain": "recovery_exempt",
-    "pacing": {
-      "kind": "vesting"
-    },
-    "straggler_idle_ns": 250000
+    "cap_base": "owed",
+    "step_stop": true
   },
   "network": {
     "topology": "clos",

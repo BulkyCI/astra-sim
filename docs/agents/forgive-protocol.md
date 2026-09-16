@@ -5,7 +5,7 @@ packet-trimming RDMA fabric, written from the code as built and from the
 runs that measured it. It is written for a reader with a computer
 networks background. Terms are defined where they first appear. Results
 are in [run-120-regime-map.md](run-120-regime-map.md) and
-[run-121-cc-exempt-readout.md](run-121-cc-exempt-readout.md). The code is
+[run-123-readout.md](run-123-readout.md). The code is
 C++17 under `extern/network_backend/ns-3` and
 `astra-sim/network_frontend/ns3`, and Python 3.11 under
 `experiments/ring_3d`.
@@ -82,7 +82,10 @@ forgiven_bytes(rank, step) + suppressed_bytes(rank, step) <= p(step) * eligible_
 ```
 
 Both counters only grow. Nothing is refunded. A closed entry forgives
-nothing.
+nothing. The receiver enforces that rule in counters it owns, as
+`forgiven <= p(step) x (delivered + forgiven)`; a step ends with
+`delivered + forgiven = eligible`, so the two forms share one ceiling and
+the analyzer certifies against the accumulated `eligible`.
 
 **Forgiveness alone saves no time.** Run #117 measured 4 to 11 % shorter
 training under go-back-N recovery. A control run with selective
@@ -324,9 +327,7 @@ Run #123 used the most congested fabric of the regime map: DCQCN,
 direct all-reduce with seven-way fan-in, and a spine oversubscribed 4:1.
 Three seeds. "Training time" is the makespan of 20 training steps.
 "All-reduce time" is measured from the first rank's start to the last
-rank's completion. Runs #121 and #122 measured the code before the
-revocation fix at commit `c6855f0`, where any repair request ended an
-exemption, so the figures below replace the ones those runs published.
+rank's completion.
 
 | run | training time | all-reduce time, non-critical steps | all-reduce time, critical steps | gradient bytes lost | bytes re-sent after trims |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -394,8 +395,8 @@ per receiver (see the run #120 readout).
   exempt flows told their allowance was spent are exactly those that
   re-armed; every re-armed flow was exempt and took a rate cut
   afterwards; the budget rule holds.
-- `bernoulli_smoke_8`, `vesting_smoke_8` with its unpaced pair, and
-  `straggler_smoke_8` carry one v2 policy each, checked in section 15.
+- `bernoulli_smoke_8` and `stepstop_smoke_8` carry one v2 policy each,
+  checked in section 15.
 - `check_refusals.py` breaks each required field in turn and checks that
   the run is refused by name and leaves no telemetry.
 
@@ -472,17 +473,17 @@ the tolerance and DCQCN assumptions are in
 | test gate | `experiments/ring_3d/forgiveness_smoke.sh`, `check_forgiveness.py`, `check_refusals.py` |
 | profiles | `experiments/ring_3d/profiles/forgiveness_*_8.json`, `exempt_smoke_8.json`, `regime_64_dcqcn_*_exempt.json`, `no_incast_8_forgive.json` |
 | v2 pure core, pacing sum, remainder verdict | `astra-sim/network_frontend/ns3/ExperimentConfig.hh` |
-| v2 straggler stop, idle timer, remainder callback | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
+| v2 step stop, arrival accounting, remainder callback | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
 | v2 core law fixtures | `extern/network_backend/ns-3/scratch/rdma-range-algebra.cc` |
 | v2 single-arm join fixture | `experiments/ring_3d/check_single_arm_join.py` |
 
-## 15. Version 2: pacing and the straggler stop
+## 15. Version 2: pacing, the cap's base, and the step stop
 
 **Built, unmeasured.** The mechanisms below are implemented and gated by
 the smoke suite; no wave has run them, so this section states what they
 do and states no result. The design and its pre-registered estimands are
-in [forgive-v2-design.md](forgive-v2-design.md); the 18 arms wait behind
-the `forgive_v2` dispatch input.
+in [forgive-v2-design.md](forgive-v2-design.md); the arms wait behind the
+`forgive_v2` dispatch input.
 
 Only the receiver can forgive, because only the receiver knows how much
 it needs and how much it has. v2 adds two receiver policies on top of the
@@ -491,70 +492,74 @@ v1 verdict and changes no sender logic.
 **Pacing (change P).** The cap binds at the headline budget, and first
 come first served spends it on the first burst, so the receiver may
 decline a forgivable trim to keep allowance for later in the step.
-`selection_policy.pacing` is a closed sum of three rules. Under `none`
-the cap is `(forgiven + b) / eligible <= t`, unchanged from v1. Under
-`bernoulli` the same cap applies and the range is additionally declined
-when `hash_combine(flow.decision_hash, range start) % 1000000 >= p *
-1000000`; the coin is deterministic per range, so a declined range stays
-declined on re-trim and the fraction forgiven is exact rather than
+`selection_policy.pacing` is a closed sum of two rules. Both spend the one
+cap `(forgiven + b) * 1000000 <= (delivered + forgiven + b) * t`, which is
+the receiver-local form of the v1 law: the rank weighs the budget against
+the bytes it has accounted for, kept or forgiven, so the cap becomes
+available as it receives rather than as senders launch, and a step whose
+delivered and forgiven bytes exhaust the eligible ones reaches the same
+`p x eligible` ceiling. Under `bernoulli` the range is additionally
+declined when `hash_combine(flow.decision_hash, range start) % 1000000 >=
+p * 1000000`; the coin is deterministic per range, so a declined range
+stays declined on re-trim and the fraction forgiven is exact rather than
 geometric, and no ns-3 random stream is consumed, so paired arms stay
-paired. Under `vesting` the denominator is the bytes the rank has
-received rather than the bytes senders have launched, which is strictly
-tighter because delivered never exceeds eligible; the ceiling is
-unchanged and only its availability moves. A declined range is repaired,
-so pacing costs time and buys allowance. `pacing_refusals` counts only the
-ranges the coin declined that the cap could have afforded, so coin and cap
-refusals decompose without overlap.
+paired. A declined range is repaired, so pacing costs time and buys
+allowance. `pacing_refusals` counts only the ranges the coin declined that
+the cap could have afforded, so coin and cap refusals decompose without
+overlap.
 
-**The straggler stop (change S).** A forgiven trimmed byte saves its
-repair; a forgiven unsent byte saves its transmission too.
-`selection_policy.straggler_idle_ns` gives each receive queue pair one
-timestamp and at most one scheduler entry: a data arrival stamps it and
-arms the event when none is pending, the event reschedules itself if data
-arrived while it ran, and otherwise it asks the frontend for the end
-offset it may absorb. A grant absorbs everything from the cumulative
-sequence to the flow size and acknowledges it, so the sender completes
-through the `IsFinished` it already had, with no new packet type and no
-new sender state. The transport asks with two numbers, the cumulative
-sequence and the bytes already accepted above it, because under selective
-repeat a stalled flow keeps taking packets past the gap; the hole is the
-size less both, and charging the whole span above the cumulative sequence
-would spend the budget on bytes the receiver already holds. The answer is the whole remainder or nothing, because
-the receiver knows the byte count and not which gradient elements matter.
-An idle of zero asks at every arrival, which stops the flow as soon as
-its remainder fits the budget; that is MLT's stop-at-(1-p) contract as
-the degenerate point of this rule, and it is retained as an arm so its
-price is measured rather than argued. A refusal emits nothing, so no
-exemption ends on it.
+**The cap's base (change O).** `selection_policy.cap_base` is
+`"accounted"`, the law above, or `"owed"`, under which the denominator is
+the bytes the step's plan says this rank will receive. The plan is
+`owed_bytes` per (receiving rank, step, sender) in `experiment.json`,
+which `generate.py` derives from the same DP All-Reduce sizing it wrote the
+traces from: a direct All-Reduce over a group of `G` sends every peer
+`2 x B / G` bytes per collective. `close` refuses a run whose launches
+disagree with the plan, so the hint is exact or the run is not a result.
 
-Both policies spend the same allowance under the same law, and both are
+**The step stop (change S).** With `selection_policy.step_stop`, legal only
+on the owed base, the receiver ends one sender's step once `1 - p` of what
+that sender owes it has arrived, and takes the holes that sender left. At
+that point nothing new is coming from it, so the exemption has nothing left
+to protect and what remains is repair tail. The transport asks the
+frontend at every accepted arrival, with the cumulative sequence and the
+bytes already accepted above it, because under selective repeat a stalled
+flow keeps taking packets past the gap; the hole is the size less both, and
+charging the whole span above the cumulative sequence would spend the
+budget on bytes the receiver already holds. A grant absorbs everything from
+the cumulative sequence to the flow size and acknowledges it, so the sender
+completes through the `IsFinished` it already had, with no new packet type
+and no new sender state. The answer is the whole remainder or nothing,
+because the receiver knows the byte count and not which gradient elements
+matter, and it is bounded by the cap like every other forgiveness. A
+refusal emits nothing, so no exemption ends on it.
+
+Every policy spends the same allowance under the same law, and all are
 refused outside a forgiving domain. The coin never applies to the
-remainder: pacing exists to keep allowance for the end of the step, and
-applying it at the end of the step would defeat its own purpose.
+remainder: pacing exists to keep allowance for the end of the step, and the
+stop fires at the end of the step.
 
 **The pure core.** `trim_verdict` and `remainder_verdict` in
 `ExperimentConfig.hh` are total functions of a budget entry, a threshold,
-a pacing rule and either a coin or a remainder; they return the answer
-and the entry to store. `evaluate_forgiveness` and `evaluate_remainder`
-are shells that eliminate a missing or closed entry, draw the coin, store
-the answer back and count. `RdmaRangeAlgebra` asserts the laws directly:
-vesting never affords what `none` refuses, the coin repeats per (flow,
-range start), the remainder is whole or nothing, a coin refusal reports
-no spent allowance, and a closed entry is eliminated before any verdict
-is computed.
+and either a pacing rule with a coin or a remainder; they return the
+answer and the entry to store. `evaluate_forgiveness` and
+`evaluate_remainder` are shells that eliminate a missing or closed entry,
+draw the coin, store the answer back and count. `RdmaRangeAlgebra` asserts
+the laws directly: an entry that has accounted for everything it does not
+spend affords exactly `t / 1000000` of its eligible bytes, the law is
+monotone in delivered and in forgiven, an entry that has received nothing
+forgives nothing, the coin repeats per (flow, range start), the remainder
+is whole or nothing, a coin refusal reports no spent allowance, and a
+closed entry is eliminated before any verdict is computed.
 
 **What the gate proves.** `bernoulli_smoke_8` must record a coin refusal
 of a range the cap could have afforded, or the rule never cost the arm a
-forgiveness. `vesting_smoke_8` must forgive something and no more than
-`vesting_smoke_8_unpaced` at the same seed; the two differ only in the
-rule, and both bucket the gradient, because vesting releases nothing until
-a message completes and a profile whose step is one All-Reduce completes
-it at the end. `straggler_smoke_8` must forgive a remainder, and its
-charged remainder bytes must equal the transport's `remainder_forgiven`
-bytes. All of them also assert `pacing_refusals == 0` wherever no
+forgiveness. `stepstop_smoke_8` must forgive a remainder, its charged
+remainder bytes must equal the transport's `remainder_forgiven` bytes, and
+its worst cell must hold the contract's floor. All of them also assert `pacing_refusals == 0` wherever no
 Bernoulli rule is in force, and
 `forgiven_remainder_bytes <= forgiven_bytes` on every flow.
 `check_single_arm_join.py` asserts that one `run.py` arm at a seed
 reproduces `compare.py`'s recovery arm at the same profile and seed, byte
-for byte in the flow telemetry, which is what makes the 18 single-arm
-records joinable against the v1 wave's baselines.
+for byte in the flow telemetry, which is what makes the single-arm records
+joinable against the v1 wave's baselines.

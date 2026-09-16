@@ -1579,10 +1579,11 @@ def summarize(
         "forgiveness": {
             "forgiven_bytes": statistics.counters["forgiven_bytes"],
             "forgiven_range_count": statistics.counters["forgiven_ranges"],
-            # The two v2 receiver policies. Remainder bytes are what the
-            # straggler stop forgave on a quiet flow, whether or not a sender
-            # had already put them on the wire; pacing refusals are forgivable
-            # trims the coin declined, which no other counter can see.
+            # The two v2 receiver policies. Remainder bytes are what the step
+            # stop forgave when it ended a sender's step, whether or not that
+            # sender had already put them on the wire; pacing refusals are
+            # forgivable trims the coin declined, which no other counter can
+            # see.
             "forgiven_remainder_bytes": statistics.counters[
                 "forgiven_remainder_bytes"
             ],

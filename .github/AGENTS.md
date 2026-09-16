@@ -285,7 +285,10 @@ the `evaluations` matrix maps `ns3-evaluation.yml` over the result.
    Where `arm_count * simulation_timeout_seconds` exceeds that budget, `notes`
    must name `walltime` as the backstop and give the arm count.
 5. A new `gate` value needs a `workflow_dispatch` boolean and its own clause in
-   the plan step's jq filter.
+   the plan step's jq filter. The `record_filter` input is a regular
+   expression on `ledger_key` that narrows what the gates already selected, so
+   a subset of a gate dispatches without a gate of its own; empty runs every
+   record the gates select.
 6. Every record costs three hosted jobs (`provision`, `provision_courier`,
    `archive`) and two SLURM allocations (the arm and its courier). Keep the
    wave inside the account concurrency limit.

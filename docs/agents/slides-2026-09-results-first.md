@@ -284,8 +284,6 @@ This is the piece we would present as ongoing, not as a result.
 ![Budget sweep](figures/dose-front.svg)
 
 One wave, 84 arms on the worst cell of the map, three seeds per budget.
-The two waves before it measured this arm before the revocation fix at
-commit `c6855f0`, so these figures replace theirs.
 
 At a loss budget of 0.1 the exempt arm recovers 12.9 to 14.1 % of the
 training window for 6.75 to 6.89 % of data-parallel bytes, against 2.4 to

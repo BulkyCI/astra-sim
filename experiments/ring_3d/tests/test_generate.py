@@ -434,8 +434,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
             # knob moved and congestion control untouched.
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_p01_{tag}.json"
-                for tag in ("b50", "b25", "b10", "b05", "vest", "strag",
-                            "strag0", "veststrag")
+                for tag in ("b50", "b25", "b10", "b05", "owed",
+                            "owed_b25", "owed_stepstop")
             }
             # Round 2 pairs the coin with a budget other than 0.1.
             | {
@@ -555,7 +555,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         document["selection_policy"]["pacing"] = {"kind": "bernoulli", "p": 0.25}
-        document["selection_policy"]["straggler_idle_ns"] = 250_000
+        document["selection_policy"]["cap_base"] = "owed"
+        document["selection_policy"]["step_stop"] = True
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "profile.json"
             profile_path.write_text(json.dumps(document), encoding="utf-8")
@@ -569,7 +570,13 @@ class Ring3DGeneratorTests(unittest.TestCase):
             policy["selection_policy"]["pacing"],
             {"kind": "bernoulli", "p": 0.25},
         )
-        self.assertEqual(policy["selection_policy"]["straggler_idle_ns"], 250_000)
+        self.assertEqual(policy["selection_policy"]["cap_base"], "owed")
+        self.assertTrue(policy["selection_policy"]["step_stop"])
+        # The plan travels with the base that reads it, per (rank, step,
+        # sender), and a direct All-Reduce owes every peer the same bytes.
+        owed = policy["owed_bytes"]["0"]["1"]
+        self.assertEqual(sorted(owed), ["2", "4", "6"])
+        self.assertEqual(set(owed.values()), {1_048_576})
 
     def test_an_unpaced_profile_still_names_its_rule(self) -> None:
         """The default is a rule, not an absence, so it is written down."""
@@ -585,7 +592,9 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
 
         self.assertEqual(policy["selection_policy"]["pacing"], {"kind": "none"})
-        self.assertNotIn("straggler_idle_ns", policy["selection_policy"])
+        self.assertNotIn("cap_base", policy["selection_policy"])
+        self.assertNotIn("step_stop", policy["selection_policy"])
+        self.assertNotIn("owed_bytes", policy)
 
     def test_the_v2_receiver_policies_refuse_a_malformed_profile(self) -> None:
         """Each refusal names its field.
@@ -602,12 +611,17 @@ class Ring3DGeneratorTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         broken = {
-            "pacing.p": {"pacing": {"kind": "vesting", "p": 0.5}},
+            "pacing.p": {"pacing": {"kind": "none", "p": 0.5}},
             "pacing.p ": {"pacing": {"kind": "bernoulli"}},
             "pacing.p  ": {"pacing": {"kind": "bernoulli", "p": 0.0}},
             "pacing.p   ": {"pacing": {"kind": "bernoulli", "p": 1.0}},
             "pacing.kind": {"pacing": {"kind": "poisson"}},
-            "straggler_idle_ns": {"straggler_idle_ns": -1},
+            # An unknown kind, because the receiver measures every cap
+            # against what it has accounted for.
+            "pacing.kind ": {"pacing": {"kind": "vesting"}},
+            "cap_base": {"cap_base": "launched"},
+            # The stop reads the plan, so it is refused without one.
+            "step_stop": {"step_stop": True},
         }
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "profile.json"
@@ -623,8 +637,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
 
             # Neither policy means anything where nothing is forgiven.
             for key, value in (
-                ("pacing", {"kind": "vesting"}),
-                ("straggler_idle_ns", 0),
+                ("pacing", {"kind": "bernoulli", "p": 0.5}),
+                ("cap_base", "owed"),
             ):
                 with self.subTest(admission=key):
                     candidate = json.loads(json.dumps(document))

@@ -204,20 +204,32 @@ FORGIVING_DOMAINS: frozenset[SheddingDomain] = frozenset(
 )
 """The domains that decide after the trim, and so need the trimming transport."""
 
+class CapBase(StrEnum):
+    """What the receiver measures its budget against.
+
+    ``accounted`` is the law of record: the bytes the rank has accounted for,
+    kept or forgiven, so the cap becomes available as the step arrives.
+    ``owed`` measures it against the step's plan, which the generator computes
+    and the simulator holds to the launches, so the whole cap is available from
+    the step's first packet.
+    """
+
+    ACCOUNTED = "accounted"
+    OWED = "owed"
+
+
 class PacingKind(StrEnum):
     """The receiver's rule for declining a forgivable trim.
 
     ``none`` forgives whatever the cap affords, first come first served.
     ``bernoulli`` forgives a fixed fraction of forgivable ranges, drawn from a
     coin that is deterministic per range, so allowance survives the first
-    burst. ``vesting`` measures the same cap against the bytes the rank has
-    received rather than the bytes senders have launched, which releases the
-    budget as the step proceeds.
+    burst. The cap itself is the same under both rules, because the receiver
+    measures it against the bytes it has accounted for.
     """
 
     NONE = "none"
     BERNOULLI = "bernoulli"
-    VESTING = "vesting"
 
 
 @dataclass(frozen=True)
@@ -269,11 +281,20 @@ class SelectionPolicy:
     p_low: float
     p_high: float
     domain: SheddingDomain = SheddingDomain.ADMISSION
-    # The two receiver policies of FORGIVE v2, both meaningful only where the
-    # receiver decides. ``straggler_idle_ns`` None disables the straggler
-    # stop; zero enables it and asks at every arrival.
+    # The receiver policies of FORGIVE v2, all meaningful only where the
+    # receiver decides. ``step_stop`` ends a sender's step once ``1 - p`` of
+    # what it owes this rank has arrived, which reads the plan and so requires
+    # the owed base.
     pacing: Pacing = Pacing()
-    straggler_idle_ns: int | None = None
+    cap_base: CapBase = CapBase.ACCOUNTED
+    step_stop: bool = False
+
+    def __post_init__(self) -> None:
+        if self.step_stop and self.cap_base is not CapBase.OWED:
+            raise ValueError(
+                "selection_policy.step_stop requires cap_base owed: the stop "
+                "fires on what a sender still owes, which only the plan knows"
+            )
 
     @property
     def semantics(self) -> str:
@@ -386,15 +407,20 @@ def _load_pacing(policy: dict[str, Any]) -> Pacing:
     )
 
 
-def _load_straggler_idle_ns(policy: dict[str, Any]) -> int | None:
-    """Absent disables the straggler stop; zero asks at every arrival."""
-    value = policy.get("straggler_idle_ns")
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+def _load_cap_base(policy: dict[str, Any]) -> CapBase:
+    value = policy.get("cap_base", CapBase.ACCOUNTED.value)
+    if value not in tuple(base.value for base in CapBase):
         raise ValueError(
-            "selection_policy.straggler_idle_ns must be a nonnegative integer"
+            "selection_policy.cap_base must be one of "
+            f"{sorted(base.value for base in CapBase)}"
         )
+    return CapBase(value)
+
+
+def _load_step_stop(policy: dict[str, Any]) -> bool:
+    value = policy.get("step_stop", False)
+    if not isinstance(value, bool):
+        raise ValueError("selection_policy.step_stop must be a boolean")
     return value
 
 
@@ -403,7 +429,7 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     if not isinstance(policy, dict):
         raise ValueError("selection_policy must be an object")
     required_keys = {"p_low", "p_high"}
-    optional_keys = {"domain", "pacing", "straggler_idle_ns"}
+    optional_keys = {"domain", "pacing", "cap_base", "step_stop"}
     if not required_keys <= set(policy) <= required_keys | optional_keys:
         raise ValueError(
             f"selection_policy must contain exactly {sorted(required_keys)} "
@@ -423,12 +449,13 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
         )
     domain = SheddingDomain(domain_value)
     pacing = _load_pacing(policy)
-    straggler_idle_ns = _load_straggler_idle_ns(policy)
-    # Both v2 policies belong to the receiver, and only a forgiving domain has
+    cap_base = _load_cap_base(policy)
+    step_stop = _load_step_stop(policy)
+    # Every v2 policy belongs to the receiver, and only a forgiving domain has
     # a receiver that decides anything. Accepting them elsewhere would write a
     # profile whose knob moves nothing.
     if domain not in FORGIVING_DOMAINS:
-        for key in ("pacing", "straggler_idle_ns"):
+        for key in ("pacing", "cap_base", "step_stop"):
             if key in policy:
                 raise ValueError(
                     f"selection_policy.{key} requires a forgiving domain"
@@ -438,7 +465,8 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
         p_high=p_high,
         domain=domain,
         pacing=pacing,
-        straggler_idle_ns=straggler_idle_ns,
+        cap_base=cap_base,
+        step_stop=step_stop,
     )
 
 
@@ -906,6 +934,10 @@ class TraceWriter:
         self.groups = groups
         self.node_id = 1
         self.nodes: list[Node] = []
+        # The DP All-Reduce bytes this rank takes part in, by step. The step's
+        # plan is derived from these, so the plan and the trace cannot drift:
+        # they are the same numbers.
+        self.dp_all_reduce_bytes_by_step: dict[int, int] = {}
 
     def _new_node(self, name: str, node_type: int, dependencies: Iterable[int]) -> Node:
         node = Node(id=self.node_id, name=name, type=node_type)
@@ -929,6 +961,10 @@ class TraceWriter:
         size_bytes: int,
         step: int,
     ) -> int:
+        if domain == "dp":
+            self.dp_all_reduce_bytes_by_step[step] = (
+                self.dp_all_reduce_bytes_by_step.get(step, 0) + size_bytes
+            )
         node = self._new_node(name, COMM_COLL_NODE, dependencies)
         node.attr.extend(
             [
@@ -1466,6 +1502,51 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
     ]
 
 
+def owed_bytes_by_cell(
+    profile: Profile,
+    dp_all_reduce_bytes_by_rank_step: dict[int, dict[int, int]],
+    groups: dict[str, list[int]],
+    dp_groups: dict[str, int],
+) -> dict[str, dict[str, dict[str, int]]]:
+    """What each sender owes each receiving rank in each step.
+
+    ASTRA-sim runs a direct DP All-Reduce as ``2 x (G - 1)`` streams of
+    ``B / G`` bytes each over the ``G - 1`` peers (``Ring.cc`` sizes the
+    All_Reduce stream count and message; ``AllToAll.cc`` spreads the streams
+    round robin), so every peer sends this rank ``2 x B / G`` bytes per
+    collective. Only the DP All-Reduce is eligible for the budget, so only it
+    is owed. The ring implementation puts all of it on one predecessor and is
+    refused here rather than predicted: nothing measures it, and the
+    simulator's close would reject a wrong plan anyway.
+    """
+    implementation = profile.dp_all_reduce_implementation
+    if not implementation.startswith("direct"):
+        raise ValueError(
+            "selection_policy.cap_base owed needs a direct DP All-Reduce: "
+            f"{implementation} spreads its messages differently"
+        )
+    plan: dict[str, dict[str, dict[str, int]]] = {}
+    for rank in range(profile.ranks):
+        members = groups[str(dp_groups[str(rank)])]
+        peers = [member for member in members if member != rank]
+        if not peers:
+            continue
+        group_size = len(members)
+        for step, collective_bytes in sorted(
+            dp_all_reduce_bytes_by_rank_step[rank].items()
+        ):
+            if (2 * collective_bytes) % group_size:
+                raise ValueError(
+                    "the DP All-Reduce does not divide evenly across the "
+                    f"group: {collective_bytes} B over {group_size} ranks"
+                )
+            per_peer = 2 * collective_bytes // group_size
+            plan.setdefault(str(rank), {})[str(step)] = {
+                str(peer): per_peer for peer in peers
+            }
+    return plan
+
+
 def dp_fan_in(dp: int, dp_all_reduce_implementation: str) -> int:
     """Peak concurrent inbound DP shard flows per receiving rank.
 
@@ -1520,7 +1601,8 @@ def resolve_selection_policy(
             profile.selection_policy.domain if domain is None else domain
         ),
         pacing=profile.selection_policy.pacing,
-        straggler_idle_ns=profile.selection_policy.straggler_idle_ns,
+        cap_base=profile.selection_policy.cap_base,
+        step_stop=profile.selection_policy.step_stop,
     )
 
 
@@ -1539,6 +1621,7 @@ def write_experiment_config(
     profile: Profile,
     clr_schedule: ClrSchedule,
     selection_policy: SelectionPolicy,
+    owed_bytes: dict[str, dict[str, dict[str, int]]] | None = None,
 ) -> None:
     microburst_flows = _microburst_flows(profile)
     policy_document: dict[str, Any] = {
@@ -1564,10 +1647,13 @@ def write_experiment_config(
         # admission drops both, because the simulator refuses them there and
         # neither would move anything if it did not.
         policy_document["pacing"] = selection_policy.pacing.document()
-        if selection_policy.straggler_idle_ns is not None:
-            policy_document["straggler_idle_ns"] = (
-                selection_policy.straggler_idle_ns
-            )
+        # Written only where it moves something: the accounted base is the
+        # default on both sides, so an arm that does not name it produces the
+        # file it produced before the base existed.
+        if selection_policy.cap_base is CapBase.OWED:
+            policy_document["cap_base"] = selection_policy.cap_base.value
+        if selection_policy.step_stop:
+            policy_document["step_stop"] = True
     policy = {
         "schema_version": 1,
         "enabled": True,
@@ -1589,6 +1675,13 @@ def write_experiment_config(
             "flows": microburst_flows,
         },
     }
+    # The step's plan travels with the policy that reads it. The simulator
+    # refuses one without the other, and holds the plan to the launches at
+    # close, so a wrong plan ends the run instead of moving the budget.
+    if "cap_base" in policy_document:
+        if owed_bytes is None:
+            raise ValueError("cap_base owed requires the step's plan")
+        policy["owed_bytes"] = owed_bytes
     path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1727,6 +1820,7 @@ def materialize(
 
     groups, tp_groups, pp_groups, dp_groups = generate_groups(profile)
     workload_dir = output_dir / "workload"
+    dp_all_reduce_bytes_by_rank_step: dict[int, dict[int, int]] = {}
     for rank in range(profile.ranks):
         writer = TraceWriter(
             workload_dir / f"ring_3d.{rank}.et",
@@ -1736,6 +1830,9 @@ def materialize(
         )
         writer.build()
         writer.write()
+        dp_all_reduce_bytes_by_rank_step[rank] = (
+            writer.dp_all_reduce_bytes_by_step
+        )
 
     topology = output_dir / "topology.txt"
     physical_topology = build_topology(profile.network, profile.ranks)
@@ -1756,7 +1853,17 @@ def materialize(
         profile.network.link_rate,
     )
     experiment_config = output_dir / "experiment.json"
-    write_experiment_config(experiment_config, profile, clr_schedule, selection_policy)
+    owed_bytes = (
+        owed_bytes_by_cell(
+            profile, dp_all_reduce_bytes_by_rank_step, groups, dp_groups
+        )
+        if selection_policy.cap_base is CapBase.OWED
+        and selection_policy.domain in FORGIVING_DOMAINS
+        else None
+    )
+    write_experiment_config(
+        experiment_config, profile, clr_schedule, selection_policy, owed_bytes
+    )
     system_config = output_dir / "system.json"
     write_system_config(
         system_config,

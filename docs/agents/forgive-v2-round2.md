@@ -5,12 +5,12 @@ main `d95d17e` and ns-3 `16d7c9d4d`. Nothing in the simulator changes.
 
 ## 1. What run #124 showed
 
-Nine of eighteen arms failed in `analyze.py`, not in the simulator. Every
-S, S0 and VS arm completed, wrote full telemetry, and then tripped
-`analyze.py:1263`, "completed flow cannot deliver more bytes than
-attempted", whose law is `data_attempted_bytes >= physical_bytes` for a
-completed flow with trims. That law assumes a completed flow sent every
-byte, and the straggler stop exists to complete flows that did not.
+Nine of eighteen arms failed in `analyze.py`, not in the simulator. Each
+completed, wrote full telemetry, and then tripped `analyze.py:1263`,
+"completed flow cannot deliver more bytes than attempted", whose law is
+`data_attempted_bytes >= physical_bytes` for a completed flow with trims.
+That law assumes a completed flow sent every byte, and a remainder
+forgiveness completes flows that did not.
 
 The law that does hold, on all 376 327 flows of all 9 arms:
 
@@ -20,31 +20,17 @@ data_attempted_bytes + forgiven_remainder_bytes >= physical_bytes
 
 Joined by seed against run #123's recovery arm at budget 0.1:
 
-| arm | training time | loss, % of DP bytes | remainder, % of DP | exempt flows re-armed |
-| --- | --- | --- | ---: | --- |
-| v1, run #123 | 12.9 to 14.1 % | 6.75 to 6.89 % | 0 | 35 to 37 % |
-| B25 | 16.0 to 16.2 % | 5.5 to 5.9 % | 0 | 7 to 8 % |
-| B50 | 13.9 to 14.8 % | 6.3 to 6.6 % | 0 | 18 to 20 % |
-| V | 13.2 to 13.8 % | 5.9 to 6.0 % | 0 | 35 to 40 % |
-| S, 250 us | 13.3 to 14.1 % | 6.8 to 7.0 % | 0.25 | 33 to 34 % |
-| S0 | 7.7 to 8.7 % | 8.1 % | 4.2 to 4.4 | 56 to 58 % |
-| VS | 13.7 to 14.4 % | 5.8 to 6.2 % | 0.40 to 0.45 | 36 to 37 % |
+| arm | training time | loss, % of DP bytes | exempt flows re-armed |
+| --- | --- | --- | --- |
+| v1, run #123 | 12.9 to 14.1 % | 6.75 to 6.89 % | 35 to 37 % |
+| B25 | 16.0 to 16.2 % | 5.5 to 5.9 % | 7 to 8 % |
+| B50 | 13.9 to 14.8 % | 6.3 to 6.6 % | 18 to 20 % |
 
-Readings.
-
-- Bernoulli pacing wins on both axes and monotonically in `p`: B25 gains
-  2.5 points of time over v1 for 1 point less loss, B50 falls between them. The
-  re-arm column is the mechanism: the coin keeps the cap unspent, the
-  exemption survives, and the exemption is what recovers time. Whether the
-  curve keeps rising below 0.25 is the next question.
-- Vesting saves 0.8 points of loss and no time. Not worth its field unless
-  round 2 changes that.
-- The straggler stop at 250 us is null. Of its forgiven remainder, 83 %
-  had already been attempted, trimmed and awaiting repair; only 16 to 18 %
-  was never sent. "Saves transmission too" is one sixth true.
-- S0, MLT's stop-at-(1-p), loses 5 points against v1 and spends the cap
-  to the byte on every permissive step (956.96 MB per step, exactly
-  `0.1 x eligible`). The ceiling became a target, as predicted.
+Bernoulli pacing wins on both axes and monotonically in `p`: B25 gains 2.5
+points of time over v1 for 1 point less loss, and B50 falls between them.
+The re-arm column is the mechanism, because the coin keeps the cap unspent,
+the exemption survives, and the exemption is what recovers time. Whether
+the curve keeps rising below 0.25 is the next question.
 
 ## 2. Changes
 
@@ -61,7 +47,8 @@ lost to trims. Summary key and report row "Remainder never sent". Nothing
 in the simulator counts it, because the two existing counters already
 determine it.
 
-**C. Regenerate, do not re-run.** The 9 straggler bundles are complete.
+**C. Regenerate, do not re-run.** The 9 remainder-forgiving bundles are
+complete.
 Run the corrected analyzer on each locally and produce their
 `summary.json`; the join table above is then reproducible from summaries
 rather than from my telemetry scan.
@@ -70,7 +57,7 @@ rather than from my telemetry scan.
 
 | record | kind | arms | answers |
 | --- | --- | --- | --- |
-| `regime_64_dcqcn_direct7_4to1_exempt_p005`, 3 seeds | comparison | 12 | the v1 reference at budget 0.05, inside MLT's tolerable range; also the missing dose point |
+| `regime_64_dcqcn_direct7_4to1_exempt_p005`, 3 seeds | comparison | 12 | the v1 reference at budget 0.05; also the missing dose point |
 | `..._p01_b10`, 3 seeds | single | 3 | does the Bernoulli curve keep rising below 0.25 |
 | `..._p01_b05`, 3 seeds | single | 3 | where it turns |
 | `..._p005_b25`, 3 seeds | single | 3 | B25 at the small budget, against the p005 comparison |
@@ -134,19 +121,17 @@ arrives, the same pass runs before any number is read.
 Run 2026-09-16 with the analyzer of change E over all 39 forgiving arms in
 hand, each against its own `clr_mask.csv`. No arm raised. The worst cell's
 delivered share is the contract's floor to four decimals wherever the cap
-binds: 0.9000 at budget 0.1 (v1, B25, B50, S, S0), 0.8000 at 0.2, 0.600 to
-0.622 at 0.4, 0.415 to 0.444 at 0.6, 0.611 to 0.620 with the mask off.
-Vesting and the vesting-plus-straggler arms leave 1.0 to 1.1 points
-unspent at their worst cell (0.910 to 0.911), the `direct2` cell 0.928 to
-0.940, and the no-incast control 1.000. Every rank received at least
-`1 - p(step)` of every step in every arm published so far.
+binds: 0.9000 at budget 0.1 (v1, B25, B50), 0.8000 at 0.2, 0.600 to 0.622
+at 0.4, 0.415 to 0.444 at 0.6, 0.611 to 0.620 with the mask off. The
+`direct2` cell keeps 0.928 to 0.940 and the no-incast control 1.000. Every
+rank received at least `1 - p(step)` of every step in every arm published
+so far.
 
 ## 6. The two references never run
 
 Yashar's second suggestion, a baseline with no loss tolerance, and the
-congestion-neutral recovery arm from phase 3 of
-[next-steps-after-v1-fix.md](next-steps-after-v1-fix.md) were planned for
-the v1 re-run and not added to the matrix. Every published delta is
+congestion-neutral recovery arm were planned for the v1 re-run and not
+added to the matrix. Every published delta is
 against the fixed-low control at `p = 0.005`, which sheds about 0.4 % of
 data-parallel bytes at admission.
 
@@ -164,7 +149,7 @@ the legal zero coincide in meaning.
 `run_forgive_ref`.** Profiles `regime_64_dcqcn_direct7_4to1_zero.json`,
 `regime_64_dcqcn_direct2_2to1_zero.json` and `no_incast_8_zero.json`,
 each its exempt sibling with `p_low = p_high = 0` and
-`domain = admission`, no pacing, no straggler. Records: direct7 at seeds
+`domain = admission`, no pacing, no stop. Records: direct7 at seeds
 9550582, 23172535, 94081284, 81117450, 28410270; direct2 at the first
 three; no-incast at its own. One arm serves every budget of the dose front
 at a given seed, because zero makes `p_high` and the mask inert.
@@ -189,3 +174,135 @@ one-seed figure of 1367 ms; this puts the brute-force row of the table on
 paired seeds beside the DCQCN baseline, FORGIVE and the zero reference.
 
 Fifteen records in the gate.
+
+## 7. One budget law
+
+**L. The receiver-local law, for every rule.** At tolerance `p` the cap is
+`forgiven <= p x (delivered + forgiven)`, equivalently
+`forgiven <= p/(1-p) x delivered`: the receiver measures the budget against
+the bytes it has accounted for, kept or forgiven, both of which are its own
+counters, while a receiving NIC never sees the sender's launches. At the
+end of a step `delivered + forgiven = eligible`, so the ceiling is
+`p x eligible`, which is v1's law, and the only difference is when the cap
+becomes available, which is whatever is in flight. The simulator holds one
+rule rather than a family: `affords` computes `spent = shed + forgiven + b`
+and tests `spent x S <= (delivered + spent) x t` whatever the pacing rule,
+and the parser refuses any `pacing.kind` but `none` and `bernoulli`. Pacing
+names the coin alone, which declines a range the budget affords rather than
+changing what it affords. `eligible`, `register_eligible`, `close`'s throw
+and `min_delivered_share` stand unchanged, because the accumulated
+denominator is what certifies the contract. `RdmaRangeAlgebra` asserts three
+laws of it: a cell that has accounted for every byte it does not spend
+affords exactly `0.1 x eligible` at `t = 0.1 S`, and not the `eligible/11` a
+delivered-only denominator would give; the rule is monotone in `delivered`
+and in `forgiven`; and a cell with `delivered = forgiven = 0` affords a
+first range only when `t >= S`, which is the floor the delivered term
+creates.
+
+**R. Delivered is per byte, not per message.** A receiving NIC credits a
+byte when it accepts it, so `delivered` advances on every accepted payload
+range rather than at message completion. `RdmaHw::ReceiveUdp` measures what
+one arrival added before the receive state moves, which is what
+`AddOutOfOrderRange` would absorb, and reports it through one callback,
+`DataAcceptedCallback(sip, dip, sport, dport, bytes)`; a duplicate reports
+zero and a forgiven range was absorbed without data, so neither is counted
+twice. The frontend credits the cell and the sending rank, and at queue-pair
+completion asserts that the flow's accepted bytes equal `q->m_size` less its
+forgiven bytes, naming the flow if they do not. Under message-granular
+crediting a step whose rank receives one message per peer released no budget
+until the step was over, which is a property of the accounting rather than of
+the law.
+
+**M. Dispatch by record, not by gate.** The workflow gains an input
+`record_filter`, a regular expression tested against `ledger_key` and
+applied on top of the gate selection, so a subset of any gate can be
+dispatched without a new gate. Empty means no filter.
+
+**N. The v1 point under the unified law.** Three `p01_single` records: the
+base exempt profile at seeds 9550582, 23172535 and 94081284, `kind` single,
+gate `forgive_v2`,
+dispatched with `run_forgive_v2=true` and
+`record_filter=exempt-p01-single-seed`. Stated in advance: the arm should
+match run #123's p01 recovery arm within the seed spread on both time and
+loss, because the in-flight gap is a few hundred KB against a 15 MB cap.
+If it does, the receiver-local form replaces the sender-side one in the
+specification with nothing lost; if the arm forgives measurably less, the
+gap is the price of measuring the budget where the receiver can.
+
+## 8. The cap's base: accounted or owed
+
+Joe's question, 2026-09-16: does the receiver-local law, whose cap grows
+only as bytes are accounted for, underperform a cap that is available in
+full from the first packet of the step? Nothing measured so far answers
+it; the pacing arms speak to the spend rate, not to availability.
+
+**O. A two-case base.** `selection_policy.cap_base` is `"accounted"`
+(default, the law of record: `spent x S <= (delivered + spent) x t`) or
+`"owed"` (`spent x S <= owed x t`, where `owed` is the bytes the step
+will send toward this rank, known at step start). In the ledger it is one
+`bool` and one `uint64_t owed` per cell; `affords` picks the base on the
+bool; nothing else branches. Bernoulli composes with either.
+
+**P. Where `owed` comes from.** The DP buckets and the all-reduce
+schedule are fixed, so the bytes each rank is owed in each step are a
+function of the profile alone. `generate.py` computes
+`owed_bytes[rank][step]` from the same message sizing it uses to write the
+traces and emits it into `experiment.json`; the frontend opens each cell
+with it. At `close`, when the base is owed, `eligible == owed` or the run
+throws: the hint was exact or the run is not a result. That is the
+certification that the collective hint is the accumulated total and not
+an approximation of it.
+
+**Q. Six arms, gate `forgive_v2`, filter `owed`.** `p01_owed` (no
+pacing) and `p01_owed_b25`, 3 seeds each, joined against #123's p01
+recovery arm and #124's B25 respectively. The keys read
+`...-exempt-p01-owed-seed-<seed>` and `...-exempt-p01-owed-b25-seed-<seed>`,
+so one filter selects every owed arm.
+
+Stated in advance: owed should be within the seed spread of accounted on
+time and slightly higher on loss and re-arm share, because it makes the
+cap spendable earlier and spending the cap is what ends exemptions. If
+owed is faster by more than the spread, the receiver-local law is leaving
+time on the table and the specification gains a size hint from the
+collective library; if it is within the spread, the law needs no coupling
+to the collective library and the paper says so with the number; if it is
+slower, the re-arm column says why.
+
+**S. The step stop.** The receiver counts what it has received from a
+sender in this step. The moment that reaches `1 - p` of what the sender
+owes it for the step, it tells the sender to stop: everything still to
+come is inside the budget and would be wasted bandwidth. It is a budget
+decision at the receiver and nothing else, not a timer, not a view of
+the line, not a check that the sender has finished. It fires near the end
+of the step by construction, because that is when `1 - p` has arrived.
+
+Run #124's stop-at-every-arrival arm was not this. It stopped a flow
+whenever that one flow's remainder fitted the cap, which for a 2 MB flow against a 15 MB cap is
+early in the step, so it spent the exemption while senders were still
+sending. The rule here does not look at one flow; it looks at the
+sender's whole share of the step.
+
+What it needs. `owed` per (sender, receiver, step), which `generate.py`
+derives from the same per-peer message sizing as the per-rank total (the
+cell's `owed` is its sum over senders), and `delivered` per (sender,
+receiver, step), which the per-byte arrival accounting of change R
+already provides once it is keyed by sender. With
+`selection_policy.step_stop = true` (legal only with `cap_base = owed`,
+and the transport asks at every accepted arrival),
+`evaluate_remainder` answers forgive for a flow only when
+`delivered_from(src) >= (1 - p) x owed_from(src)`; the remainder is then
+forgiven whole, bounded by the cap as always. Flows from that sender still
+receiving are stopped at their next packet; a flow waiting on a repair is
+left to its repair, which is cheap.
+
+Three arms in #127: `p01_owed_stepstop`, seeds 9550582, 23172535,
+94081284, ledger keys `...-exempt-p01-owed-stepstop-seed-<seed>`; the
+filter `exempt-p01-(single|owed)` selects 12.
+
+Stated in advance: loss settles at `p` on every permissive step, as any
+stop that uses its budget must; the re-arm share stays near v1's, because
+the cap is spent only after `1 - p` has arrived from each sender; time
+should be at or above v1, the difference being the bandwidth the last
+`p` of every sender's share no longer occupies. If the gain is inside the
+seed spread, the stop is the completeness item it was meant to be and the
+paper says so with the number.

@@ -67,31 +67,39 @@ RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
 the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
 ```
 
-`selection_policy.straggler_idle_ns` adds a second question on the same
-budget. A receive queue pair that has gone that long without a data arrival
-asks `entry.h::remainder_verdict()`, which reaches
-`ExperimentConfig.hh::evaluate_remainder()` with the cumulative sequence and
-the bytes already accepted above it; the hole is the flow size less both. A
-grant absorbs everything from the cumulative sequence to the flow size and
-acknowledges it, so the sender completes through the `IsFinished` it already
-had. Zero asks at every arrival,
-which stops the flow as soon as its remainder fits the budget. A refusal emits
-nothing. The answer is the whole remainder or nothing, because the receiver
-knows the byte count and not which gradient elements matter.
+`selection_policy.cap_base` picks what the cap is measured against:
+`accounted` (the default) uses the bytes the rank has accounted for, and
+`owed` uses the step's plan, `owed_bytes` per (rank, step, sender) in
+`experiment.json`. `ForgivenessLedger::close` refuses a run whose launches
+disagree with that plan.
 
-`selection_policy.pacing` picks which bytes the budget is measured against and
-whether a forgivable range may still be declined: `none` spends the cap first
-come first served, `bernoulli` declines a range whose coin
-(`hash_combine(decision_hash, range start)`) lands above `p * 1000000`, and
-`vesting` measures the cap against the bytes the rank has received rather than
-the bytes senders have launched. `pacing_refusals` counts only the ranges the
-coin declined that the cap could have afforded, so coin and cap refusals
-decompose without overlap. Both are receiver policies, so both are refused
-outside a forgiving domain.
+`selection_policy.step_stop`, legal only on the owed base, adds a second
+question on the same budget. Every accepted arrival asks
+`entry.h::remainder_verdict()`, which reaches
+`ExperimentConfig.hh::evaluate_remainder()` with the cumulative sequence and
+the bytes already accepted above it; the hole is the flow size less both. The
+frontend refuses until `1 - p` of what that sender owes this rank for the step
+has arrived, and then grants the hole if the cap affords it. A grant absorbs
+everything from the cumulative sequence to the flow size and acknowledges it,
+so the sender completes through the `IsFinished` it already had. A refusal
+emits nothing. The answer is the whole remainder or nothing, because the
+receiver knows the byte count and not which gradient elements matter.
+
+`selection_policy.pacing` picks whether a forgivable range may still be
+declined: `none` spends the cap first come first served, and `bernoulli`
+declines a range whose coin (`hash_combine(decision_hash, range start)`) lands
+above `p * 1000000`. `pacing_refusals` counts only the ranges the coin
+declined that the cap could have afforded, so coin and cap refusals decompose
+without overlap. Pacing is a receiver policy, so it is refused outside a
+forgiving domain.
 
 The ledger is dense over (receiving rank, step). Its law is
-`shed + forgiven <= p(step) * eligible`, with `p` the strict CLR threshold on a
-critical step and the permissive one otherwise. Both terms only grow: a range
+`shed + forgiven <= p(step) * (delivered + shed + forgiven)`, with `p` the
+strict CLR threshold on a critical step and the permissive one otherwise: the
+receiver measures the budget against the bytes it has accounted for, kept or
+forgiven, which is `forgiven <= p / (1 - p) * delivered` rearranged. A step
+ends with `delivered + shed + forgiven = eligible`, so the ceiling is
+`p(step) * eligible`, and `close` and the analyzer certify against that. Both terms only grow: a range
 charged once is never refunded, and a duplicate arriving later takes the
 existing old-sequence branch. A step closes when its rank writes its DP
 All-Reduce `collective_events` row, after which the step can only be pulled.
@@ -176,7 +184,7 @@ fields are:
 | `timeouts` / `cnp_received` | Retransmission-timeout firings that rescheduled data, and rate cuts taken. `cnp_received` is zero unless the profile sets `network.congestion_control.mode: dcqcn` |
 | `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
 | `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
-| `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the straggler stop took before any sender put them on the wire, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
+| `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the step stop took when it ended a sender's step, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
 | `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
 | `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell had no allowance left, and the simulated time one of them ended the exemption; zero means none did |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |

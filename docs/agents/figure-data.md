@@ -16,8 +16,7 @@ Sources are release bundles in `BulkyCI/astra-sim`: run #117
 `uwlaookzhemmwabtbwfe2yhyxepupnmw`, #121
 `b363b3rri7pbgbaudfh3tbnysiranl66`, #122
 `rt4732ejzjqe2hkar2bturuv3qav6pv3`. Run #123 is workflow run
-`34867374086`, and its exempt-arm numbers replace the ones runs #121 and
-#122 published.
+`34867374086`, and every exempt-arm number in this file comes from it.
 
 ---
 
@@ -28,8 +27,6 @@ configuration. A *comparison* is a set of arms sharing a seed and a
 random selection stream, so their results can be subtracted. A *run* is
 one dispatch of many comparisons to the cluster, numbered #117, #120,
 #121, #122, #123. A *cell* is one point of the eight-point fabric map.
-Runs #121 and #122 measured the code before the revocation fix at commit
-`c6855f0`, so every exempt-arm number in this file comes from run #123.
 The two sender-side arms are both shedding: *phase-aware shedding*
 protects the critical steps, *unmasked shedding* does not. Quantities marked
 **derived** below were computed from measured counters under a stated

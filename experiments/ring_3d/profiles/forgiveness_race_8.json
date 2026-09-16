@@ -7,10 +7,10 @@
     "dp": 4
   },
   "steps": 3,
-  "compute_duration_us": 10,
+  "compute_duration_us": 200,
   "tp_all_reduce_bytes": 65536,
   "pp_bytes": 0,
-  "dp_all_reduce_bytes": 1048576,
+  "dp_all_reduce_bytes": 2097152,
   "seed": 20260317,
   "selection_policy": {
     "p_low": 0.005,
@@ -38,11 +38,23 @@
       "selective_repair": true
     }
   },
-  "microburst_bytes": 1048576,
+  "microburst_bytes": 2097152,
   "microburst_enabled": true,
   "microburst_flow_count": 7,
   "microburst_destination_rank": 0,
   "microburst_offset_spacing_ns": 0,
   "microburst_trigger_step": 2,
-  "dp_all_reduce_implementation": "direct"
+  "dp_all_reduce_implementation": "direct",
+  "model": {
+    "parameter_count": 16777216,
+    "parameter_dtype_bytes": 2,
+    "gradient_bucket_count": 8,
+    "transformer_layers": 4,
+    "hidden_size": 256,
+    "sequence_length": 128,
+    "microbatch_size": 1,
+    "activation_dtype_bytes": 2,
+    "tensor_parallel_all_reduces_per_layer": 2,
+    "gradient_accumulation_steps": 2
+  }
 }

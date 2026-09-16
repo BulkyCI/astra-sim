@@ -441,6 +441,14 @@ class Ring3DGeneratorTests(unittest.TestCase):
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_{tag}_b25.json"
                 for tag in ("p005", "p02")
+            }
+            # The zero-tolerance and congestion-neutral references keep their
+            # cell's fabric and move the selection policy alone, so a join
+            # against that cell's published arms holds.
+            | {
+                "regime_64_dcqcn_direct7_4to1_zero.json",
+                "regime_64_dcqcn_direct2_2to1_zero.json",
+                "regime_64_dcqcn_direct7_4to1_recovery_p01.json",
             },
         )
 
@@ -749,6 +757,47 @@ class Ring3DGeneratorTests(unittest.TestCase):
             resolve_selection_policy(
                 profile, p_low=0.1, p_high=0.05, allow_clr_exposure=True
             )
+
+    def test_selection_policy_accepts_zero_and_keeps_its_other_bounds(
+        self,
+    ) -> None:
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        document["selection_policy"]["p_low"] = 0.0
+        document["selection_policy"]["p_high"] = 0.0
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "zero.json"
+            output = Path(temporary_directory) / "experiment"
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            materialize(profile_path, output)
+
+            policy = json.loads(
+                (output / "experiment.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                policy["selection_probability_by_step"],
+                {"1": 0.0, "2": 0.0, "3": 0.0},
+            )
+            self.assertEqual(
+                policy["selection_policy"],
+                {
+                    "semantics": "logical_admission_selection",
+                    "p_low": 0.0,
+                    "p_high": 0.0,
+                    "p_low_threshold": 0,
+                    "p_high_threshold": 0,
+                },
+            )
+            # The zero is the only bound that moved.
+            document["selection_policy"]["p_high"] = 0.005
+            document["selection_policy"]["p_low"] = 0.0101
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "p_low"):
+                load_profile(profile_path)
+            document["selection_policy"]["p_low"] = 0.005
+            document["selection_policy"]["p_high"] = 0.0
+            profile_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "p_high"):
+                load_profile(profile_path)
 
     def test_selection_policy_rejects_low_value_above_one_percent(self) -> None:
         document = json.loads(self.profile_path.read_text(encoding="utf-8"))

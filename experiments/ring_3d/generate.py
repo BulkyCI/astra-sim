@@ -411,10 +411,8 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
         )
     p_low = _probability(policy["p_low"], "selection_policy.p_low")
     p_high = _probability(policy["p_high"], "selection_policy.p_high")
-    if p_low == 0.0 or p_low > MAX_P_LOW:
-        raise ValueError(
-            "selection_policy.p_low must be greater than zero and at most 0.01"
-        )
+    if p_low > MAX_P_LOW:
+        raise ValueError("selection_policy.p_low must be at most 0.01")
     if p_high < p_low:
         raise ValueError("selection_policy.p_high must be at least p_low")
     domain_value = policy.get("domain", SheddingDomain.ADMISSION.value)
@@ -1511,8 +1509,8 @@ def resolve_selection_policy(
         if p_high is None
         else _probability(p_high, "p_high")
     )
-    if resolved_low == 0.0 or (resolved_low > MAX_P_LOW and not allow_clr_exposure):
-        raise ValueError("p_low must be greater than zero and at most 0.01")
+    if resolved_low > MAX_P_LOW and not allow_clr_exposure:
+        raise ValueError("p_low must be at most 0.01")
     if resolved_high < resolved_low:
         raise ValueError("p_high must be at least p_low")
     return SelectionPolicy(

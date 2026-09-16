@@ -140,3 +140,52 @@ Vesting and the vesting-plus-straggler arms leave 1.0 to 1.1 points
 unspent at their worst cell (0.910 to 0.911), the `direct2` cell 0.928 to
 0.940, and the no-incast control 1.000. Every rank received at least
 `1 - p(step)` of every step in every arm published so far.
+
+## 6. The two references never run
+
+Yashar's second suggestion, a baseline with no loss tolerance, and the
+congestion-neutral recovery arm from phase 3 of
+[next-steps-after-v1-fix.md](next-steps-after-v1-fix.md) were planned for
+the v1 re-run and not added to the matrix. Every published delta is
+against the fixed-low control at `p = 0.005`, which sheds about 0.4 % of
+data-parallel bytes at admission.
+
+**H. Zero is a legal threshold.** `generate.py` and the C++ parser refuse
+`p_low = 0`. They stop refusing it. A zero threshold already means "refuse
+every forgiveness, shed nothing" on every verdict path, and `close` with
+zero spent passes, so no verdict code changes. One predicate does:
+`evaluate_congestion_exemption` requires `p_high_threshold > 0`, because
+`affords(cell, 0, pacing, 0)` is true and would grant an exemption against
+an empty budget. The C++ comment that calls zero "free as a sentinel
+because the parser refuses it" is rewritten to say that the sentinel and
+the legal zero coincide in meaning.
+
+**I. Nine zero-tolerance singles, gate `forgive_ref`, input
+`run_forgive_ref`.** Profiles `regime_64_dcqcn_direct7_4to1_zero.json`,
+`regime_64_dcqcn_direct2_2to1_zero.json` and `no_incast_8_zero.json`,
+each its exempt sibling with `p_low = p_high = 0` and
+`domain = admission`, no pacing, no straggler. Records: direct7 at seeds
+9550582, 23172535, 94081284, 81117450, 28410270; direct2 at the first
+three; no-incast at its own. One arm serves every budget of the dose front
+at a given seed, because zero makes `p_high` and the mask inert.
+
+**J. Three congestion-neutral singles, same gate.** Profile
+`regime_64_dcqcn_direct7_4to1_recovery_p01.json`, the exempt p01 profile
+with `domain = recovery`, at the three seeds. The join is against run
+#123's p01 recovery arm and fixed-low baseline.
+
+Stated in advance: the zero reference should be within 0.5 points of
+training time of the fixed-low control, so FORGIVE's relief reads about
+0.1 points higher against true zero. The congestion-neutral arm should
+recover well under half of the exempt arm's 12.9 to 14.1 %, because the
+re-arm column of run #124 says the exemption is what the time comes from.
+If it recovers most of it, the exemption is unnecessary and the protocol
+shrinks.
+
+**K. Three no-controller singles, same gate.** Profile
+`regime_64_none_direct7_4to1_zero.json`, the regime map's no-CC profile
+(`CC_MODE 12`) with the zero policy, at the three seeds. Run #120 gave the
+one-seed figure of 1367 ms; this puts the brute-force row of the table on
+paired seeds beside the DCQCN baseline, FORGIVE and the zero reference.
+
+Fifteen records in the gate.

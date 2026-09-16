@@ -708,10 +708,12 @@ inline SheddingDecision evaluate_shedding(const AstraSim::sim_request& request,
     return decision;
 }
 
-// The step's threshold, and zero when the mask does not define the step. Zero
-// is free as that sentinel because the parser refuses a p_low of zero and
-// p_high is never below it. Both verdict shells and the closing check resolve
-// the threshold the same way, so they resolve it through the same function.
+// The step's threshold, and zero when the mask does not define the step. The
+// sentinel and a configured zero coincide in meaning, because a step outside
+// the mask and a step whose threshold is zero both forgive nothing and shed
+// nothing, so nothing distinguishes them and the parser need not refuse a
+// zero. Both verdict shells and the closing check resolve the threshold the
+// same way, so they resolve it through the same function.
 inline uint64_t step_threshold(uint32_t step) {
     const auto clr = experiment_config.clr_mask_by_step.find(step);
     if (clr == experiment_config.clr_mask_by_step.end()) {
@@ -850,14 +852,18 @@ inline uint64_t evaluate_remainder(FlowRecord& flow,
 
 // Whether one queue pair may ignore congestion signals for as long as the
 // receiver keeps forgiving its trims. Asked once, at creation, and total: an
-// unknown step, a critical step, or a budget already spent all answer false,
-// which is the congestion response of a transport without this domain. It
-// spends no budget; only forgiving does. The only mutation is the flow's own
-// record of the answer.
+// unknown step, a critical step, an empty budget, or a budget already spent
+// all answer false, which is the congestion response of a transport without
+// this domain. It spends no budget; only forgiving does. The only mutation is
+// the flow's own record of the answer.
 inline bool evaluate_congestion_exemption(FlowRecord& flow) {
     if (!experiment_config.enabled ||
         experiment_config.domain != SheddingDomain::RecoveryExempt ||
-        flow.kind != FlowKind::ForegroundPayload || !flow.admission_eligible) {
+        flow.kind != FlowKind::ForegroundPayload || !flow.admission_eligible ||
+        // A cell affords a zero charge against a zero threshold, so without
+        // this condition a permissive threshold of zero would grant the
+        // exemption against an empty budget.
+        experiment_config.p_high_threshold == 0) {
         return false;
     }
     const uint32_t step = flow.operation.training_step;
@@ -1315,10 +1321,8 @@ inline void configure_experiment(const std::string& configuration_path,
         // exemption: the fixed-high comparison arm runs with p_low set to
         // the permissive rate. The simulator enforces only representability;
         // re-imposing the ceiling here rejected every fixed-high arm.
-        if (experiment_config.p_low_threshold == 0) {
-            throw std::runtime_error(
-                "selection_policy.p_low must be greater than zero");
-        }
+        // A p_low of zero is legal, and it asks the run to shed nothing and
+        // forgive nothing on every step the mask marks critical.
         if (experiment_config.p_low_threshold >
             experiment_config.p_high_threshold) {
             throw std::runtime_error(

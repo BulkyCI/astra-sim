@@ -1192,6 +1192,7 @@ class _FlowStatistics:
         "foreground_traffic",
         "cc_exempt_count",
         "cc_rearmed_count",
+        "forgiven_remainder_unsent_bytes",
         "shed_count",
         "shed_logical_bytes",
         "total_logical_bytes",
@@ -1212,6 +1213,10 @@ class _FlowStatistics:
         # in the summed counters.
         self.cc_exempt_count = 0
         self.cc_rearmed_count = 0
+        # The part of the forgiven remainder no sender put on the wire. The
+        # law below computes it per flow, so summing it here costs nothing and
+        # keeps the two readings of the same subtraction in one place.
+        self.forgiven_remainder_unsent_bytes = 0
         self.total_logical_bytes = 0
         self.total_physical_bytes = 0
         self.shed_logical_bytes = 0
@@ -1255,12 +1260,22 @@ class _FlowStatistics:
             _optional_nonnegative_int(row, "trimmed_payload_bytes") == 0
         ):
             raise ValueError("trim notification must identify undelivered payload bytes")
-        if (
-            trim_notifications
-            and outcome == "completed"
-            and _optional_nonnegative_int(row, "data_attempted_bytes") < physical_bytes
-        ):
-            raise ValueError("completed flow cannot deliver more bytes than attempted")
+        # A completed flow accounts for every physical byte: the sender
+        # attempted it, or the receiver forgave a remainder that covers it.
+        # The shortfall is the remainder no sender put on the wire, which the
+        # summary reports and nothing in the simulator counts.
+        if outcome == "completed":
+            unsent_bytes = max(
+                0,
+                physical_bytes - _optional_nonnegative_int(row, "data_attempted_bytes"),
+            )
+            if unsent_bytes > _optional_nonnegative_int(
+                row, "forgiven_remainder_bytes"
+            ):
+                raise ValueError(
+                    "completed flow must attempt or be forgiven every byte"
+                )
+            self.forgiven_remainder_unsent_bytes += unsent_bytes
 
         # Zero means the flow never saw a trim or never sent a repair. A
         # repair before the first trim is NACK-driven and answers a different
@@ -1476,13 +1491,19 @@ def summarize(
         "forgiveness": {
             "forgiven_bytes": statistics.counters["forgiven_bytes"],
             "forgiven_range_count": statistics.counters["forgiven_ranges"],
-            # The two v2 receiver policies. Remainder bytes are the subset of
-            # forgiven bytes no sender ever put on the wire, so the trimmed
-            # share is the difference; pacing refusals are forgivable trims
-            # the coin declined, which no other counter can see.
+            # The two v2 receiver policies. Remainder bytes are what the
+            # straggler stop forgave on a quiet flow, whether or not a sender
+            # had already put them on the wire; pacing refusals are forgivable
+            # trims the coin declined, which no other counter can see.
             "forgiven_remainder_bytes": statistics.counters[
                 "forgiven_remainder_bytes"
             ],
+            # The share of that remainder no sender put on the wire, which the
+            # two byte columns already determine: the rest was attempted,
+            # trimmed, and then forgiven instead of repaired.
+            "forgiven_remainder_unsent_bytes": (
+                statistics.forgiven_remainder_unsent_bytes
+            ),
             "pacing_refusal_count": statistics.counters["pacing_refusals"],
             # What the congestion exemption did: how many flows were granted
             # one, how many congestion signals they withheld, how many

@@ -47,6 +47,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_forgive_r2:
+        description: Run the FORGIVE round 2 budget and Bernoulli front
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -325,6 +330,7 @@ jobs:
         INCLUDE_FORGIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_studies }}
         INCLUDE_FORGIVE_DOSE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_dose }}
         INCLUDE_FORGIVE_V2: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_v2 }}
+        INCLUDE_FORGIVE_R2: ${{ github.event_name == 'workflow_dispatch' && inputs.run_forgive_r2 }}
       run: |
         set -euo pipefail
         matrix="$(jq -c \
@@ -333,14 +339,16 @@ jobs:
           --arg regime_map "$INCLUDE_REGIME_MAP" \
           --arg forgive "$INCLUDE_FORGIVE" \
           --arg forgive_dose "$INCLUDE_FORGIVE_DOSE" \
-          --arg forgive_v2 "$INCLUDE_FORGIVE_V2" '
+          --arg forgive_v2 "$INCLUDE_FORGIVE_V2" \
+          --arg forgive_r2 "$INCLUDE_FORGIVE_R2" '
           [ .[]
             | select((.gate == "always" and $always == "true")
                      or (.gate == "structural" and $structural == "true")
                      or (.gate == "regime_map" and $regime_map == "true")
                      or (.gate == "forgive" and $forgive == "true")
                      or (.gate == "forgive_dose" and $forgive_dose == "true")
-                     or (.gate == "forgive_v2" and $forgive_v2 == "true"))
+                     or (.gate == "forgive_v2" and $forgive_v2 == "true")
+                     or (.gate == "forgive_r2" and $forgive_r2 == "true"))
             | del(.gate, .notes) ]
         ' .github/workflows/evaluation-matrix.json)"
         echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"

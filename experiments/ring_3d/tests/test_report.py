@@ -493,6 +493,7 @@ class Ring3DReportTests(unittest.TestCase):
                 "forgiven_bytes": 78_608,
                 "forgiven_range_count": 79,
                 "forgiven_remainder_bytes": 40_960,
+                "forgiven_remainder_unsent_bytes": 6_912,
                 "pacing_refusal_count": 137,
                 "forgiven_bytes_by_training_step": {"2": 78_608},
                 "ledger_law": {
@@ -509,6 +510,14 @@ class Ring3DReportTests(unittest.TestCase):
             report = render_report(run_dir, self.profile_path)
 
         self.assertIn("Forgiven remainder", report)
+        self.assertLess(
+            report.index("Forgiven remainder"),
+            report.index("Remainder never sent"),
+        )
+        self.assertLess(
+            report.index("Remainder never sent"),
+            report.index("| Pacing refusals | 137 |"),
+        )
         self.assertIn("| Pacing refusals | 137 |", report)
 
     def test_report_omits_forgiveness_for_an_admission_run(self) -> None:

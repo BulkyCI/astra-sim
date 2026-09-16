@@ -34,6 +34,7 @@ small while retaining the non-obvious project decisions.
 | Changing the receiver verdict after the v1 fix: pacing (Bernoulli, vesting) and the straggler stop, with the 18 arms that price them | [FORGIVE v2 design](forgive-v2-design.md) |
 | Reading what the exemption revocation fix changed and why. Merged at c6855f0; run #123 is its wave | [FORGIVE v1 revocation fix](forgive-v1-revocation-fix.md) |
 | Reading run #123, FORGIVE v1 with the revocation corrected: the 9.3 % ceiling retired, the headline moved to budget 0.1 | [Run #123 readout](run-123-readout.md) |
+| Reading run #124 and planning round 2: Bernoulli pacing wins, the analyzer law that failed the straggler arms, and the 24-arm wave under gate forgive_r2 | [FORGIVE v2 round 2](forgive-v2-round2.md) |
 | Planning the next wave: Yashar's probabilistic forgiveness and zero-tolerance baseline, the v2 pacing revision, and the five phases | [Next steps after the v1 fix](next-steps-after-v1-fix.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |

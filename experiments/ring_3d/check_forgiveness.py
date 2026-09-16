@@ -389,12 +389,21 @@ def check_straggler(run_dir: Path) -> list[str]:
             f"{len(incomplete)} flows did not complete; the straggler stop "
             "must not convert a transfer into a failure"
         )
+    # What no sender put on the wire is part of what the receiver forgave, so
+    # the derived reading can never exceed the counter it is carved out of.
+    unsent = int(summary["forgiveness"]["forgiven_remainder_unsent_bytes"])
+    charged_remainder = int(summary["forgiveness"]["forgiven_remainder_bytes"])
+    if unsent > charged_remainder:
+        failures.append(
+            f"{unsent} B of remainder were never sent out of "
+            f"{charged_remainder} B forgiven as remainder"
+        )
     law = summary["forgiveness"]["ledger_law"]
     if law["status"] != "verified":
         failures.append(f"per-(dst, step) ledger law is {law['status']}: {law}")
     print(
         f"straggler stop: {remainder} B of remainder forgiven over {events} "
-        "forgivenesses"
+        f"forgivenesses, {unsent} B never sent"
     )
     return failures
 

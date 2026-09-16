@@ -213,6 +213,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
                             "transport_role": "collective_payload",
                             "logical_bytes": "1024",
                             "physical_bytes": "1024",
+                            "data_attempted_bytes": "1024",
                         }
                     )
                 flows.append(flow)
@@ -655,6 +656,85 @@ class Ring3DAnalysisTests(unittest.TestCase):
         self.assertEqual(forgiveness["forgiven_remainder_bytes"], 60)
         self.assertEqual(forgiveness["pacing_refusal_count"], 7)
         self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
+
+    def test_a_forgiven_remainder_covers_the_bytes_no_sender_attempted(self) -> None:
+        """The straggler stop completes a flow whose sender stopped early.
+
+        The receiver takes the unsent tail as delivered, so the sender never
+        attempts it and the flow still completes. The gap is the part of the
+        remainder that was never on the wire, and a flow that attempted
+        everything adds nothing to it.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            straggler.update(
+                {
+                    "data_attempted_bytes": "940",
+                    "forgiven_remainder_bytes": "60",
+                }
+            )
+            attempted_in_full = self.eligible_flow("5", "2", 1_000, 0, "10002")
+            self.write_telemetry(telemetry, [straggler, attempted_in_full])
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+        forgiveness = summary["forgiveness"]
+        self.assertEqual(forgiveness["forgiven_remainder_bytes"], 60)
+        self.assertEqual(forgiveness["forgiven_remainder_unsent_bytes"], 60)
+
+    def test_a_forgiven_remainder_may_cover_bytes_already_attempted(self) -> None:
+        """Most of the remainder was attempted, trimmed and awaiting repair.
+
+        The law binds the shortfall alone, so a remainder larger than the
+        shortfall is lawful and only the shortfall reaches the derived key.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            telemetry = root / "telemetry"
+            straggler = self.eligible_flow("4", "2", 1_000, 100, "10001")
+            straggler.update(
+                {
+                    "data_attempted_bytes": "990",
+                    "forgiven_remainder_bytes": "60",
+                }
+            )
+            self.write_telemetry(telemetry, straggler)
+            manifest = self.write_recovery_manifest(root, ("1",), 0.005, 0.1)
+
+            summary = summarize(telemetry, manifest_path=manifest)
+
+        forgiveness = summary["forgiveness"]
+        self.assertEqual(forgiveness["forgiven_remainder_bytes"], 60)
+        self.assertEqual(forgiveness["forgiven_remainder_unsent_bytes"], 10)
+
+    def test_summary_rejects_a_completed_flow_whose_remainder_falls_short(
+        self,
+    ) -> None:
+        """No forgiveness, no excuse: the sender owed those bytes."""
+        for remainder in ("0", "59"):
+            with self.subTest(forgiven_remainder_bytes=remainder):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    telemetry = root / "telemetry"
+                    short = self.eligible_flow("4", "2", 1_000, 100, "10001")
+                    short.update(
+                        {
+                            "data_attempted_bytes": "940",
+                            "forgiven_remainder_bytes": remainder,
+                        }
+                    )
+                    self.write_telemetry(telemetry, short)
+                    manifest = self.write_recovery_manifest(
+                        root, ("1",), 0.005, 0.1
+                    )
+
+                    with self.assertRaisesRegex(
+                        ValueError, "attempt or be forgiven every byte"
+                    ):
+                        summarize(telemetry, manifest_path=manifest)
 
     def test_ledger_law_rejects_a_cell_over_its_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1238,6 +1318,7 @@ class Ring3DAnalysisTests(unittest.TestCase):
                         "source_port": str(20000 + index),
                         "logical_bytes": "2048",
                         "physical_bytes": "2048",
+                        "data_attempted_bytes": "2048",
                         "start_time_ns": str(start),
                         "end_time_ns": str(end),
                     }

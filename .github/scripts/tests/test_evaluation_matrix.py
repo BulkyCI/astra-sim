@@ -22,6 +22,7 @@ GATES = {
     "forgive",
     "forgive_dose",
     "forgive_v2",
+    "forgive_r2",
 }
 GATE_INPUTS = {
     "always": "run_always",
@@ -30,6 +31,7 @@ GATE_INPUTS = {
     "forgive": "run_forgive_studies",
     "forgive_dose": "run_forgive_dose",
     "forgive_v2": "run_forgive_v2",
+    "forgive_r2": "run_forgive_r2",
 }
 # The closed sum the provision job validates and ci/dcs/evaluate.sh dispatches
 # on. Nothing downstream of that validation branches on anything else.

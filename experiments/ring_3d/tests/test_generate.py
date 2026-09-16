@@ -428,14 +428,19 @@ class Ring3DGeneratorTests(unittest.TestCase):
             }
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_{tag}.json"
-                for tag in ("p01", "p02", "p06", "allsteps")
+                for tag in ("p005", "p01", "p02", "p06", "allsteps")
             }
             # The FORGIVE v2 receiver policies, each the p01 cell with one
             # knob moved and congestion control untouched.
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_p01_{tag}.json"
-                for tag in ("b50", "b25", "vest", "strag", "strag0",
-                            "veststrag")
+                for tag in ("b50", "b25", "b10", "b05", "vest", "strag",
+                            "strag0", "veststrag")
+            }
+            # Round 2 pairs the coin with a budget other than 0.1.
+            | {
+                f"regime_64_dcqcn_direct7_4to1_exempt_{tag}_b25.json"
+                for tag in ("p005", "p02")
             },
         )
 

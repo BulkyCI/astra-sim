@@ -146,10 +146,11 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
         "domain; a violated status invalidates the arm. A CC-exempt flow "
         "withholds every congestion signal from its controller until a "
         "receiver reports that cell's allowance spent, which re-arms it. The "
-        "forgiven remainder is the part no sender put on the wire, because "
-        "the receiver took a quiet flow's unsent bytes as delivered, so the "
-        "trimmed part is the difference. Pacing refusals are forgivable trims "
-        "the receiver declined to keep allowance for later in the step.",
+        "forgiven remainder is what the receiver took from a quiet flow, and "
+        "the part of it never sent is what no sender had put on the wire; the "
+        "rest was attempted, trimmed, and awaiting repair. Pacing refusals "
+        "are forgivable trims the receiver declined to keep allowance for "
+        "later in the step.",
         "",
         *_markdown_table(
             ["Signal", "Value"],
@@ -160,6 +161,12 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
                     "Forgiven remainder",
                     _format_optional_bytes(
                         forgiveness.get("forgiven_remainder_bytes", 0)
+                    ),
+                ],
+                [
+                    "Remainder never sent",
+                    _format_optional_bytes(
+                        forgiveness.get("forgiven_remainder_unsent_bytes", 0)
                     ),
                 ],
                 [

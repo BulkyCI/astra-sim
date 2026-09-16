@@ -67,11 +67,18 @@ RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
 the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
 ```
 
-`selection_policy.cap_base` picks what the cap is measured against:
-`accounted` (the default) uses the bytes the rank has accounted for, and
-`owed` uses the step's plan, `owed_bytes` per (rank, step, sender) in
-`experiment.json`. `ForgivenessLedger::close` refuses a run whose launches
-disagree with that plan.
+There are two caps. The soft one, `forgiven + b <= p x (delivered +
+forgiven)`, decides affordability and grows as the step arrives; a trim it
+refuses is repaired, sets no report, and adds its bytes to the cell's
+`refused_soft`. The hard one is the step's total, `owed_bytes` per (rank,
+step, sender) in `experiment.json`, and it decides revocation: the report
+rides a repair request or a forgiveness acknowledgement when
+`forgiven + 4096 > p x owed` or `refused_soft > p x owed - forgiven`, the
+second clause being what reaches a flooding sender whose stalled delivery
+stalls the soft cap. `selection_policy.cap_base` picks which cap affords:
+`accounted` (the default) the soft one, `owed` the hard one, which is the
+ablation. Every forgiving domain carries the plan either way, and
+`ForgivenessLedger::close` refuses a run whose launches disagree with it.
 
 `selection_policy.step_stop`, legal only on the owed base, adds a second
 question on the same budget. Every accepted arrival asks
@@ -79,7 +86,11 @@ question on the same budget. Every accepted arrival asks
 `ExperimentConfig.hh::evaluate_remainder()` with the cumulative sequence and
 the bytes already accepted above it; the hole is the flow size less both. The
 frontend refuses until `1 - p` of what that sender owes this rank for the step
-has arrived, and then grants the hole if the cap affords it. A grant absorbs
+has arrived, and then grants the hole if the cap affords it. The arrival that
+crosses `1 - p` also stops that sender's other open flows into the rank
+immediately: `entry.h::stop_sender_flows()` walks the active flow registry and
+calls `RdmaHw::StopFlow` on each, which runs the same remainder path on a queue
+pair that is waiting on a repair rather than receiving. A grant absorbs
 everything from the cumulative sequence to the flow size and acknowledges it,
 so the sender completes through the `IsFinished` it already had. A refusal
 emits nothing. The answer is the whole remainder or nothing, because the
@@ -87,8 +98,10 @@ receiver knows the byte count and not which gradient elements matter.
 
 `selection_policy.pacing` picks whether a forgivable range may still be
 declined: `none` spends the cap first come first served, and `bernoulli`
-declines a range whose coin (`hash_combine(decision_hash, range start)`) lands
-above `p * 1000000`. `pacing_refusals` counts only the ranges the coin
+declines a range whose coin
+(`hash_combine(decision_hash, range start, verdicts asked)`) lands above
+`p * 1000000`; every trimmed arrival draws again, so a declined range meets
+the cap as it stands on its next trim. `pacing_refusals` counts only the ranges the coin
 declined that the cap could have afforded, so coin and cap refusals decompose
 without overlap. Pacing is a receiver policy, so it is refused outside a
 forgiving domain.
@@ -186,7 +199,9 @@ fields are:
 | `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
 | `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the step stop took when it ended a sender's step, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
 | `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
-| `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell had no allowance left, and the simulated time one of them ended the exemption; zero means none did |
+| `cc_exempt_granted_ns` | When the first acknowledgement marked eligible, with no allowance report, granted this queue pair its exemption; zero means never |
+| `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell can afford no further range, and the simulated time one of them ended the exemption; zero means none did |
+| `soft_refusals` | Bytes the soft cap declined for want of vested allowance. With `pacing_refusals` and the forgiven bytes, it decomposes every trim the receiver answered |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |
 
 `source_port` identifies a live five-tuple, not a flow. ns-3 owns only the

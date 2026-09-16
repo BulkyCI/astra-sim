@@ -28,7 +28,7 @@ exempt arm.
 | #124 | 2026-09-15 | main 55d5767, ns-3 16d7c9d4d | v2 round 1 at budget 0.1: Bernoulli 0.5 and 0.25 stand; the other twelve arms measured mechanisms since deleted | see section 3 | |
 | #125 | 2026-09-16 | main 8213401 | v2 round 2: the budget 0.05 comparison, Bernoulli 0.1 and 0.05 at 0.1, Bernoulli 0.25 at 0.05 and 0.2, 24 arms | in flight; its cluster analyzer predates the hard law, so every bundle is certified locally with the 87ad3ae analyzer before a number is read | |
 | #126 | 2026-09-16 | main a1b30b0 | the references: zero tolerance at nine (fabric, seed) pairs, the recovery domain under DCQCN at 0.1, no controller at all, 15 single arms | in flight; same local certification | |
-| #127 | pending | after sections 7 and 8 of the round-2 doc | one wave, 12 single arms at budget 0.1: the receiver-local law with per-byte delivery, no pacing (3); the owed base, cap available in full from step start, no pacing (3) and with Bernoulli 0.25 (3); the step stop, a sender stopped once 1 - p of its share has arrived (3) | tests that the unification loses nothing against #123, whether a size hint from the collective library buys anything, and what the stop is worth | |
+| #127 | pending | after sections 9 and 10 of the round-2 doc | one wave, 18 single arms at budget 0.1: the owed law's v1 point, the accounted ablation, Bernoulli 0.25 on each under the fresh coin, the step stop, and arm D (never re-engage) | the v1 point re-measures #123's configuration under the receiver-granted exemption and refusal-based revocation; read with TP all-reduce span and re-sent bytes per arm | |
 
 ## 3. Run #124 arm by arm
 

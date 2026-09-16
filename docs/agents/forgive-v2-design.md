@@ -70,11 +70,14 @@ receives rather than as senders launch. The remainder forgiveness of change
 S uses the same condition without the coin: the coin reserves, the stop
 consumes the reserve.
 
-**The coin.** `coin(flow, start) = hash_combine(flow.decision_hash, start)
-% kDecisionScale`. Deterministic per range, so a range the coin refuses
-stays refused on re-trim and "forgive a fraction `p` of trimmed ranges" is
-exact rather than geometric. No ns-3 random stream is consumed, so paired
-arms stay paired.
+**The coin.** `coin(flow, start, attempt) =
+hash_combine(flow.decision_hash, start, attempt) % kDecisionScale`, with
+`attempt` the flow's count of verdicts asked. Every trimmed arrival draws,
+so a range the coin refuses is asked again on its next trim and meets the
+cap as it stands then, which has grown with delivery in the meantime.
+Nothing about a range is remembered between trims. No ns-3 random stream is
+consumed and the attempt counter is deterministic, so paired arms draw the
+same sequence.
 
 **Profile shape.**
 
@@ -108,18 +111,19 @@ trim_verdict(StepLedger, uint64_t threshold, const Pacing&, uint64_t coin, uint6
 // Whole remainder or nothing: the receiver knows the byte count and not
 // which gradient elements matter, so it does not choose among them.
 std::pair<uint64_t, StepLedger>
-remainder_verdict(StepLedger, uint64_t threshold, const Pacing&, uint64_t remainder);
+remainder_verdict(StepLedger, uint64_t threshold, uint64_t remainder,
+                  uint32_t src, bool step_stop);
 ```
 
 | event | guard | effect | result |
 | --- | --- | --- | --- |
 | trim | cell missing, closed, or flow ineligible | none | repair, spent bit clear |
-| trim | Bernoulli and coin refuses | `pacing_refusals++` on the flow | repair, spent bit as on every repair: set when the cap has no room |
-| trim | affordable under the rule | `forgiven += b` | forgive |
-| trim | otherwise | none | repair, spent bit set |
-| remainder | affordable under the rule and `remainder > 0` | `forgiven += remainder` | forgive `remainder` |
+| trim | Bernoulli and coin refuses | `pacing_refusals++` on the flow | repair, spent bit from the hard cap; the coin's refusal counts nowhere else |
+| trim | affordable under the cap in force | `forgiven += b` | forgive |
+| trim | otherwise | `refused_soft += b` under the soft cap | repair, spent bit from the hard cap |
+| remainder | affordable, `remainder > 0`, and under the step stop the sender past `1 - p` of its share | `forgiven += remainder` | forgive `remainder` |
 | remainder | otherwise | none | refuse, nothing sent |
-| message complete | always | `delivered += size - flow.forgiven_bytes` | none |
+| payload accepted | always | `delivered += bytes` on the cell and on the sender's share | the crossing arrival stops that sender's open flows |
 | collective complete | always | `closed = true` | none |
 
 A refused remainder emits nothing. The exemption revokes only on a repair
@@ -155,7 +159,10 @@ and no new sender state.
 and no threshold in the transport: the frontend holds the budget and the
 step's plan, so it is what decides, and it refuses until the arriving
 sender has delivered `1 - p` of what it owes. That is one hash find per
-data packet and no scheduler entry at all.
+data packet and no scheduler entry at all. The arrival that crosses `1 - p`
+does not wait for the next packet of every other flow from that sender: the
+frontend calls `RdmaHw::StopFlow` on each of them there and then, which is
+what reaches a flow that is waiting on a repair.
 
 **Late data.** After a remainder forgiveness the sender may still have
 packets in flight, and they arrive for a five-tuple whose rx queue pair is
@@ -172,14 +179,14 @@ pre-existing leak stays pre-existing.
 | --- | --- |
 | ledger mutation | monotone counters; a duplicate forgiveness of a settled range is a no-op because `UnsettledBytes` is zero and no verdict is asked |
 | `register_delivered` at every accepted arrival | once per newly accepted payload range, credited to the cell and to the sender that sent it; completion asserts the total against `q->m_size` less the forgiven bytes |
-| the step stop's question | one hash find per accepted data packet, answered by the frontend |
+| the step stop's question | one hash find per accepted data packet, answered by the frontend; the arrival that crosses `1 - p` walks the registry once and stops that sender's open flows |
 | remainder ACK | the ordinary ACK primitive; the sender tolerates it because `IsFinished` is `snd_una >= m_size` |
 | telemetry | `forgiven_remainder_bytes` (a subset of `forgiven_bytes`, which the remainder also increments) and `pacing_refusals` on the flow record; transport events `remainder_forgiven` (bytes) beside `trim_forgiven` |
 
 Trimmed-forgiven bytes are `forgiven_bytes - forgiven_remainder_bytes`,
-derived rather than counted. Cap refusals are `allowance_spent_signalled`
-from the v1 fix; coin refusals are counted because nothing else can see
-them.
+derived rather than counted. Hard-cap reports are
+`allowance_spent_signalled` from the v1 fix; soft-cap refusals and coin
+refusals are counted because nothing else can see them.
 
 ## 6. Complexity budget
 
@@ -203,10 +210,6 @@ by having no consumer.
 
 **One callback returning a struct for both questions.** Every trim verdict
 would carry an end it never uses. Two callbacks, two questions.
-
-**A fresh coin per trim attempt.** Turns Bernoulli into a geometric delay
-of a few round trips rather than a reservation. Killed by not being a
-pacing rule.
 
 **Stop at `(1 - p)` delivered.** No longer an alternative: it is change S,
 the design of record, specified in

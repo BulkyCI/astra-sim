@@ -249,10 +249,11 @@ def check_congestion_neutrality(run_dir: Path) -> list[str]:
 def check_congestion_exemption(run_dir: Path) -> list[str]:
     """Assert the exemption reached exactly the flows the policy names.
 
-    The exemption is granted once, at queue-pair creation, to an eligible DP
-    payload flow on a non-critical step whose budget is not already spent, and
-    it ends when the receiver reports that budget spent. Each clause below is
-    one of those words, read back off telemetry the run already wrote.
+    The receiver grants it: an acknowledgement of an eligible DP payload flow
+    on a non-critical step, with the step's budget not yet spent, is the grant,
+    and the sender obeys its controller until the first one arrives. It ends
+    when the receiver reports that budget spent. Each clause below is one of
+    those words, read back off telemetry the run already wrote.
     """
     failures: list[str] = []
     flows = _flows(run_dir)
@@ -277,6 +278,20 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
             failures.append(
                 f"exempted a flow on critical step {flow['training_step']}"
             )
+        # The grant is an acknowledgement, so it has a time, and that time is
+        # after the flow started: a sender obeys its controller for the round
+        # trip before its first acknowledgement.
+        granted = int(flow["cc_exempt_granted_ns"])
+        if granted == 0:
+            failures.append("an exempt flow records no grant")
+        elif granted <= int(flow["start_time_ns"]):
+            failures.append(
+                "a flow was exempt from its first byte, before any "
+                "acknowledgement could have granted it"
+            )
+    for flow in flows:
+        if flow["cc_exempt"] != "true" and int(flow["cc_exempt_granted_ns"]):
+            failures.append("a flow records a grant it was never exempt under")
     if not exempt:
         failures.append("no flow was exempted; the exemption never fired")
     if not any(int(flow["cc_signal_withheld"]) for flow in exempt):
@@ -306,6 +321,8 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
             continue
         if flow["cc_exempt"] != "true":
             failures.append("a flow that was never exempt was re-armed")
+        if int(flow["cc_rearmed_ns"]) <= int(flow["cc_exempt_granted_ns"]):
+            failures.append("a flow re-armed before it was granted")
         if int(flow["cnp_received"]) == 0:
             failures.append(
                 "a re-armed flow took no rate cut, so the report that "
@@ -317,8 +334,10 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
         failures.append(f"per-(dst, step) ledger law is {law['status']}: {law}")
 
     forgiveness = _summary(run_dir)["forgiveness"]
+    grants = [int(flow["cc_exempt_granted_ns"]) for flow in exempt]
     print(
-        f"congestion-exempt: {len(exempt)} exempt flows, "
+        f"congestion-exempt: {len(exempt)} flows granted an exemption, first "
+        f"at {min(grants) if grants else 0} ns, "
         f"{forgiveness['cc_signal_withheld_count']} congestion signals "
         f"withheld, {forgiveness['cc_rearmed_flow_count']} flows re-armed"
     )
@@ -330,7 +349,9 @@ def check_bernoulli_pacing(run_dir: Path) -> list[str]:
 
     The counter records only those, so a zero would mean the coin never cost
     the arm a forgiveness, which is indistinguishable from the unpaced arm and
-    would report as a null result from a mechanism that never ran.
+    would report as a null result from a mechanism that never ran. A declined
+    range is not refused for good: the coin is drawn again on its next trim,
+    so the count is of declined arrivals rather than of declined ranges.
     """
     flows = _flows(run_dir)
     refusals = sum(int(flow["pacing_refusals"]) for flow in flows)

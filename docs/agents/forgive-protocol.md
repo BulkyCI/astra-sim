@@ -83,9 +83,11 @@ forgiven_bytes(rank, step) + suppressed_bytes(rank, step) <= p(step) * eligible_
 
 Both counters only grow. Nothing is refunded. A closed entry forgives
 nothing. The receiver enforces that rule in counters it owns, as
-`forgiven <= p(step) x (delivered + forgiven)`; a step ends with
-`delivered + forgiven = eligible`, so the two forms share one ceiling and
-the analyzer certifies against the accumulated `eligible`.
+`forgiven <= p(step) x (delivered + forgiven)`, the soft cap; a step ends
+with `delivered + forgiven = eligible`, so the two forms share one ceiling
+and the analyzer certifies against the accumulated `eligible`. The step's
+total `owed`, which the generator plans and `close` holds to the launches,
+is the hard cap, and it is what revocation and the step stop read.
 
 **Forgiveness alone saves no time.** Run #117 measured 4 to 11 % shorter
 training under go-back-N recovery. A control run with selective
@@ -213,14 +215,16 @@ acknowledgement point advances over forgiven holes, and the transfer
 completes when that point reaches the message size.
 
 In the `recovery_exempt` configuration each queue pair carries one flag.
-It is set once, when the queue pair is created, and cleared once.
+The receiver sets it and the receiver clears it, once each: the sender
+reads neither a budget nor a step.
 
 | state | event | result |
 | --- | --- | --- |
-| creation | queue pair created | exempt if the feature is on and the experiment layer answers yes for this five-tuple; the rate starts at line rate as always |
+| creation | queue pair created | obeying its controller, at line rate as always |
+| obeying | an acknowledgement arrives marked eligible with no allowance report | exempt from that acknowledgement on, and the time recorded; one round trip of every flow is spent obeying |
 | exempt | congestion signal arrives (from an ECN-marked ACK, a forgiveness ACK, or a trim notification) | withheld from the controller and counted; the DCQCN rate and its alpha state are untouched |
 | exempt | allowance report arrives, on a repair request or a forgiveness ACK | flag cleared, time recorded, then the normal path runs, including this packet's own rate cut |
-| obeying | anything | DCQCN as today |
+| re-armed | anything, including a later eligible acknowledgement | DCQCN as today; the grant is one way, so the exemption cannot flap |
 
 The re-arm happens before the sender checks whether the request is stale.
 A stale report still describes a spent entry. The receiver code is
@@ -230,22 +234,25 @@ transport reaches its congestion controller at three call sites and the
 exemption is checked at those, so an exempt flow runs no controller code
 at all.
 
-The experiment layer's answer at queue-pair creation:
+The experiment layer's answer, asked by the receiver once per receive
+queue pair and carried on every acknowledgement that queue pair emits:
 
 ```
-exempt(flow):
+eligible(flow):
   configuration is not recovery_exempt, or not gradient payload,
     or not eligible                                          -> no
   step is critical, or not in the mask                       -> no
-  budget entry (rank, step) is already spent                 -> no
-  record the exemption on the flow                           -> yes
+  the permissive threshold is zero                           -> no
+  otherwise                                                  -> yes
 ```
 
-The exemption spends no budget. Only forgiveness does. A flow that was
-exempt at creation and whose budget entry is later used up by other
-flows is re-armed by its own next trim, because the receiver reports the
-spent entry on the answer to that trim. A flow that is never trimmed
-again stays exempt until it completes. It is not the flow causing trims.
+The grant is that mark on an acknowledgement whose allowance report is
+clear, so the sender learns both halves from one packet and reads no cell.
+The exemption spends no budget. Only forgiveness does. A flow whose budget
+entry is later used up by other flows is re-armed by its own next trim,
+because the receiver reports the spent entry on the answer to that trim. A
+flow that is never trimmed again stays exempt until it completes. It is not
+the flow causing trims.
 
 ## 6. Invariants
 
@@ -463,7 +470,7 @@ the tolerance and DCQCN assumptions are in
 | --- | --- |
 | receiver fork, verdict callback, sender exemption and re-arm | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
 | range algebra, per-queue-pair counters | `extern/network_backend/ns-3/src/point-to-point/model/rdma-queue-pair.{h,cc}` |
-| allowance report on the repair request and the acknowledgement | `extern/network_backend/ns-3/src/point-to-point/model/qbb-header.{h,cc}` |
+| allowance report and eligibility mark on the repair request and the acknowledgement | `extern/network_backend/ns-3/src/point-to-point/model/qbb-header.{h,cc}` |
 | attribute wiring, transport events | `extern/network_backend/ns-3/scratch/common.h` |
 | configurations, budget entries, verdict, exemption predicate, telemetry columns | `astra-sim/network_frontend/ns3/ExperimentConfig.hh` |
 | callbacks, eligibility registration, counter copy at completion | `astra-sim/network_frontend/ns3/entry.h` |
@@ -500,10 +507,12 @@ available as it receives rather than as senders launch, and a step whose
 delivered and forgiven bytes exhaust the eligible ones reaches the same
 `p x eligible` ceiling. Under `bernoulli` the range is additionally
 declined when `hash_combine(flow.decision_hash, range start) % 1000000 >=
-p * 1000000`; the coin is deterministic per range, so a declined range
-stays declined on re-trim and the fraction forgiven is exact rather than
-geometric, and no ns-3 random stream is consumed, so paired arms stay
-paired. A declined range is repaired, so pacing costs time and buys
+p * 1000000`, where the flow's count of verdicts asked enters the hash as
+the attempt number. Every trimmed arrival draws, so a declined range is
+asked again on its next trim and meets the cap as it stands then; nothing
+about a range is remembered between trims. No ns-3 random stream is
+consumed and the attempt number is deterministic, so paired arms draw the
+same sequence. A declined range is repaired, so pacing costs time and buys
 allowance. `pacing_refusals` counts only the ranges the coin declined that
 the cap could have afforded, so coin and cap refusals decompose without
 overlap.
@@ -521,10 +530,14 @@ disagree with the plan, so the hint is exact or the run is not a result.
 on the owed base, the receiver ends one sender's step once `1 - p` of what
 that sender owes it has arrived, and takes the holes that sender left. At
 that point nothing new is coming from it, so the exemption has nothing left
-to protect and what remains is repair tail. The transport asks the
-frontend at every accepted arrival, with the cumulative sequence and the
-bytes already accepted above it, because under selective repeat a stalled
-flow keeps taking packets past the gap; the hole is the size less both, and
+to protect and what remains is repair tail. The crossing arrival stops every
+open flow from that sender into the rank at once, through
+`RdmaHw::StopFlow`, because a flow waiting on a repair receives nothing and
+would otherwise wait for its own timeout; the transport also asks at every
+accepted arrival, which covers the flows that start after the crossing. The
+question carries the cumulative sequence and the bytes already accepted
+above it, because under selective repeat a stalled flow keeps taking packets
+past the gap; the hole is the size less both, and
 charging the whole span above the cumulative sequence would spend the
 budget on bytes the receiver already holds. A grant absorbs everything from
 the cumulative sequence to the flow size and acknowledges it, so the sender

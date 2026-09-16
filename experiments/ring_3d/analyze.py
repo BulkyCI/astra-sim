@@ -794,6 +794,7 @@ _HOST_TRANSPORT_EVENTS: Final = frozenset(
         "clipped_trim",
         "cc_signal_withheld",
         "allowance_spent_signalled",
+        "cc_exempt_granted",
         "cc_rearmed",
     }
 )
@@ -854,11 +855,13 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         "cnp_taken",
         # The congestion-exempt domain's reactions: a congestion signal the
         # sender withheld from its controller while exempt, the receiver's
-        # report that the cell has no allowance left, and the exemption that
-        # report ended. None carries a packet, so all three are counts and no
-        # bytes on the control plane.
+        # report that the cell has no allowance left, the acknowledgement that
+        # granted the exemption, and the exemption that report ended. None
+        # carries a packet, so all four are counts and no bytes on the control
+        # plane.
         "cc_signal_withheld",
         "allowance_spent_signalled",
+        "cc_exempt_granted",
         "cc_rearmed",
         # A trim whose range the receiver already partly holds, so the verdict
         # was asked about fewer bytes than the packet carried. Those bytes were
@@ -1271,6 +1274,7 @@ class _FlowStatistics:
         "foreground_traffic",
         "cc_exempt_count",
         "cc_rearmed_count",
+        "soft_refusal_bytes",
         "forgiven_remainder_unsent_bytes",
         "shed_count",
         "shed_logical_bytes",
@@ -1287,10 +1291,12 @@ class _FlowStatistics:
         self.completed_count = 0
         self.failed_count = 0
         self.shed_count = 0
-        # Flows the transport was told it could exempt, and the subset whose
-        # exemption a PULL ended. Neither is a byte count, so neither belongs
-        # in the summed counters.
+        # Flows the receiver granted an exemption, and the subset whose
+        # exemption a spent report ended. Neither is a byte count, so neither
+        # belongs in the summed counters; the soft refusals below are bytes,
+        # and they decompose the repairs with the coin's and the hard cap's.
         self.cc_exempt_count = 0
+        self.soft_refusal_bytes = 0
         self.cc_rearmed_count = 0
         # The part of the forgiven remainder no sender put on the wire. The
         # law below computes it per flow, so summing it here costs nothing and
@@ -1383,6 +1389,9 @@ class _FlowStatistics:
         for field in _COUNTER_FIELDS:
             self.counters[field] += _optional_nonnegative_int(row, field)
         self.cc_exempt_count += _optional_bool(row, "cc_exempt")
+        self.soft_refusal_bytes += _optional_nonnegative_int(
+            row, "soft_refusals"
+        )
         self.cc_rearmed_count += (
             _optional_nonnegative_int(row, "cc_rearmed_ns") > 0
         )
@@ -1598,6 +1607,9 @@ def summarize(
             # one, how many congestion signals they withheld, how many
             # allowance reports reached them, and how many exemptions those
             # reports ended.
+            # Repairs decompose into three: the soft cap's refusals for want
+            # of vested allowance, the coin's, and the hard cap's.
+            "soft_refusal_bytes": statistics.soft_refusal_bytes,
             "cc_exempt_flow_count": statistics.cc_exempt_count,
             "cc_signal_withheld_count": statistics.counters[
                 "cc_signal_withheld"

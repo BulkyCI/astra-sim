@@ -435,7 +435,7 @@ class Ring3DGeneratorTests(unittest.TestCase):
             | {
                 f"regime_64_dcqcn_direct7_4to1_exempt_p01_{tag}.json"
                 for tag in ("b50", "b25", "b10", "b05", "owed",
-                            "owed_b25", "owed_stepstop")
+                            "owed_b25", "owed_stepstop", "noreengage")
             }
             # Round 2 pairs the coin with a budget other than 0.1.
             | {
@@ -592,9 +592,16 @@ class Ring3DGeneratorTests(unittest.TestCase):
             )
 
         self.assertEqual(policy["selection_policy"]["pacing"], {"kind": "none"})
-        self.assertNotIn("cap_base", policy["selection_policy"])
+        self.assertEqual(
+            policy["selection_policy"]["cap_base"], "accounted"
+        )
         self.assertNotIn("step_stop", policy["selection_policy"])
-        self.assertNotIn("owed_bytes", policy)
+        self.assertNotIn("reengage", policy["selection_policy"])
+        # The plan travels with every forgiving domain: the spent report is
+        # measured against the step's total, whatever the affordability base.
+        self.assertEqual(
+            set(policy["owed_bytes"]["0"]["1"].values()), {1_048_576}
+        )
 
     def test_the_v2_receiver_policies_refuse_a_malformed_profile(self) -> None:
         """Each refusal names its field.

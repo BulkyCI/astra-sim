@@ -27,6 +27,7 @@
 #include <ns3/sim-setting.h>
 #include <ns3/switch-node.h>
 #include <stdexcept>
+#include <vector>
 #include <utility>
 
 using namespace ns3;
@@ -256,6 +257,45 @@ uint64_t remainder_verdict(uint32_t sip,
                                            accepted_above);
 }
 
+// Every logical flow this bridge starts is addressed to the same receiving
+// port; the sender's port is what names the flow. Naming it once keeps the
+// stop's five-tuple and the queue pair's the same by construction.
+constexpr uint16_t kReceiverPort = 100;
+
+// Stopping runs the remainder path, which acknowledges and mutates flow
+// records; nothing in it receives data, so this guard is for a future change
+// rather than for a path that exists.
+bool stopping_sender = false;
+
+// The receiver's budget says this sender has delivered 1 - p of what it owes
+// for the step, so every open flow it still has into this rank is stopped now.
+// The registry is walked rather than indexed: it holds the run's open flows,
+// in the low thousands at 64 ranks, and a crossing happens once per (sender,
+// step), so a walk costs less than a second index kept current on every start
+// and completion. The keys are collected before any stop runs, because a
+// stopped flow can complete and leave the registry.
+void stop_sender_flows(uint32_t src, uint32_t dst, uint32_t step) {
+    if (stopping_sender) {
+        return;
+    }
+    stopping_sender = true;
+    vector<FlowKey> stopping;
+    for (const auto& entry : active_flow_registry) {
+        const AstraSimNs3::FlowRecord& flow = entry.second;
+        if (flow.src == static_cast<int>(src) &&
+            flow.dst == static_cast<int>(dst) &&
+            flow.operation.training_step == step &&
+            AstraSimNs3::forgivable(flow)) {
+            stopping.push_back(entry.first);
+        }
+    }
+    for (const FlowKey& key : stopping) {
+        StopFlowAtReceiver(dst, serverAddress[src].Get(),
+                           serverAddress[dst].Get(), key.first, kReceiverPort);
+    }
+    stopping_sender = false;
+}
+
 // The transport's report that a receiving NIC accepted payload bytes. It
 // resolves the flow the way the verdict callbacks do; an unknown five-tuple is
 // a flow the experiment layer no longer holds, and nothing is credited to it.
@@ -273,14 +313,16 @@ void data_accepted(uint32_t sip,
     if (active == active_flow_registry.end()) {
         return;
     }
-    AstraSimNs3::note_delivered(active->second, bytes);
+    if (AstraSimNs3::note_delivered(active->second, bytes)) {
+        stop_sender_flows(src, dst, active->second.operation.training_step);
+    }
 }
 
-// The transport's congestion-exemption callback, asked once per queue pair at
-// creation. It resolves the flow the way the verdict callback does. An unknown
-// five-tuple obeys congestion control: an exemption belongs to a flow the
-// experiment layer can name, and nothing else can be exempted.
-bool congestion_exemption(uint32_t sip,
+// The receiver's question about a flow it is about to acknowledge: may the
+// experiment layer forgive it on this step. Asked once per receive queue pair
+// and resolved the way the verdict callbacks are. An unknown five-tuple is not
+// eligible, so its sender keeps obeying its controller.
+bool forgiveness_eligible(uint32_t sip,
                           uint32_t dip,
                           uint16_t sport,
                           uint16_t dport) {
@@ -293,7 +335,7 @@ bool congestion_exemption(uint32_t sip,
     if (active == active_flow_registry.end()) {
         return false;
     }
-    return AstraSimNs3::evaluate_congestion_exemption(active->second);
+    return AstraSimNs3::exemption_eligible(active->second);
 }
 
 void start_rdma_flow(AstraSimNs3::FlowRecord flow,
@@ -325,7 +367,7 @@ void start_rdma_flow(AstraSimNs3::FlowRecord flow,
 
     RdmaClientHelper client_helper(
         flow.priority_group, serverAddress[flow.src], serverAddress[flow.dst],
-        port, 100, flow.physical_bytes,
+        port, kReceiverPort, flow.physical_bytes,
         has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(flow.src)][n.Get(flow.dst)])
                 : 0,
         global_t == 1 ? maxRtt : pairRtt[flow.src][flow.dst], msg_handler,
@@ -530,6 +572,10 @@ void copy_transport_counters(AstraSimNs3::FlowRecord& flow,
     flow.stale_trim_notifications = q->m_stale_trim_notifications;
     flow.timeouts = q->m_timeouts;
     flow.cnp_received = q->m_cnp_received;
+    // Granted at some point, which is what the column means; the queue pair's
+    // live flag is false again after a re-arm.
+    flow.cc_exempt = q->m_cc_exempt_granted_ns != 0;
+    flow.cc_exempt_granted_ns = q->m_cc_exempt_granted_ns;
     flow.cc_signal_withheld = q->m_cc_signals_withheld;
     flow.allowance_spent_signalled = q->m_allowance_spent_signalled;
     flow.cc_rearmed_ns = q->m_cc_rearmed_ns;
@@ -682,11 +728,12 @@ int setup_ns3_simulation(string network_configuration) {
     // The step stop is on exactly when the profile asked for it, and the
     // callback being null is what tells the transport it is off.
     if (!SetupNetwork(qp_finish, qp_fail, recovery_verdict, recovery_domain,
-                      congestion_exemption, congestion_exempt,
+                      forgiveness_eligible, congestion_exempt,
                       AstraSimNs3::experiment_config.step_stop
                           ? remainder_verdict
                           : nullptr,
-                      data_accepted)) {
+                      data_accepted,
+                      AstraSimNs3::experiment_config.reengage)) {
         return -1;
     }
     // The experiment's scale sizes the forgiveness ledger and bounds every

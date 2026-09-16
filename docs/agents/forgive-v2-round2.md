@@ -139,9 +139,9 @@ data-parallel bytes at admission.
 `p_low = 0`. They stop refusing it. A zero threshold already means "refuse
 every forgiveness, shed nothing" on every verdict path, and `close` with
 zero spent passes, so no verdict code changes. One predicate does:
-`evaluate_congestion_exemption` requires `p_high_threshold > 0`, because
-`affords(cell, 0, pacing, 0)` is true and would grant an exemption against
-an empty budget. The C++ comment that calls zero "free as a sentinel
+`exemption_eligible` requires `p_high_threshold > 0`, because a step whose
+permissive threshold is zero forgives nothing and its acknowledgements
+would otherwise grant an exemption against an empty budget. The C++ comment that calls zero "free as a sentinel
 because the parser refuses it" is rewritten to say that the sentinel and
 the legal zero coincide in meaning.
 
@@ -184,7 +184,7 @@ the bytes it has accounted for, kept or forgiven, both of which are its own
 counters, while a receiving NIC never sees the sender's launches. At the
 end of a step `delivered + forgiven = eligible`, so the ceiling is
 `p x eligible`, which is v1's law, and the only difference is when the cap
-becomes available, which is whatever is in flight. The simulator holds one
+becomes available, which is whatever is in flight. The simulator keeps one
 rule rather than a family: `affords` computes `spent = shed + forgiven + b`
 and tests `spent x S <= (delivered + spent) x t` whatever the pacing rule,
 and the parser refuses any `pacing.kind` but `none` and `bernoulli`. Pacing
@@ -306,3 +306,100 @@ should be at or above v1, the difference being the bandwidth the last
 `p` of every sender's share no longer occupies. If the gain is inside the
 seed spread, the stop is the completeness item it was meant to be and the
 paper says so with the number.
+
+## 9. The coin is drawn per trimmed arrival, and a stopped sender stops at once
+
+Joe, 2026-09-16. Two corrections to how the receiver decides.
+
+**T. A fresh coin per trim.** The coin is `hash(flow, range start,
+attempt)` with `attempt` the flow's count of verdicts asked so far, so
+every trim of a range draws again; a range the coin refused is re-tried
+on its next trim against the cap as it stands then, which under the
+receiver-local law has grown with delivery in the meantime. Nothing about
+a range is remembered between trims. Paired arms still draw the same coins
+because the attempt counter is deterministic. Runs #124 and #125 measured
+a coin fixed per range; B25 and B50 re-run under this rule in #127, and
+#125's Bernoulli arms re-run only if the two rules differ by more than
+the seed spread.
+
+**U. A stopped sender stops at once.** When a sender crosses `1 - p` of
+its share, every open flow from that sender into the rank is stopped at
+that moment, not at each flow's next arrival: the frontend asks the
+transport to run the remainder path on each of those queue pairs. One
+call into the transport keyed by the flow's five-tuple; the remainder
+verdict, the acknowledgement and the accounting are unchanged.
+
+## 10. When the controller re-engages
+
+Joe, 2026-09-16. The temporal shape of FORGIVE, per receiving rank and per
+step: the sender ignores the controller while the receiver still has
+allowance to forgive; when there is almost nothing left to forgive, the
+sender switches to the controller for the rest of the step; the next step
+opens a fresh allowance. Two rules that were considered and rejected:
+a spent report against the receiver-local cap, which is near zero at
+step start and so fires on the first burst; and a symmetric rule (obey
+while the last report says spent, withhold while it says room), which
+flips with every report and sets the flow's rate by the flap frequency.
+A third, revocation against the step total while affording under the
+receiver-local cap, was rejected because under real congestion the
+receiver-local cap refuses trims for want of vested budget, `forgiven`
+never grows, and the controller never returns while the fabric throws
+everything away.
+
+**V. Two "cannot afford", kept distinct.** Joe's rule. The soft one is
+the vesting cap, `forgiven + b > p x (delivered + forgiven)`: the
+allowance has not vested yet, the trim is repaired, no bit is set,
+because the cap will grow and this refusal says nothing about the future.
+The hard one is the step's total, `forgiven + 4096 > p x owed` (one
+packet's payload being the largest range): no further range will ever be
+affordable this step, the bit is set, and the controller returns for the
+rest of the step. `owed` per (sender, receiver, step) comes from the
+collective library's hint, one table per step, and is the only external
+number the receiver needs.
+
+The soft cap alone would let a congested sender flood forever: delivery
+stalls, the soft cap stalls, every trim is refused softly, `forgiven`
+never grows and the hard line is never reached. So the soft side keeps
+one count, `refused_soft`, the bytes it declined for want of vested
+allowance, and the hard condition has a second clause: when
+`refused_soft > p x owed - forgiven`, the receiver is repairing more than
+it could ever be allowed to absorb this step, which is congestion beyond
+tolerance rather than vesting lag, and the bit is set. No window, no
+threshold beyond `p`, nothing an estimator would add.
+
+| decision | reads | sets the bit |
+| --- | --- | --- |
+| forgive now | the soft cap, then the coin | no |
+| repair, soft | the soft cap refused; `refused_soft += b` | no |
+| spent | `forgiven + 4096 > p x owed` or `refused_soft > p x owed - forgiven` | yes, once, monotone within the step |
+
+Coin refusals set nothing and count in neither. The step stop reads the
+hard side, `1 - p` of `owed` from a sender. `cap_base = owed`, the hard
+cap used for affordability too (full allowance from the first packet), is
+the ablation.
+
+A receiver-side congestion estimator (trim fraction over a window with a
+threshold) was considered and set aside: it is a second controller with a
+set point, re-deriving the signal the sender already receives and
+discards. Whether budget-based revocation bounds the exempt flows'
+aggression enough is read from #127's TP all-reduce spans and re-sent
+bytes against the fixed-low baseline, with arm D as the extreme.
+
+**W. The exemption is granted by the receiver.** The sender obeys its
+controller until the first acknowledgement from the receiver arrives with
+the spent bit clear on a permissive step; from then it withholds signals
+until a report with the bit set. The sender never reads the receiver's
+cell. One round trip is spent obeying at the start of every flow.
+
+**X. Reference arm D.** `p01_noreengage`: the exemption never ends on a
+permissive step, the budget bounds loss only. Three seeds. It is the
+exemption's ceiling and prices what revocation costs us in time against
+what it saves the fabric in re-sent bytes and TP collective time.
+
+#127, budget 0.1, gate `forgive_v2`, filter
+`exempt-p01-(single|owed|b25-seed|noreengage)`: the law's v1 point
+(`p01_single`, soft cap with hard revocation, 3), the owed ablation
+(`p01_owed`, 3), B25 under the fresh coin on the law (`p01_b25`, 3) and
+on the ablation (`p01_owed_b25`, 3), the step stop (`p01_owed_stepstop`,
+3), D (3). Eighteen arms. Read with two extra columns per arm: TP all-reduce span
+and re-sent bytes against the fixed-low baseline.

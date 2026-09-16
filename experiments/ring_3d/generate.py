@@ -205,13 +205,14 @@ FORGIVING_DOMAINS: frozenset[SheddingDomain] = frozenset(
 """The domains that decide after the trim, and so need the trimming transport."""
 
 class CapBase(StrEnum):
-    """What the receiver measures its budget against.
+    """Which cap decides whether a trim is affordable.
 
-    ``accounted`` is the law of record: the bytes the rank has accounted for,
-    kept or forgiven, so the cap becomes available as the step arrives.
-    ``owed`` measures it against the step's plan, which the generator computes
-    and the simulator holds to the launches, so the whole cap is available from
-    the step's first packet.
+    ``accounted`` is the law of record: the soft, vesting cap against the
+    bytes the rank has accounted for, kept or forgiven, which grows as the
+    step arrives. ``owed`` is the ablation, affording against the step's plan
+    so that the whole allowance is available from the first packet. Revocation
+    reads the hard side either way, so every forgiving profile carries the
+    plan.
     """
 
     ACCOUNTED = "accounted"
@@ -222,10 +223,11 @@ class PacingKind(StrEnum):
     """The receiver's rule for declining a forgivable trim.
 
     ``none`` forgives whatever the cap affords, first come first served.
-    ``bernoulli`` forgives a fixed fraction of forgivable ranges, drawn from a
-    coin that is deterministic per range, so allowance survives the first
-    burst. The cap itself is the same under both rules, because the receiver
-    measures it against the bytes it has accounted for.
+    ``bernoulli`` forgives a fixed fraction of forgivable ranges, drawn fresh
+    on every trimmed arrival, so allowance survives the first burst and a
+    declined range is asked again on its next trim. The cap itself is the same
+    under both rules, because the receiver measures it against the bytes it
+    has accounted for.
     """
 
     NONE = "none"
@@ -288,12 +290,16 @@ class SelectionPolicy:
     pacing: Pacing = Pacing()
     cap_base: CapBase = CapBase.ACCOUNTED
     step_stop: bool = False
+    # Whether the receiver's report that the step's budget is spent ends the
+    # sender's exemption. False is the reference arm: the report is still
+    # carried and counted, and the budget alone bounds the loss.
+    reengage: bool = True
 
     def __post_init__(self) -> None:
         if self.step_stop and self.cap_base is not CapBase.OWED:
             raise ValueError(
-                "selection_policy.step_stop requires cap_base owed: the stop "
-                "fires on what a sender still owes, which only the plan knows"
+                "selection_policy.step_stop requires cap_base owed: the arms "
+                "that measure the stop measure it against the hard cap"
             )
 
     @property
@@ -424,12 +430,19 @@ def _load_step_stop(policy: dict[str, Any]) -> bool:
     return value
 
 
+def _load_reengage(policy: dict[str, Any]) -> bool:
+    value = policy.get("reengage", True)
+    if not isinstance(value, bool):
+        raise ValueError("selection_policy.reengage must be a boolean")
+    return value
+
+
 def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     policy = document.get("selection_policy")
     if not isinstance(policy, dict):
         raise ValueError("selection_policy must be an object")
     required_keys = {"p_low", "p_high"}
-    optional_keys = {"domain", "pacing", "cap_base", "step_stop"}
+    optional_keys = {"domain", "pacing", "cap_base", "step_stop", "reengage"}
     if not required_keys <= set(policy) <= required_keys | optional_keys:
         raise ValueError(
             f"selection_policy must contain exactly {sorted(required_keys)} "
@@ -451,11 +464,12 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
     pacing = _load_pacing(policy)
     cap_base = _load_cap_base(policy)
     step_stop = _load_step_stop(policy)
+    reengage = _load_reengage(policy)
     # Every v2 policy belongs to the receiver, and only a forgiving domain has
     # a receiver that decides anything. Accepting them elsewhere would write a
     # profile whose knob moves nothing.
     if domain not in FORGIVING_DOMAINS:
-        for key in ("pacing", "cap_base", "step_stop"):
+        for key in ("pacing", "cap_base", "step_stop", "reengage"):
             if key in policy:
                 raise ValueError(
                     f"selection_policy.{key} requires a forgiving domain"
@@ -467,6 +481,7 @@ def _load_selection_policy(document: dict[str, Any]) -> SelectionPolicy:
         pacing=pacing,
         cap_base=cap_base,
         step_stop=step_stop,
+        reengage=reengage,
     )
 
 
@@ -1520,10 +1535,12 @@ def owed_bytes_by_cell(
     simulator's close would reject a wrong plan anyway.
     """
     implementation = profile.dp_all_reduce_implementation
-    if not implementation.startswith("direct"):
+    peer_count = profile.dp - 1
+    if not implementation.startswith("direct") and peer_count > 1:
         raise ValueError(
-            "selection_policy.cap_base owed needs a direct DP All-Reduce: "
-            f"{implementation} spreads its messages differently"
+            "a forgiving domain needs a direct DP All-Reduce to plan from: "
+            f"{implementation} spreads its messages over {peer_count} peers "
+            "differently"
         )
     plan: dict[str, dict[str, dict[str, int]]] = {}
     for rank in range(profile.ranks):
@@ -1603,6 +1620,7 @@ def resolve_selection_policy(
         pacing=profile.selection_policy.pacing,
         cap_base=profile.selection_policy.cap_base,
         step_stop=profile.selection_policy.step_stop,
+        reengage=profile.selection_policy.reengage,
     )
 
 
@@ -1647,13 +1665,14 @@ def write_experiment_config(
         # admission drops both, because the simulator refuses them there and
         # neither would move anything if it did not.
         policy_document["pacing"] = selection_policy.pacing.document()
-        # Written only where it moves something: the accounted base is the
-        # default on both sides, so an arm that does not name it produces the
-        # file it produced before the base existed.
-        if selection_policy.cap_base is CapBase.OWED:
-            policy_document["cap_base"] = selection_policy.cap_base.value
+        # The base is written out whatever it is: it is the law the arm ran
+        # under, and an artifact that names it can be read years later without
+        # the generator. The other two are written where they move something.
+        policy_document["cap_base"] = selection_policy.cap_base.value
         if selection_policy.step_stop:
             policy_document["step_stop"] = True
+        if not selection_policy.reengage:
+            policy_document["reengage"] = False
     policy = {
         "schema_version": 1,
         "enabled": True,
@@ -1675,12 +1694,14 @@ def write_experiment_config(
             "flows": microburst_flows,
         },
     }
-    # The step's plan travels with the policy that reads it. The simulator
-    # refuses one without the other, and holds the plan to the launches at
-    # close, so a wrong plan ends the run instead of moving the budget.
-    if "cap_base" in policy_document:
+    # The step's plan travels with every forgiving domain, because the spent
+    # report is measured against the step's total and the step stop against one
+    # sender's share of it. The simulator refuses one without the other, and
+    # holds the plan to the launches at close, so a wrong plan ends the run
+    # instead of moving the budget.
+    if selection_policy.domain in FORGIVING_DOMAINS:
         if owed_bytes is None:
-            raise ValueError("cap_base owed requires the step's plan")
+            raise ValueError("a forgiving domain requires the step's plan")
         policy["owed_bytes"] = owed_bytes
     path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
 
@@ -1857,8 +1878,7 @@ def materialize(
         owed_bytes_by_cell(
             profile, dp_all_reduce_bytes_by_rank_step, groups, dp_groups
         )
-        if selection_policy.cap_base is CapBase.OWED
-        and selection_policy.domain in FORGIVING_DOMAINS
+        if selection_policy.domain in FORGIVING_DOMAINS
         else None
     )
     write_experiment_config(

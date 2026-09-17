@@ -376,6 +376,12 @@ RIGHT THIRD: an ink panel with paper text:
   most congested configuration reached 0.24."
   "We required the 7-sender burst to take at least 20 % of training time. The
   most congested configuration reached 0.62 %."
+  a 1px paper-30 divider
+  "The 7-sender cell is the all-to-all schedule with every DP peer
+  sending at once, the most incast a group of 8 can produce. NCCL's ring
+  and tree receive from 1 or 2 peers per channel, which our fan-in 2 cell
+  approximates, and that cell is the one to map onto a production
+  library."
 
 CLOSING LINE, two sentences:
   "DBLP saves 3.9 to 11.1 % with go-back-N, while it saves 0.78 % with
@@ -421,8 +427,8 @@ at 34px bold on its own line above 20px body:
   repair otherwise."
 
   "two bits, and nothing new on the wire"
-  "The receiver withdraws the exemption with one bit once the budget is
-  spent, and the sender obeys its controller for the rest of the step."
+  "The receiver reports in one bit that the step's tolerance is gone, and
+  the sender obeys its controller until a later report says otherwise."
 
 CLOSING LINE:
   "Every rank is certified after every step to have received at least

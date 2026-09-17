@@ -29,12 +29,12 @@ it.
 | --- | --- | --- | --- |
 | P1 | On a trimming fabric with selective retransmission the incast episode costs under 1 % of training time; prior relief numbers measured go-back-N | shown (runs #117, #120), per-flow ECMP only | 2 confirms it under spraying |
 | P2 | Congestion control's time penalty is the cost tolerance can buy back, and it is large | shown for DCQCN as configured (18 to 24 %) | 1 (tuned DCQCN), 3 (NSCC) |
-| P3 | Budgeted exemption recovers a large share of that penalty with critical steps untouched | shown at one cell, 3 seeds, DCQCN, ECMP (13 %) | 0 (front), 2, 3 |
-| P4 | Loss targeted by the fabric's trim signal costs a fraction of the bytes blind shedding costs for the same or better time | shown (9 % vs 32 %) | 0 |
-| P5 | The mechanism is minimal and controller-agnostic: sender flag at birth, receiver's existing retransmission request as the re-arm, no wire change | shown for DCQCN; argued for NSCC | 3 |
+| P3 | Budgeted exemption recovers a large share of that penalty while the strict budget keeps critical steps | shown at one cell, 3 seeds, DCQCN, ECMP (16 %) | 0 (front), 2, 3 |
+| P4 | Loss targeted by the fabric's trim signal costs a fraction of the bytes blind shedding costs for the same or better time | shown at budget 0.4 (21.3 to 21.8 % against 31.6 %, and shorter) | 0 |
+| P5 | The mechanism is minimal and controller-agnostic: the receiver grants and reports on two flag bits of the existing acknowledgement, the sender obeys them and reads no budget, and no controller changes | shown for DCQCN; argued for NSCC | 3 |
 | P6 | A neighbouring job that obeys congestion control pays a bounded price | unmeasured | 5 |
 | P7 | A current model survives the loss actually spent, at the budgets used | assumed from DBLP and Weintraub 2025 | 6 |
-| P8 | The result holds on a fabric that carries only DP and PP traffic, at 128 ranks or more | unmeasured; 64 ranks with TP on the fabric | 4 |
+| P8 | The result survives on a fabric that carries only DP and PP traffic, at 128 ranks or more | unmeasured; 64 ranks with TP on the fabric | 4 |
 | P9 | The numbers are stable across seeds and not artefacts of RTO, ECN thresholds or burst shape | 3 seeds at headline points | 7 |
 
 ## 3. Unanswered questions, each with the experiment that answers it
@@ -59,7 +59,7 @@ ends it.
 
 | # | phase | answers | instrument | done when | kill test | cost |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | Dose front and mask ablation (running, run 34260936239) | Q8 | worst DCQCN cell, budgets 0.1, 0.2, 0.6 at 3 seeds, 2 more seeds at 0.4, no-critical-steps at 3 seeds | front plotted: bytes lost vs time recovered, exempt and admission, with seed bars | front flat above 0.2, or exempt loses to admission on both axes at 0.1 | 56 arms, 2 days |
+| 0 | Dose front and mask ablation (done, run #123) | Q8 | worst DCQCN cell, budgets 0.1, 0.2, 0.6 at 3 seeds, 2 more seeds at 0.4, no-critical-steps at 3 seeds | front plotted: bytes lost vs time recovered, exempt and admission, with seed bars | front flat above 0.2, or exempt loses to admission on both axes at 0.1 | 56 arms, 2 days |
 | 1 | DCQCN in its best configuration | Q1 | worst cell, fixed-low single arms: RATE_AI and RATE_HAI at x1, x4, x16 of the scaled literals; ECN KMIN/KMAX at x1 and x2; alpha gain at x1 and x4; 1 seed | a tuned setting chosen by shortest window; all later DCQCN arms use it | tuned DCQCN within 5 % of the no-CC window: the penalty was mistuning, P2 and P3 shrink to what survives | 10 arms, 1 day |
 | 2 | Per-packet spraying | Q2, P1 | switch hashes a per-packet entropy (`load_balancing: per_packet`); rerun the 8 map cells as single arms; then the worst-cell comparison at the tuned DCQCN, 3 seeds; then adaptive spraying in the REPS style if oblivious spraying leaves collision-shaped hot spots | map redrawn under spraying; P3 restated on the sprayed fabric | the exempt gain under spraying falls below 5 window-percent | 20 arms, 1 week engineering for oblivious, 2 more for adaptive |
 | 3 | NSCC | Q3, P2, P5 | new CC mode in `rdma-hw.cc`: per-connection window and in-flight, ACK-carried received bytes, ECN plus delay four-case update, `quick_adapt` from achieved goodput, per-trim window decrement, BDP-scaled parameters per UET 1.0.3 pp. 384 to 393; fixtures: single-flow convergence to target delay, N-to-1 fairness, reaction to a trim burst; then the exemption guard in the update; rerun the 4 CC-on map cells and the worst-cell comparison, 3 seeds | NSCC arms pass the fixtures; P2 and P3 have an NSCC row beside the DCQCN row | exempt gain under NSCC under 5 window-percent | 24 arms, 3 to 4 weeks engineering |
@@ -70,7 +70,7 @@ ends it.
 | 7 | Robustness | P9 | 5 seeds at every headline point; RTO at 0.5 and 2 ms; ECN thresholds at spec defaults; burst every step and 7 x 1 GiB once | every headline number carries a seed bar and a sensitivity row | any headline sign flips under a sensitivity row | 40 arms, 1 week |
 | 8 | Paper | all | claims table with one number each, threats to validity, artifact: the ns-3 fork, profiles, CI ledger and release bundles are already a reproducibility package | draft with every promise discharged or scoped out | none | 3 weeks writing |
 
-Order and calendar. Phase 0 is running. Phases 1 and 2 next, in parallel:
+Order and calendar. Phase 0 is done. Phases 1 and 2 come next, in parallel:
 1 is one day of cluster and no code; 2 is a week of code then a day of
 cluster. Phase 3 starts as soon as 2's oblivious spraying is in, since
 NSCC without spraying is not the fabric the claim is about. Phase 6 runs
@@ -116,4 +116,5 @@ No comparisons against run #117's relief numbers. No "tail" or "episode"
 framing. No claim about a congestion control the simulator does not
 model. No budget above 0.4 in a headline: MLT's profiled bounds are 0.7
 to 3.3 % of gradient bytes at equal rounds and 10 % at a quality target,
-and the exempt arm at 0.4 already spends 9 %.
+and the exempt arm at 0.4 already loses 21.3 to 21.8 % of data-parallel
+bytes.

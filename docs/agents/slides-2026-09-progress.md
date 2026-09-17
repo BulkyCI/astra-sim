@@ -249,7 +249,7 @@ The worst cell reaches a trim ratio of 0.24, and the worst burst excess
 is 0.62 % of the window. The rule returns the negative branch. We
 withdrew the episode-shortening claim the same day.
 
-Two things the map did establish. Trimming is a steady-state property of
+The map did establish two facts. Trimming is a steady-state property of
 how the fabric is provisioned, not of the burst: it multiplies about
 2.7x with fan-in and about 5.5x with oversubscription, and the burst step
 looks like every other step. And the burst is a non-event under selective
@@ -303,9 +303,9 @@ are ECN-originated. Suppressing only the notification our own
 forgiveness provoked could not move the window.
 
 The revocation rule is what keeps this honest. The receiver grants the
-exemption on the acknowledgements it already sends and withdraws it with
-one bit when the step's allowance is spent, and the sender follows the
-latest report it has. Nothing new goes on the data path; the whole
+exemption on the acknowledgements it already sends and reports in one bit
+when forgiving every byte it is missing would exceed the step's
+tolerance, and the sender follows the latest report it has. Nothing new goes on the data path; the whole
 protocol is two bits on messages the transport already sends.
 
 ---
@@ -507,9 +507,9 @@ oversubscribed by the same factor.
 | # | Question | Where it stands now |
 | --- | --- | --- |
 | 1 | Sparsification | Separated, deliberately. We model pure drop with no error feedback, and we wrote down why mixing it with an error-feedback compressor is a second uncontrolled lossy layer: the optimiser's residual does not know which updates never arrived. The tolerance question is now a designed experiment rather than an assumption, and the literature gives us bounds to hit: MLT profiles 0.7 to 3.3 % at equal rounds, OptiReduce reports accuracy surviving 1 %. |
-| 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the communication window, so what we report is exposed communication time inside a training window, not blocking transfer time. This is the confound that made us stop quoting 24.8 %. |
-| 3 | CLR identification | Split into two halves. The detector is out of scope for a simulator with no gradients, so we pinned a schedule from independent literature with a written circularity guard. What we can now do, and did this week, is price it: the mask costs 5.1 points of time and the ledger tracks it to the byte. |
-| 4 | Topology, centralized against ring | Turned from a threat into two measured axes. DP fan-in and spine oversubscription are knobs on the regime map, and they are the two things that actually set the trim ratio, multiplying it 2.7x and 5.5x. Hub-and-spoke pressure at one NIC is our fan-in 7 cell, and it is the worst cell of the map. |
+| 2 | Compute and transport interleaving | Closed by construction. Chakra traces overlap 5.4 ms of compute per node with the communication window, so what we report is exposed communication time inside a training window, not blocking transfer time. The overlap is the confound that prevents us from quoting 24.8 %. |
+| 3 | CLR identification | Split into two halves. The detector is out of scope for a simulator with no gradients, so we pinned a schedule from independent literature with a written circularity guard. The ledger prices the mask at 5.1 points of time and tracks it to the byte. |
+| 4 | Topology, centralized against ring | Turned from a threat into two measured axes. DP fan-in and spine oversubscription are knobs on the regime map, and they set the trim ratio, multiplying it 2.7x and 5.5x. Our fan-in 7 cell models hub-and-spoke pressure at one NIC, and it is the worst cell of the map. |
 
 ---
 
@@ -517,26 +517,34 @@ oversubscribed by the same factor.
 
 The numbers above are one cell of one map.
 
-**Verified, three seeds or more, matched arms, pre-registered rules:**
-the negative result on selective repeat; the regime map's shape; DCQCN's
+Verified on three seeds or more, with matched arms and pre-registered
+rules, are the negative result on selective repeat; the regime map's shape; DCQCN's
 18 to 24 % time penalty at this configuration; the exempt arm's window
 gain and its loss cost across the front; the coin's front below P = 0.25;
 the three references of run #126; the budget law; the mask's price and
 its integrity.
 
-**Assumed, and named as assumed:** that a real model tolerates the 1.2 to
-1.3 % of gradient bytes we spend at the headline point, and that the
-framework rescales each reduce-scatter element by the contributions that
-arrived. MLT profiles 0.7 to 3.3 % as tolerable and our own May GPT-2
+We assume, and name as an assumption, that a real model tolerates the
+1.2 to 1.3 % of gradient bytes we spend at the headline point, and that
+the framework rescales each reduce-scatter element by the contributions
+that arrived. MLT profiles 0.7 to 3.3 % as tolerable and our own May GPT-2
 runs survived 40 % with no rescale, so the point falls inside both;
 nothing in a network simulator can test it, and the GPT-2 injection
 experiment is where the assumption stops being one.
 
-**Not yet touched:** per-packet spraying, which is how Ultra Ethernet and
-Meta's MRC balance load, where we use per-flow ECMP hashing. NSCC, the
-window-based controller the Ultra Ethernet specification defines, where
-we use DCQCN. What an exempt job costs a neighbouring tenant. Anything above 64
-ranks.
+We have not touched per-packet spraying, which is how Ultra Ethernet and
+Meta's MRC balance load, where we use per-flow ECMP hashing; nor NSCC,
+the window-based controller the Ultra Ethernet specification defines,
+where we use DCQCN; nor what an exempt job costs a neighbouring tenant;
+nor anything above 64 ranks.
+
+Our worst cell is the all-to-all schedule with all 7 DP peers sending at
+once, the most incast a group of 8 can produce, so it is the stress case.
+NCCL's default ring and tree schedules receive from 1 or 2 peers per
+channel, which the `direct2` cell approximates: there FORGIVE at budget
+0.4 recovers 10.5 to 12.5 % of training time for 2.4 % of data-parallel
+bytes. Map the `direct2` figures onto a production library and read the
+worst-cell figures as the stress case.
 
 We have a mechanism result at one point of a map, on a fabric one
 generation behind the target.

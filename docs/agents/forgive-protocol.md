@@ -1,412 +1,235 @@
-# The forgive protocol
+# FORGIVE: implementation notes
 
-This is the specification of record for receiver-side bounded loss on a
-packet-trimming RDMA fabric, written from the code as built and from the
-runs that measured it. It is written for a reader with a computer
-networks background. Terms are defined where they first appear. Results
-are in [run-120-regime-map.md](run-120-regime-map.md) and
-[run-123-readout.md](run-123-readout.md). The code is
-C++17 under `extern/network_backend/ns-3` and
+[forgive-spec.md](forgive-spec.md) states the rules; this file says where
+each rule lives in the code, what travels on the wire, what every
+telemetry column means, and which gate checks a rule against its statement.
+Where this file and the specification disagree, the specification is
+right. [forgive-design-plain.md](forgive-design-plain.md) says the same
+rules in plain words with the assumptions behind them.
+
+Joe Fang's work in collaboration with Zechen Ma.
+
+The code is C++17 under `extern/network_backend/ns-3` and
 `astra-sim/network_frontend/ns3`, and Python 3.11 under
-`experiments/ring_3d`.
+`experiments/ring_3d`. Notes are current at main `59cf16c` and ns-3
+`3e11ace49`.
 
-## 1. What the protocol does
+## 1. The split between the transport and the experiment layer
 
-Distributed training synchronizes gradients with an all-reduce every
-step. A training job can lose a small share of those gradient bytes
-without harm, except during the critical learning period early in
-training. The forgive protocol lets the network use that tolerance.
+The ns-3 transport carries no application semantics: it hands over a
+five-tuple and a byte range and learns an answer, and it reads no step, no
+phase and no budget. Every rule the specification states lives in
+`astra-sim/network_frontend/ns3/ExperimentConfig.hh`, which the transport
+reaches through the callbacks in
+`astra-sim/network_frontend/ns3/entry.h`.
 
-The mechanism has three parts.
-
-- The switch trims instead of dropping. When a queue is full, the switch
-  truncates the packet to its header and forwards the header on a
-  lossless control queue. The receiver therefore learns exactly which
-  bytes went missing. This is packet trimming as specified by the Ultra
-  Ethernet Transport.
-- The receiver decides what to do with each missing range. It either
-  requests retransmission, as any selective-retransmission transport
-  would, or it forgives the range: it acknowledges past the hole as if
-  the bytes had arrived. A budget per receiving rank and per training
-  step bounds how much may be forgiven. The budget is tight on critical
-  steps and loose on the others.
-- With congestion exemption enabled, a sender whose trims would be
-  forgiven also stops reacting to congestion signals. It keeps its rate
-  until the receiver reports that its budget entry has no allowance
-  left. From then on it obeys congestion control again. The sender pays
-  for congestion in bounded loss instead of in reduced rate.
-
-The budget can be spent in three places. All three share one accounting
-rule, so they can be compared at equal budget.
-
-| where the budget is spent | configuration name | what happens | sender under congestion |
-| --- | --- | --- | --- |
-| at the sender, before sending | `admission` | a hash draw suppresses whole gradient messages; the receiver gets a 64-byte placeholder instead | obeys congestion control |
-| at the receiver, after a trim | `recovery` | the receiver forgives trimmed ranges | obeys congestion control; a forgiven trim still triggers a rate cut |
-| at the receiver, after a trim, with exemption | `recovery_exempt` | same as `recovery` | withholds every congestion signal until the receiver reports the allowance spent |
-
-Sender-side suppression is the mechanism of the DBLP paper and serves as
-the matched baseline. Receiver-side forgiveness is the forgive protocol.
-Forgiveness with congestion exemption is the variant that produced a
-measurable gain.
-
-## 2. Why each piece exists
-
-Each paragraph states a measurement and the design decision it forced.
-
-**Trimming turns loss into a message.** A dropped packet leaves the
-receiver waiting for a retransmission timeout. A trimmed packet delivers
-its header on a lossless queue, so the receiver knows the missing range
-at once. That is what makes a receiver-side decision possible. Without
-trimming there is nothing to forgive, only a timeout to wait for.
-
-**Tolerance depends on the training phase.** The DBLP and Accordion
-papers show that a model cannot afford gradient loss during its critical
-learning period and can afford substantial loss afterwards. The budget is
-therefore a per-step probability. It is `p_low` on the critical steps,
-which are pinned to steps 1, 2, 3 and 20 (see
-[clr-schedule-evidence.md](clr-schedule-evidence.md)), and `p_high` on
-every other step. The budget applies only to gradient all-reduce
-payload. Tensor-parallel traffic, pipeline traffic, control packets and
-background traffic are never eligible.
-
-**The bound belongs to a rank and a step, not to a flow.** The claim
-about tolerance is about one rank's gradient for one step. The budget is
-therefore kept per (receiving rank, training step). Every eligible flow
-registers its byte count when it is sent. Suppression at the sender and
-forgiveness at the receiver both charge the same entry. The entry closes
-when that rank's all-reduce for that step completes. The rule is:
-
-```
-forgiven_bytes(rank, step) + suppressed_bytes(rank, step) <= p(step) * eligible_bytes(rank, step)
-```
-
-Both counters only grow. Nothing is refunded. A closed entry forgives
-nothing. The receiver enforces that rule in counters it owns, as
-`forgiven <= p(step) x (delivered + forgiven)`, the soft cap; a step ends
-with `delivered + forgiven = eligible`, so the two forms share one ceiling
-and the analyzer certifies against the accumulated `eligible`. The step's
-total `owed`, which the generator plans and `close` holds to the launches,
-is the hard cap, and it is what revocation and the step stop read.
-
-**Forgiveness alone saves no time.** Run #117 measured 4 to 11 % shorter
-training under go-back-N recovery. A control run with selective
-retransmission showed why: under go-back-N every trim caused the sender
-to resend its whole window, up to 79 bytes on the wire for every byte the
-policy removed. Under selective retransmission a trim costs one repair
-packet and one round trip, overlapped with the rest of the flow. Run #120
-confirmed this across eight fabric configurations: the congestion episode
-cost under 1 % of the training time in every one. Forgiveness that only
-skips the repair round can save at most one round trip per flow, which is
-under 0.2 % of an all-reduce. So receiver-side forgiveness by itself is
-not a performance mechanism. It needed a second half.
-
-**The cost of congestion control is what can be bought back.** On the
-same eight configurations, DCQCN cut the trim rate tenfold and lengthened
-the training time by 18 to 24 %. It did so through millions of rate cuts.
-That time was spent avoiding trims the model could have afforded. So an
-eligible flow on a non-critical step is exempted: it ignores rate cuts
-while its budget entry has room.
-
-**The exemption must cover ECN marks, not only trims.** In the DCQCN
-configuration used here, switches start ECN-marking packets at 800 KB of
-queue at 400 Gbps and trim only when the 4 MiB data queue is full. Marks
-arrive long before trims. On the most congested configuration at least
-74 % of rate cuts came from ECN marks, which a forgiven trim never
-touches. Exempting the flow only from trim-triggered cuts would leave
-three cuts in four in place. So an exempt sender ignores every congestion
-notification packet, whatever caused it.
-
-**A spent allowance ends the exemption.** The budget entry is shared by
-every sender that talks to one rank, so no sender can read it. The
-receiver therefore reports the one thing a sender cannot work out for
-itself: this entry has no allowance left. The report is one header bit,
-it rides an existing repair request or forgiveness acknowledgement, and
-the first one to reach an exempt flow puts that flow back under
-congestion control with the rate cut the same packet carries. A repair
-request on its own does not end an exemption: the receiver replays one
-whenever a range it is already repairing is trimmed again, which says
-nothing about the budget.
-
-**What it measured.** On the most congested configuration, over three
-seeds at budget 0.4, forgiveness with exemption shortened training by 20
-to 21 % relative to DCQCN alone, and its critical steps stayed within
-2.4 ms of DCQCN's. It lost 21.3 to 21.5 % of the gradient bytes, against
-32 % for sender-side suppression at the same budget, and its training
-time was shorter. At budget 0.1, the budget we publish, it shortened
-training by 12.9 to 14.1 % for 6.75 to 6.89 % of the gradient bytes.
-Section 8 has the table.
-
-## 3. Who decides what
-
-| role | knows | decides |
+| the rule | the transport asks | the experiment layer answers |
 | --- | --- | --- |
-| switch | its queue depth | trim or forward; it never decides acceptance |
-| receiver NIC model (ns-3 `RdmaHw`) | which ranges are missing and which it already holds | asks the experiment layer per unsettled range, then absorbs or requests |
-| experiment layer (`ExperimentConfig.hh`) | flow identity, training step, critical-step mask, the budget entries | the verdict per range; the exemption per flow at creation |
-| sender NIC model (ns-3 `RdmaHw`) | its own rate and window | nothing new; it delivers or withholds congestion signals according to its exemption flag, and re-arms on the receiver's allowance report |
+| forgive a trimmed range | `RdmaHw::ReceiveTrimmedData` | `recovery_verdict` to `evaluate_forgiveness` |
+| the budget-gone report | `RdmaHw::AllowanceGone` | `allowance_gone` to `note_holes` |
+| credit an arrival | `RdmaHw::ReceiveUdp` | `data_accepted` to `note_delivered` |
+| the grant's eligible mark | `RdmaHw::Setup`, once per receive queue pair | `forgiveness_eligible` to `exemption_eligible` |
+| the step stop's remainder | `RdmaHw::AskRemainderOnArrival` | `remainder_verdict` to `evaluate_remainder` |
 
-The transport carries no application semantics. The ns-3 code passes a
-five-tuple and a byte range across two callbacks. It never learns what a
-step or a budget is.
+Three domains share one budget and one accounting rule, so they compare at
+equal budget: `admission` sheds whole messages at the sender and is the
+matched baseline, `recovery` forgives at the receiver under its controller,
+and `recovery_exempt` adds the licence to ignore the controller. The names
+are `SheddingDomain` in `ExperimentConfig.hh` and
+`selection_policy.domain` in a profile.
 
-## 4. The receiver's decision
+## 2. The ledger and the verdicts
 
-A trimmed packet arrives at its destination carrying the original
-sequence number and payload length. The receiver first computes how many
-of those bytes it does not already hold. Bytes below its cumulative
-acknowledgement point, or inside its set of accepted out-of-order ranges,
-are already held. A retransmission can be re-segmented so that a trimmed
-range straddles the cumulative point or overlaps an accepted range;
-charging the full length in that case would spend budget on bytes the
-receiver already has. The unsettled length is what the verdict is asked
-about.
+`StepLedger` is one receiving rank's cell for one step and
+`ForgivenessLedger` is the dense table over (rank, step), both in
+`ExperimentConfig.hh`. A cell keeps `eligible`, `shed`, `forgiven`,
+`delivered`, `owed`, `holes`, `collectives`, `completed`, and a
+`SenderShare` of `owed` and `delivered` per sender. Every counter is
+monotone except `holes`, which falls as repairs land.
 
-Each range is in one of three states.
-
-| state of the range | on a trimmed packet | on a data packet (a retransmission after timeout) |
-| --- | --- | --- |
-| held, nothing unsettled | send a duplicate ACK; no charge | accept as today |
-| requested | recompute the verdict and send the answer again | accept |
-| forgiven | send an ACK; no charge | discard the payload and ACK; no refund |
-| unsettled | ask for a verdict | cannot happen: data never precedes a verdict on the same range |
-
-The verdict function is total. Anything it cannot place is answered with
-a retransmission request.
-
-```
-verdict(flow, unsettled_bytes):
-  flow unknown, or not gradient payload, or not eligible,
-    or the configuration does not forgive                    -> request
-  step not in the critical-step mask                         -> request
-  threshold = p_low if step is critical else p_high
-  budget entry (rank, step) cannot cover unsettled_bytes     -> request
-  charge the entry; add unsettled_bytes to the flow's total  -> forgive
-  entry has no room for one further byte                     -> report the allowance spent
-```
-
-On forgive, the range is added to the accepted out-of-order set as if it
-had arrived. If it was at the head of the sequence, the cumulative
-acknowledgement point advances over it and over any accepted ranges
-behind it. An acknowledgement is sent immediately. That acknowledgement
-carries the congestion flag, so that in the `recovery` configuration a
-forgiven trim costs the sender the same rate cut a requested one would.
-Forgiving must not hide congestion.
-
-On request, the existing trim NACK is sent. The verdict is recomputed on
-every request rather than remembered, because the allowance only shrinks
-within a step, so a repeated question answers the same way or refuses,
-and recomputing is also right when the first request was lost.
-
-Two edge cases are covered by the state table. First, a trimmed packet
-can arrive for a flow whose receive state is already gone, because the
-flow completed and its port number was reused. Such a packet is answered
-with a plain retransmission request. Creating receive state for it would
-leave a stale cumulative point for the next flow on that port. Second, a
-retransmission timeout can resend a range after the receiver forgave it.
-That data takes the old-sequence path and is discarded. A race between
-forgiveness and the timeout can therefore neither deliver the bytes
-twice nor refund the budget.
-
-## 5. The sender
-
-In the `recovery` configuration the sender is unchanged. Its cumulative
-acknowledgement point advances over forgiven holes, and the transfer
-completes when that point reaches the message size.
-
-In the `recovery_exempt` configuration each queue pair carries one flag.
-The receiver sets it and the receiver clears it, once each: the sender
-reads neither a budget nor a step.
-
-| state | event | result |
-| --- | --- | --- |
-| creation | queue pair created | obeying its controller, at line rate as always |
-| obeying | an acknowledgement arrives marked eligible with no allowance report | exempt from that acknowledgement on, and the time recorded; one round trip of every flow is spent obeying |
-| exempt | congestion signal arrives (from an ECN-marked ACK, a forgiveness ACK, or a trim notification) | withheld from the controller and counted; the DCQCN rate and its alpha state are untouched |
-| exempt | allowance report arrives, on a repair request or a forgiveness ACK | flag cleared, time recorded, then the normal path runs, including this packet's own rate cut |
-| re-armed | anything, including a later eligible acknowledgement | DCQCN as today; the grant is one way, so the exemption cannot flap |
-
-The re-arm happens before the sender checks whether the request is stale.
-A stale report still describes a spent entry. The receiver code is
-identical in the two configurations. An exempt sender withholds the
-congestion flag on a forgiveness ACK; a re-armed sender acts on it. The
-transport reaches its congestion controller at three call sites and the
-exemption is checked at those, so an exempt flow runs no controller code
-at all.
-
-The experiment layer's answer, asked by the receiver once per receive
-queue pair and carried on every acknowledgement that queue pair emits:
-
-```
-eligible(flow):
-  configuration is not recovery_exempt, or not gradient payload,
-    or not eligible                                          -> no
-  step is critical, or not in the mask                       -> no
-  the permissive threshold is zero                           -> no
-  otherwise                                                  -> yes
-```
-
-The grant is that mark on an acknowledgement whose allowance report is
-clear, so the sender learns both halves from one packet and reads no cell.
-The exemption spends no budget. Only forgiveness does. A flow whose budget
-entry is later used up by other flows is re-armed by its own next trim,
-because the receiver reports the spent entry on the answer to that trim. A
-flow that is never trimmed again stays exempt until it completes. It is not
-the flow causing trims.
-
-## 6. Invariants
-
-- The forgiven and suppressed byte counts of an entry only grow. The
-  budget rule holds at every charge. A closed entry forgives nothing.
-  `analyze.py` re-checks the rule per run from the integer thresholds
-  the generator wrote.
-- A range is charged at most once, because forgiving it absorbs it and an
-  absorbed range has no unsettled bytes left to charge.
-- Delivered bytes exclude forgiven bytes. The `physical_bytes` column
-  keeps counting forgiven bytes as offered, because it is the denominator
-  of the trim ratio and is joined against the ns-3 flow-completion
-  records. The `delivered_bytes` column excludes them.
-- Nothing is forgiven, exempted or suppressed on a placeholder flow, a
-  background flow, a tensor-parallel flow or a pipeline flow, nor on a
-  critical step beyond `p_low`.
-- The `recovery` configuration does not change the sender's reaction to
-  congestion. It takes exactly the rate cuts that its trims and ECN marks
-  would cause without forgiveness.
-- The exemption flag is set only in the `recovery_exempt` configuration.
-  A recorded re-arm time implies the flow was told its allowance was
-  spent, and that it took at least one rate cut afterwards.
-- Two runs of one profile with one seed produce identical telemetry.
-- The switch never decides acceptance. Every trim is a question to the
-  receiver, never an answer.
-
-## 7. Configuration and refusals
-
-Profile keys, in `experiments/ring_3d/profiles/*.json`:
-
-```json
-"selection_policy": { "p_low": 0.005, "p_high": 0.4, "domain": "recovery_exempt" },
-"clr_schedule": { "kind": "explicit_critical_steps", "critical_steps": [1, 2, 3, 20] },
-"network": {
-  "packet_trimming": { "mode": "ftd" },
-  "transport_recovery": { "selective_repair": true, "retransmission_timeout_ns": 1000000 },
-  "congestion_control": { "mode": "dcqcn" }
-}
-```
-
-The generator refuses an inconsistent profile by name, and the simulator
-refuses it again when it reads the generated configuration.
-
-| configuration | requires |
+| what moves the cell | the call |
 | --- | --- |
-| `recovery` | selective retransmission (`selective_repair: true`), packet trimming (`ftd`), a critical-step mask covering every step |
-| `recovery_exempt` | all of the above, plus DCQCN (`congestion_control.mode: dcqcn`) |
+| a message launches toward the rank | `register_eligible`, which throws if the plan never named the cell |
+| the sender's baseline sheds a message | `register_shed` |
+| a receiving NIC accepts payload | `register_delivered`, credited to the cell and to the sender |
+| the plan opens the step | `register_owed`, `register_collectives` |
+| a flow's missing bytes change | `replace_holes`, which keeps the cell's sum |
+| the cap's base becomes the plan | `use_owed_base`, once, from the parser |
 
-Selective retransmission is required because a forgiven range is stored
-as an accepted out-of-order range, and go-back-N never consults that
-set. Trimming is required because a dropped packet reaches no receiver.
-A mask is required because the verdict answers "request" for any step it
-cannot find, and a run that forgives nothing by omission would look like
-a null result. DCQCN is required because without congestion control
-there is nothing to be exempt from.
+The pure core is a set of total functions on a cell, with no clock and no
+network in them: `affords_soft` (the soft cap of the specification's trim
+rule), `paces_out` and `range_coin` (the coin), `budget_gone` (the
+report), `trim_verdict`, `sender_stopped` and `remainder_verdict`.
+`evaluate_forgiveness` and `evaluate_remainder` are the shells that
+resolve the cell, draw the coin, store the answer back and count.
+`step_threshold` resolves `p_low`, `p_high` or zero from the mask, and
+every path resolves it through that one function.
 
-The generator writes the configuration name, a semantics string
-(`recovery_forgiveness` or `recovery_forgiveness_cc_exempt`) and the
-transport requirements into `experiment.json`. The simulator checks all
-of them against the transport it was built with. `run.py --domain`
-overrides the profile's configuration, which is how `compare.py` builds
-the matched runs.
+`Pacing` is `std::variant<NoPacing, Bernoulli>`, so a Bernoulli
+probability exists only under Bernoulli and a third rule fails to compile.
+`parse_pacing` in `ExperimentConfig.hh` and `_load_pacing` in
+`experiments/ring_3d/generate.py` are its two smart constructors.
 
-## 8. Matched runs and what they measured
+## 3. The report and the grant
 
-For a profile that forgives, `compare.py` runs four configurations per
-seed. All four draw from one random selection stream, so the set of
-messages suppressed by the sender-side baseline is the same set the
-receiver-side runs treat as forgivable.
+`budget_gone` is the specification's transition inequality,
+`forgiven + holes + 4096 > p x owed`, evaluated wherever an
+acknowledgement or a repair request leaves the receiver. It is not a
+latch: `forgiven` only grows, the holes drain as repairs land, and a cell
+that reported gone reports room again once the fabric recovers.
 
-| run | where the budget is spent | budget |
-| --- | --- | --- |
-| tight baseline (`fixed_p_low_baseline`) | sender | `p_low` on every step |
-| phase-aware suppression (`dblp_policy`) | sender | `p_low` on critical steps, `p_high` elsewhere |
-| forgiveness (`recovery_policy`) | receiver, per the profile | same as phase-aware suppression |
-| loose baseline (`fixed_p_high_baseline`) | sender | `p_high` on every step |
+`RdmaHw::FollowAllowanceReport` is the sender's whole share of the
+protocol. It reads the two bits, counts a transition when the bit
+differs from the one before it, and moves the queue pair between
+withholding and delivering. The first report with the eligible bit set
+and the gone bit clear is the grant, timestamped in
+`cc_exempt_granted_ns`. Under `selection_policy.reengage = false` the
+sender still carries and counts every report and ignores a set bit, which
+is the reference arm.
 
-Run #123 used the most congested fabric of the regime map: DCQCN,
-direct all-reduce with seven-way fan-in, and a spine oversubscribed 4:1.
-Three seeds. "Training time" is the makespan of 20 training steps.
-"All-reduce time" is measured from the first rank's start to the last
-rank's completion.
+`exemption_eligible` is what the receiver marks its acknowledgements
+with. It reads no cell and spends no budget: a critical step marks like
+any other, and its small `p` is what brings the controller back.
 
-| run | training time | all-reduce time, non-critical steps | all-reduce time, critical steps | gradient bytes lost | bytes re-sent after trims |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| tight baseline | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
-| phase-aware suppression, 0.4 | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
-| forgiveness with exemption, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
-| loose baseline, 0.4 | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
+## 4. The stop
 
-Per seed, the exempt run withheld 25.4 to 25.7 million congestion
-signals, delivered 3.58 to 3.69 million, and re-armed 5 049 to 5 447 of
-its 71 680 exempt flows. The flows that received an allowance report are
-the flows that re-armed, to the flow, which is the invariant of section 6
-measured rather than assumed. The budget rule held in every entry. The
-same fabric without any congestion control ran in 1367 ms and re-sent
-24 % of its bytes after trims (run #120, one seed). The exemption is
-therefore a third way to pay for an overloaded fabric: it finishes below
-the no-congestion-control result, its re-sent bytes stay near DCQCN's,
-and it loses 5.1 % of all bytes.
+`note_delivered` returns true on the arrival that carries a sender past
+`1 - p` of its share. `entry.h::stop_sender_flows` then walks the active
+flow registry and calls `RdmaHw::StopFlow` on every open flow from that
+sender into the rank, because a flow waiting on a repair receives nothing
+and would otherwise wait for its own timeout. Each of those runs
+`AskRemainderOnArrival`, which asks `evaluate_remainder` with the
+cumulative sequence and the bytes already accepted above it; the hole is
+the flow size less both, since under selective repeat a stalled flow keeps
+accepting packets past its gap.
+
+`remainder_verdict` grants the whole hole or nothing, and only when the
+step's pool affords it, `forgiven + remainder <= p x owed`. A grant
+absorbs everything from the cumulative sequence to the flow size and
+acknowledges it, so the sender completes through the `IsFinished` it
+already had, with no new packet type and no new sender state. A refusal
+emits nothing. The coin never applies here.
+
+## 5. The plan and the certification
+
+`owed` comes from ASTRA-sim's own collective code before the first launch.
+`AstraSimNetwork.cc::install_collective_plan` walks every rank,
+`Workload::plan_dp_all_reduce` finds that rank's DP All-Reduce nodes, and
+`Sys::plan_all_reduce_bytes_per_peer` runs the scheduler's own phase
+builder on a copy of the queue allocator. Rank `r`'s answer for peer `p`
+becomes `p`'s owed from `r`. One call installs the whole table through
+`ExperimentConfig.hh::install_collective_plan`, because a cell whose
+senders are still being added would measure its report against a total
+that is not yet the total. A real receiver reads the same table from its
+collective library at step start.
+
+`ForgivenessLedger::note_collective_completed` fires on every DP
+All-Reduce completion at a rank and asserts on the last one the plan
+named: the launches equal the plan, and `shed + forgiven <= p(step) x
+eligible`. `affords_soft` makes both throws unreachable; they are what
+stops a later change to the verdicts, the remainder path or the ledger
+from shipping a run that broke the contract.
+
+`experiments/ring_3d/analyze.py::_check_ledger_law` recomputes the same
+law per cell from the run's own telemetry and its own `clr_mask.csv`, and
+`_require_lawful_ledger` fails the arm rather than reporting it.
+`min_delivered_share` is the smallest `1 - (shed + forgiven) / eligible`
+over cells with eligible bytes, and `worst_cell` names its rank and step.
+
+## 6. The guard at the three dispatch sites
+
+`RdmaHw::DeliverCongestionSignal` is one boolean test on the queue pair's
+exemption, and it is checked at the three places the transport hands a
+congestion signal to whichever controller is configured, all in
+`rdma-hw.cc`:
+
+1. a CNP-marked acknowledgement under `cc_mode` 1, before `cnp_received_mlx`;
+2. the per-acknowledgement dispatch of `cc_mode` 3, 7, 8 and 10;
+3. a trim notification under `cc_mode` 1.
+
+No line inside a controller changes, and an exempt flow runs no controller
+code at all. The controller raises its own rate on its own timers when it
+hears nothing.
+
+## 7. The wire
+
+Two flag bits on the existing acknowledgement and repair request, in
+`qbb-header.{h,cc}`: `FLAG_ALLOWANCE_EXHAUSTED` (the budget is gone) and
+`FLAG_FORGIVENESS_ELIGIBLE` (this flow may be exempt), set by
+`SetAllowanceExhausted` and `SetForgivenessEligible`. The stop is an
+ordinary acknowledgement whose sequence number is the flow's size. The
+data path gains nothing.
+
+## 8. Configuration and refusals
+
+A profile names `selection_policy` with `p_low`, `p_high`, `domain` and
+the four receiver policies `pacing` (`none` or `bernoulli` with its `p`),
+`cap_base` (`accounted` or `owed`), `step_stop` and `reengage`; a
+`clr_schedule` of `explicit_critical_steps`; and a `network` block whose
+`packet_trimming`, `transport_recovery` and `congestion_control` decide
+the fabric. The four policies default to none, accounted, false and true,
+and `generate.py` refuses any of them outside a forgiving domain. `recovery`
+requires selective repair and `ftd` trimming; `recovery_exempt` requires
+DCQCN as well, because without a controller there is nothing to be exempt
+from. `RdmaHw::Setup` aborts when `Forgiveness` runs without
+`SelectiveRetransmission`, when `CongestionExemption` runs without
+`Forgiveness`, and when the remainder callback runs without selective
+repair. `validate_experiment_contract` requires a mask covering every
+step, because a step the mask does not define forgives nothing and an arm
+that forgave nothing by omission reads as a real negative result.
+`run.py --domain` overrides the profile's domain, which is how
+`compare.py` builds the matched runs.
 
 ## 9. Telemetry
 
-Per flow, in `telemetry/flow_events.csv`, the columns added by this
-protocol in order: `timeouts`, `cnp_received`, `first_trim_ns`,
-`first_repair_ns`, `forgiven_bytes`, `forgiven_ranges`,
-`forgiven_remainder_bytes`, `pacing_refusals`, `soft_refusals`,
-`late_forgiven_bytes`, `delivered_bytes`, `cc_exempt`,
-`cc_exempt_granted_ns`, `cc_signal_withheld`, `allowance_gone_reports`,
-`cc_transitions`, `cc_obeying_ns`.
+Per flow, in `telemetry/flow_events.csv`:
 
-Per run, in `ns3/transport_summary.csv`, the events: `trim_ftd_admission`
-and `trim_ftd_lasthop_admission` (data plane, bytes trimmed),
-`trim_forgiven` and `remainder_forgiven` (data plane, bytes forgiven),
-and the control-plane counts `rto_fired`, `cnp_taken`,
-`cc_signal_withheld`, `allowance_gone_reports`, `cc_exempt_granted`,
-`cc_transition`, `clipped_trim`.
+| column | meaning |
+| --- | --- |
+| `forgiven_bytes` | bytes the receiver accepted without seeing them, trims and remainders together |
+| `forgiven_ranges` | trimmed ranges forgiven; a remainder was never trimmed and does not count here |
+| `forgiven_remainder_bytes` | the subset of `forgiven_bytes` the step stop took |
+| `pacing_refusals` | trimmed arrivals the coin declined that the cap could have afforded, so coin and cap refusals decompose without overlap |
+| `soft_refusals` | bytes the soft cap declined for want of vested allowance |
+| `late_forgiven_bytes` | bytes that arrived for an already forgiven range; the charge stands, so the loss the training side saw is `forgiven_bytes` less this |
+| `delivered_bytes` | `physical_bytes` less `forgiven_bytes`; `physical_bytes` stays the offered figure because it joins `fct.txt` and denominates W |
+| `cc_exempt` | the receiver granted this flow an exemption at some point; never withdrawn, because the telemetry is the record of the grant |
+| `cc_exempt_granted_ns` | when the first acknowledgement carrying the grant arrived; zero means never |
+| `cc_signal_withheld` | congestion signals the sender kept from its controller |
+| `allowance_gone_reports` | reports that said the step's budget was gone |
+| `cc_transitions` | reports that changed the bit |
+| `cc_obeying_ns` | simulated time the sender spent delivering signals while holding a grant |
 
-`summary.json` and the report derive from these: the trim ratio W
-(trimmed bytes divided by offered bytes), the net trim ratio W' (W minus
-the forgiven share, which is the load the transport still re-sent),
-forgiven bytes per step, the exemption counters, and the budget-rule
-verdict. Do not quote `wire_per_offered`; it counts bytes per hop, not
-per receiver (see the run #120 readout).
+Per run, in `ns3/transport_summary.csv`: `trim_ftd_admission` and
+`trim_ftd_lasthop_admission` (bytes trimmed), `trim_forgiven` and
+`remainder_forgiven` (bytes forgiven), and the control-plane counts
+`rto_fired`, `cnp_taken`, `cc_signal_withheld`, `allowance_gone_reports`,
+`cc_exempt_granted`, `cc_transition`, `clipped_trim`.
 
-## 10. What the test gate proves
+Derived by `analyze.py` and `report.py`, never counted: trimmed-forgiven
+bytes (`forgiven_bytes` less `forgiven_remainder_bytes`), the loss the
+training side saw (`forgiven_bytes` less `late_forgiven_bytes`),
+`forgiven_remainder_unsent_bytes` (the remainder no sender put on the
+wire), the trim ratio W, the net trim ratio W', and the ledger law with
+`min_delivered_share`. Do not quote `wire_per_offered`; it counts bytes
+per hop rather than per receiver.
 
-`experiments/ring_3d/forgiveness_smoke.sh` runs on every push.
+## 10. What the gate proves
 
-- `RdmaRangeAlgebra` exercises the receiver's range clipping and pruning,
-  including the straddle and partial-overlap branches that no fabric run
-  can reach because every packet starts on a packet boundary.
-- `forgiveness_smoke_8` in the `recovery` configuration, against the same
-  profile in the `admission` configuration: every flow completes;
-  forgiven bytes appear only on gradient payload and only within the
-  budget rule; bytes charged equal bytes absorbed; delivered bytes
-  exclude forgiven bytes; the net trim ratio is below the trim ratio;
-  two same-seed runs are identical.
-- `forgiveness_race_8` sets the retransmission timeout an order of
-  magnitude below the round-trip time, so retransmitted data races the
-  forgiveness that made it redundant: forgiven bytes stay monotone,
-  duplicates are discarded, every flow completes.
-- `forgiveness_dcqcn_8` checks that under DCQCN a forgiven trim still
-  costs a rate cut.
-- `exempt_smoke_8` in the `recovery_exempt` configuration: only eligible
-  gradient flows on non-critical steps are exempt; at least one
-  congestion signal is withheld; no non-exempt flow withholds any; the
-  exempt flows told their allowance was spent are exactly those that
-  re-armed; every re-armed flow was exempt and took a rate cut
-  afterwards; the budget rule holds.
-- `bernoulli_smoke_8` and `stepstop_smoke_8` carry one v2 policy each,
-  checked in section 15.
-- `check_refusals.py` breaks each required field in turn and checks that
-  the run is refused by name and leaves no telemetry.
+`experiments/ring_3d/forgiveness_smoke.sh` runs on every push, and
+`check_forgiveness.py` reads each run back off its own telemetry.
+
+| fixture | what it must show |
+| --- | --- |
+| `RdmaRangeAlgebra` | the core laws directly: a cell that has accounted for everything it does not spend affords exactly its threshold's share, the law is monotone in delivered and in forgiven, a cell that has received nothing forgives nothing, the coin repeats per (flow, range, attempt), the remainder is whole or nothing, a coin refusal reports no spent allowance; plus the range clipping's straddle and partial-overlap branches, which no fabric run reaches |
+| `forgiveness_smoke_8`, against the same profile in `admission` | every flow completes, forgiven bytes appear only on gradient payload and only within the law, bytes charged equal bytes absorbed, delivered bytes exclude forgiven bytes, W' is below W, two same-seed runs are identical |
+| `forgiveness_race_8` | with the timeout an order of magnitude below the round-trip time, retransmitted data races the forgiveness that made it redundant and loses |
+| `forgiveness_dcqcn_8` | a forgiven trim still costs a rate cut |
+| `exempt_smoke_8` | only eligible gradient flows are exempt; no flow is exempt from its first byte, since a sender obeys for the round trip before its first acknowledgement; at least one signal is withheld and no non-exempt flow withholds any; a flow that changed its report was told its allowance was gone; a flow back under its controller took a rate cut afterwards |
+| `bernoulli_smoke_8` | a coin refusal of a range the cap could have afforded, without which the rule cost the arm no forgiveness |
+| `stepstop_smoke_8` | a forgiven remainder, charged remainder equal to the transport's `remainder_forgiven`, remainder never sent within remainder charged, ledger law verified |
+| `check_single_arm_join.py` | one `run.py` arm reproduces `compare.py`'s recovery arm at the same profile and seed, byte for byte |
+| `check_refusals.py` | each required field broken in turn is refused by name and leaves no telemetry |
 
 Unit tests cover the profile parser's refusals, the construction of the
 four matched runs, the counters reaching the summary and the report, and
@@ -414,166 +237,45 @@ the CI matrix's run counts.
 
 ## 11. Cost
 
-The verdict per trim is one lookup in a map of at most about ten
-thousand active flows, plus constant-time access into a dense array of
-ranks by steps. The exemption is asked once per queue pair. The
-congestion-notification check is one boolean test. Measured on the
-32-rank profile with the `admission` and `recovery` configurations on the
-same build, the receiver-side path costs 0.56 % more wall time per
-simulated event, within run-to-run spread, and the run has fewer events
-overall because forgiven ranges are never retransmitted.
+The trim verdict is one lookup in the active flow registry plus
+constant-time access into a dense array of ranks by steps, and the
+remainder question is the same lookup per accepted arrival. The exemption
+is asked once per receive queue pair and the congestion-signal guard is
+one boolean test. A forgiving run has fewer events overall, because a
+forgiven range is never retransmitted.
 
-## 12. Limits and open items
+## 12. What has been measured
 
-- Tolerance is assumed, not demonstrated. That a current model survives
-  losing 6.8 % of its gradient bytes on non-critical steps rests on the
-  DBLP paper (EfficientNet, ResNet) and on Weintraub et al. 2025 (10 %
-  uniform loss on Llama 2 7B, with no phase dependence tested). A real
-  training run is needed.
-- DCQCN only. The exemption discards DCQCN's congestion notification
-  packets. The Ultra Ethernet default congestion control (NSCC) is
-  window-based with a trim-triggered fast adaptation and has no model
-  here. Meta runs its 400 Gbps training fabrics with DCQCN off; there the
-  exemption has nothing to act on, and receiver-side forgiveness alone is
-  the open question.
-- One tenant. The exempt flows shared the fabric only with their own
-  job's tensor-parallel traffic and one background burst. Against another
-  job's flows that obey congestion control, the cost of the exemption
-  lands on that job. The budget bounds it; nothing here measures it.
-- Eligibility covers the gradient all-reduce as a whole. Treating its
-  reduce-scatter half as forgivable and its all-gather half as never
-  forgivable needs a collective-phase field in
-  `AstraSim::OperationContext`.
-- The receiver never acknowledges beyond what the sender has sent.
-  Without evidence of congestion, such skip-ahead would degenerate into
-  suppression at the receiver.
-- The switch has no steering role. Drop-precedence steering would only be
-  an efficiency option, with no authority over acceptance.
-
-## 13. Relation to prior work
-
-Receiver-side bounded loss for gradient traffic exists: MLT (NSDI 2024)
-stops retransmission once a fixed fraction of a tensor has arrived, LTP
-(2023) closes a round early on network conditions, OptiReduce (NSDI 2025)
-bounds a round by a timeout, and trimmable gradients (HotNets 2024) make a
-trimmed packet a compressed gradient with no retransmission at all. What
-this protocol adds over them is the per-range verdict driven by the
-switch's trim report, the budget per rank and step with the critical
-steps held tight, and the per-flow, budget-bounded, self-revoking
-congestion-control exemption. The comparison table, the null searches
-that support the "not found" claims, and what the literature says about
-the tolerance and DCQCN assumptions are in
+Every number lives in [results-ledger.md](results-ledger.md), one row per
+run with the code it ran, the caveat that limits it, and what replaces it;
+a number is quotable only if its row says so. The per-seed rows behind the
+figures are in [figure-data.md](figure-data.md), the design history of the
+v2 policies and the arms that price them in
+[forgive-v2-design.md](forgive-v2-design.md), and the comparison against
+MLT, trimmable gradients, OptiReduce, partial-reliability transports and
+deadline-aware congestion control in
 [forgive-related-work.md](forgive-related-work.md).
 
-## 14. Where the code lives
+## 13. Limits and open items
 
-| piece | file |
-| --- | --- |
-| receiver fork, verdict callback, sender exemption and re-arm | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
-| range algebra, per-queue-pair counters | `extern/network_backend/ns-3/src/point-to-point/model/rdma-queue-pair.{h,cc}` |
-| allowance report and eligibility mark on the repair request and the acknowledgement | `extern/network_backend/ns-3/src/point-to-point/model/qbb-header.{h,cc}` |
-| attribute wiring, transport events | `extern/network_backend/ns-3/scratch/common.h` |
-| configurations, budget entries, verdict, exemption predicate, telemetry columns | `astra-sim/network_frontend/ns3/ExperimentConfig.hh` |
-| callbacks, eligibility registration, counter copy at completion | `astra-sim/network_frontend/ns3/entry.h` |
-| profile parsing, refusals, `experiment.json` | `experiments/ring_3d/generate.py` |
-| matched runs | `experiments/ring_3d/compare.py` |
-| budget-rule check, trim ratios, counters | `experiments/ring_3d/analyze.py`, `report.py` |
-| test gate | `experiments/ring_3d/forgiveness_smoke.sh`, `check_forgiveness.py`, `check_refusals.py` |
-| profiles | `experiments/ring_3d/profiles/forgiveness_*_8.json`, `exempt_smoke_8.json`, `regime_64_dcqcn_*_exempt.json`, `no_incast_8_forgive.json` |
-| v2 pure core, pacing sum, remainder verdict | `astra-sim/network_frontend/ns3/ExperimentConfig.hh` |
-| v2 step stop, arrival accounting, remainder callback | `extern/network_backend/ns-3/src/point-to-point/model/rdma-hw.cc` |
-| v2 core law fixtures | `extern/network_backend/ns-3/scratch/rdma-range-algebra.cc` |
-| v2 single-arm join fixture | `experiments/ring_3d/check_single_arm_join.py` |
-
-## 15. Version 2: pacing, the cap's base, and the step stop
-
-**Built, unmeasured.** The mechanisms below are implemented and gated by
-the smoke suite; no wave has run them, so this section states what they
-do and states no result. The design and its pre-registered estimands are
-in [forgive-v2-design.md](forgive-v2-design.md); the arms wait behind the
-`forgive_v2` dispatch input.
-
-Only the receiver can forgive, because only the receiver knows how much
-it needs and how much it has. v2 adds two receiver policies on top of the
-v1 verdict and changes no sender logic.
-
-**Pacing (change P).** The cap binds at the headline budget, and first
-come first served spends it on the first burst, so the receiver may
-decline a forgivable trim to keep allowance for later in the step.
-`selection_policy.pacing` is a closed sum of two rules. Both spend the one
-cap `(forgiven + b) * 1000000 <= (delivered + forgiven + b) * t`, which is
-the receiver-local form of the v1 law: the rank weighs the budget against
-the bytes it has accounted for, kept or forgiven, so the cap becomes
-available as it receives rather than as senders launch, and a step whose
-delivered and forgiven bytes exhaust the eligible ones reaches the same
-`p x eligible` ceiling. Under `bernoulli` the range is additionally
-declined when `hash_combine(flow.decision_hash, range start) % 1000000 >=
-p * 1000000`, where the flow's count of verdicts asked enters the hash as
-the attempt number. Every trimmed arrival draws, so a declined range is
-asked again on its next trim and meets the cap as it stands then; nothing
-about a range is remembered between trims. No ns-3 random stream is
-consumed and the attempt number is deterministic, so paired arms draw the
-same sequence. A declined range is repaired, so pacing costs time and buys
-allowance. `pacing_refusals` counts only the ranges the coin declined that
-the cap could have afforded, so coin and cap refusals decompose without
-overlap.
-
-**The cap's base (change O).** `selection_policy.cap_base` is
-`"accounted"`, the law above, or `"owed"`, under which the denominator is
-the bytes the step's plan says this rank will receive. The plan is
-`owed_bytes` per (receiving rank, step, sender) in `experiment.json`,
-which `generate.py` derives from the same DP All-Reduce sizing it wrote the
-traces from: a direct All-Reduce over a group of `G` sends every peer
-`2 x B / G` bytes per collective. `close` refuses a run whose launches
-disagree with the plan, so the hint is exact or the run is not a result.
-
-**The step stop (change S).** With `selection_policy.step_stop`, legal only
-on the owed base, the receiver ends one sender's step once `1 - p` of what
-that sender owes it has arrived, and takes the holes that sender left. At
-that point nothing new is coming from it, so the exemption has nothing left
-to protect and what remains is repair tail. The crossing arrival stops every
-open flow from that sender into the rank at once, through
-`RdmaHw::StopFlow`, because a flow waiting on a repair receives nothing and
-would otherwise wait for its own timeout; the transport also asks at every
-accepted arrival, which covers the flows that start after the crossing. The
-question carries the cumulative sequence and the bytes already accepted
-above it, because under selective repeat a stalled flow keeps taking packets
-past the gap; the hole is the size less both, and
-charging the whole span above the cumulative sequence would spend the
-budget on bytes the receiver already holds. A grant absorbs everything from
-the cumulative sequence to the flow size and acknowledges it, so the sender
-completes through the `IsFinished` it already had, with no new packet type
-and no new sender state. The answer is the whole remainder or nothing,
-because the receiver knows the byte count and not which gradient elements
-matter, and it is bounded by the cap like every other forgiveness. A
-refusal emits nothing, so no exemption ends on it.
-
-Every policy spends the same allowance under the same law, and all are
-refused outside a forgiving domain. The coin never applies to the
-remainder: pacing exists to keep allowance for the end of the step, and the
-stop fires at the end of the step.
-
-**The pure core.** `trim_verdict` and `remainder_verdict` in
-`ExperimentConfig.hh` are total functions of a budget entry, a threshold,
-and either a pacing rule with a coin or a remainder; they return the
-answer and the entry to store. `evaluate_forgiveness` and
-`evaluate_remainder` are shells that eliminate a missing or closed entry,
-draw the coin, store the answer back and count. `RdmaRangeAlgebra` asserts
-the laws directly: an entry that has accounted for everything it does not
-spend affords exactly `t / 1000000` of its eligible bytes, the law is
-monotone in delivered and in forgiven, an entry that has received nothing
-forgives nothing, the coin repeats per (flow, range start), the remainder
-is whole or nothing, a coin refusal reports no spent allowance, and a
-closed entry is eliminated before any verdict is computed.
-
-**What the gate proves.** `bernoulli_smoke_8` must record a coin refusal
-of a range the cap could have afforded, or the rule never cost the arm a
-forgiveness. `stepstop_smoke_8` must forgive a remainder, its charged
-remainder bytes must equal the transport's `remainder_forgiven` bytes, and
-its worst cell must hold the contract's floor. All of them also assert `pacing_refusals == 0` wherever no
-Bernoulli rule is in force, and
-`forgiven_remainder_bytes <= forgiven_bytes` on every flow.
-`check_single_arm_join.py` asserts that one `run.py` arm at a seed
-reproduces `compare.py`'s recovery arm at the same profile and seed, byte
-for byte in the flow telemetry, which is what makes the single-arm records
-joinable against the v1 wave's baselines.
+- The simulator moves bytes and holds no gradient value, so every training
+  claim rests on DBLP's May GPT-2 runs.
+- DCQCN only. The Ultra Ethernet default congestion control is
+  window-based with a trim-triggered fast adaptation and has no model
+  here, and where a fabric runs with DCQCN off the exemption has nothing
+  to act on.
+- One tenant. The exempt flows shared the fabric with their own job's
+  tensor-parallel traffic and one background burst, so the cost of the
+  exemption to another job's obedient flows is bounded by the budget and
+  measured nowhere.
+- Eligibility covers the gradient all-reduce whole; splitting
+  reduce-scatter from all-gather needs a collective-phase field in
+  `AstraSim::OperationContext`.
+- The receiver never acknowledges beyond what the sender has sent, since
+  without evidence of congestion such skip-ahead degenerates into
+  suppression at the receiver.
+- The switch has no steering role; drop-precedence steering would be an
+  efficiency option with no authority over acceptance.
+- Comments in `ExperimentConfig.hh` and `rdma-hw.cc` still call a refusal
+  a "Pull", which the protocol no longer has; the code under them
+  implements the specification.

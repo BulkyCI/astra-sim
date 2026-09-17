@@ -139,7 +139,7 @@ chosen to ignore non-congestive loss. Reported up to 30x throughput over
 TCP with no accuracy loss. Abstract and introduction read; the
 threshold rule was not extracted.
 
-## 3. Where our protocol sits
+## 3. Where our protocol stands
 
 | element | MLT | trimmable gradients | OptiReduce | ours |
 | --- | --- | --- | --- | --- |
@@ -151,7 +151,7 @@ threshold rule was not extracted.
 | transport | UDP, user space | UDP, planned | UDP | RDMA-style, trimming, selective retransmission |
 | evidence | 8 servers at 100 Gbps, ns-3 | 2 servers, simulated trimming | up to 144 nodes, cloud | ns-3, 64 ranks, 400 Gbps |
 
-Three things are ours over that table.
+Our design adds three elements that no row of that table has.
 
 1. Per-range forgiveness driven by the switch's own trim report on a
    selective-retransmission transport. MLT loses the tail of a transfer;
@@ -162,8 +162,9 @@ Three things are ours over that table.
    critical steps held tight. DBLP moved MLT's bound across phases; the
    ledger moves it to the granularity the tolerance claim is made at.
 3. A congestion-control exemption that is per flow, budget-bounded and
-   self-revoking: the receiver's first refusal to forgive is the signal
-   that puts the flow back under DCQCN. MLT weakened congestion control
+   self-revoking: the receiver reports that forgiving every byte it is
+   missing would exceed the step's tolerance, and that report puts the
+   flow back under DCQCN until a later report says otherwise. MLT weakened congestion control
    for every flow because loss was tolerated; the deadline-aware
    controllers scale the response by class and never revoke it; nothing
    in review C exempts an RDMA flow from DCQCN's own signal under a loss
@@ -177,9 +178,10 @@ And two findings that reframe the prior work on a modern fabric:
    Those systems faced TCP or UDP with millisecond retransmission
    timeouts; the fabric already removed that cost.
 5. What remains to buy back on such a fabric is the congestion-control
-   reaction, 18 to 24 % of training time under DCQCN, and the exemption
-   recovers about half of it (run #121). Forgiveness alone recovers
-   nothing measurable; the exemption is what carries the gain.
+   reaction, 18 to 24 % of training time under DCQCN. At budget 0.1 the
+   protocol recovers 16.1 to 16.7 % of training time (run #127), of which
+   forgiveness under the controller supplies 5.5 to 6.6 % (run #126); the
+   exemption roughly doubles what forgiveness alone gains.
 
 ## 4. What the reviews say about our assumptions
 
@@ -187,12 +189,13 @@ And two findings that reframe the prior work on a modern fabric:
   equal rounds and 10 % at a quality target, on CNNs and RNNs. Weintraub
   2025 shows Llama 2 7B at 10 % i.i.d. loss with 1.17 % worse perplexity
   and at 40 % with 6.65 % worse. DBLP's 40 % is its own DenseNet result.
-  Our exempt run at budget 0.4 actually lost 8.8 to 9.5 % of gradient
-  bytes on non-critical steps, at the edge of what MLT profiled and inside
-  what Weintraub measured. No paper gates loss by training phase at LLM
-  scale, and none measures loss that is bursty or correlated, which is
-  what a trimming fabric produces. The dose front at budget 0.1 will show
-  what the mechanism buys inside MLT's own bounds.
+  Our exempt run at budget 0.4 lost 21.3 to 21.8 % of data-parallel
+  bytes, inside what Weintraub measured and above what MLT profiled; at
+  budget 0.1 under the design of record it loses 7.55 to 7.57 %, and with
+  Bernoulli pacing at 0.25 it loses 5.5 to 5.6 % for the same time. No
+  paper gates loss by training phase at LLM scale, and none measures loss
+  that is bursty or correlated, which is what a trimming fabric
+  produces.
 - DCQCN. Chameleon (SIGCOMM 2023 poster) reports that more than ten
   DCQCN parameters have non-negligible effect on AI-training traffic;
   ECN-or-Delay (CoNEXT 2016) shows DCQCN's stability is non-monotonic in
@@ -204,9 +207,9 @@ And two findings that reframe the prior work on a modern fabric:
   claim must say "DCQCN as configured" until it runs.
 - Fairness. Floyd and Fall's result on unresponsive flows is the
   objection a reviewer will raise. The exemption is bounded by the budget
-  and revoked by refusal, which is more than an unresponsive flow has,
-  and less than a proof. The two-tenant experiment (phase 3) is the
-  answer.
+  and ended by the receiver's report, which is more than an unresponsive
+  flow has, and less than a proof. The two-tenant experiment (phase 5) is
+  the answer.
 - Currency of the setting. Meta runs its 400 Gbps training fabric with
   DCQCN off (Gangidi et al., SIGCOMM 2024, abstract). Where there is no
   congestion control, the exemption has nothing to act on and only

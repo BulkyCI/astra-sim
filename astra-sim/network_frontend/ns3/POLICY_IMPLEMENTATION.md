@@ -1,6 +1,6 @@
 # Ring-3D policy implementation map
 
-This guide describes the **current logical admission-suppression mechanism**.
+This guide describes the current logical admission-suppression mechanism.
 Read [the paper brief](../../../docs/agents/ring-3d-paper-brief.md) and
 [the ASTRA-sim pivot](../../../docs/agents/ring-3d-astra-pivot.md) first: this
 code is not DBLP bitmap/retransmission transport.
@@ -65,8 +65,9 @@ ExperimentConfig.hh::evaluate_forgiveness()
          ExperimentConfig.hh::note_holes)
         |
         v
-RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
-the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
+RdmaRxQueuePair absorbs the range; the acknowledgement the forgiveness emits
+advances the sender past the hole and sets FLAG_CNP, the mark the trim would
+have produced, so a sender that is listening still takes the rate cut
 ```
 
 There are two caps. The soft one, `forgiven + b <= p x (delivered +
@@ -80,6 +81,23 @@ again as repairs land. `selection_policy.cap_base` picks which cap affords:
 `accounted` (the default) the soft one, `owed` the hard one, which is the
 ablation.
 
+`selection_policy.domain: recovery_exempt` adds the licence the report
+governs. `ExperimentConfig.hh::exemption_eligible` decides, once per receive
+queue pair, whether the receiver marks its acknowledgements
+`FLAG_FORGIVENESS_ELIGIBLE`; the first one that arrives with
+`FLAG_ALLOWANCE_EXHAUSTED` clear grants the exemption, so a sender obeys its
+controller for one round trip and reads no cell ever.
+`RdmaHw::FollowAllowanceReport` moves the queue pair between withholding and
+delivering on the latest report, and `RdmaHw::DeliverCongestionSignal` is the
+one boolean test at the three places `rdma-hw.cc` hands a congestion signal to
+whichever controller is configured: a CNP-marked acknowledgement under
+`cc_mode` 1, the per-acknowledgement dispatch of modes 3, 7, 8 and 10, and a
+trim notification under `cc_mode` 1. No line inside a controller changes. A
+critical step grants like any other; its small `p` puts the cell over the
+report's line after a few hundred kilobytes. `selection_policy.reengage:
+false` is the reference arm whose sender carries and counts every report and
+acts on none of them.
+
 The step's plan, `owed` per (rank, step, sender) and the count of DP
 All-Reduce collectives per (rank, step), is read out of ASTRA-sim's own
 collective code before the first launch:
@@ -88,7 +106,7 @@ collective code before the first launch:
 `Sys::plan_all_reduce_bytes_per_peer` runs the same phase builder the
 scheduler runs on a copy of the queue allocator. A launch into a cell the plan
 did not name ends the run, and the certification on the step's last collective
-holds the plan to the launches.
+checks the plan against the launches.
 
 `selection_policy.step_stop` adds a second question on the same budget. Every
 accepted arrival asks
@@ -110,7 +128,7 @@ receiver knows the byte count and not which gradient elements matter.
 `selection_policy.pacing` picks whether a forgivable range may still be
 declined: `none` spends the cap first come first served, and `bernoulli`
 declines a range whose coin
-(`hash_combine(decision_hash, range start, verdicts asked)`) lands above
+(`hash_combine(decision_hash, range start, verdicts asked)`) exceeds
 `p * 1000000`; every trimmed arrival draws again, so a declined range meets
 the cap as it stands on its next trim. `pacing_refusals` counts only the ranges the coin
 declined that the cap could have afforded, so coin and cap refusals decompose
@@ -123,10 +141,14 @@ strict CLR threshold on a critical step and the permissive one otherwise: the
 receiver measures the budget against the bytes it has accounted for, kept or
 forgiven, which is `forgiven <= p / (1 - p) * delivered` rearranged. A step
 ends with `delivered + shed + forgiven = eligible`, so the ceiling is
-`p(step) * eligible`, and `close` and the analyzer certify against that. Both terms only grow: a range
-charged once is never refunded, and a duplicate arriving later takes the
-existing old-sequence branch. A step closes when its rank writes its DP
-All-Reduce `collective_events` row, after which the step can only be pulled.
+`p(step) * eligible`, and the certification and the analyzer measure against
+that. Both terms only grow: a range charged once is never refunded, and a
+duplicate arriving later takes the existing old-sequence branch.
+`ForgivenessLedger::note_collective_completed` certifies the cell when the
+last DP All-Reduce the plan named for that rank and step completes, throwing
+if the launches disagree with the plan or the law is broken; a rank that runs
+two collectives in a step has accounted for the step's bytes only when both
+are done.
 
 The transport is semantics-blind. It supplies a five-tuple, a sequence, and a
 length, and learns a verdict; it never reads a step, a phase label, or a
@@ -209,9 +231,9 @@ fields are:
 | `first_trim_ns` / `first_repair_ns` | Simulated times of the first trim notification received and the first repair packet sent; zero means never |
 | `forgiven_bytes` / `forgiven_ranges` | Bytes and trimmed ranges a receiver accepted without ever seeing them. Zero in every admission arm |
 | `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the step stop took when it ended a sender's step, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
-| `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
-| `cc_exempt_granted_ns` | When the first acknowledgement marked eligible, with no allowance report, granted this queue pair its exemption; zero means never |
-| `allowance_gone_reports` / `cc_transitions` / `cc_obeying_ns` | Receiver reports that the (rank, step) cell can afford no further range, how many reports changed the bit, and the simulated time the sender spent delivering signals to its controller after it had been granted |
+| `cc_exempt` / `cc_signal_withheld` | Whether the receiver ever granted this queue pair a congestion exemption, and how many congestion signals it withheld from the controller while it held one. The grant is not withdrawn in telemetry: the exemption may have lapsed, but it was granted |
+| `cc_exempt_granted_ns` | When the first acknowledgement carrying the eligible bit with the gone bit clear granted this queue pair its exemption; zero means never. A sender obeys its controller for the round trip before it |
+| `allowance_gone_reports` / `cc_transitions` / `cc_obeying_ns` | Receiver reports that forgiving every byte the rank is missing would exceed the step's tolerance, how many reports changed the bit, and the simulated time the sender spent delivering signals to its controller while holding a grant. The sender follows the latest report, so a report with the bit clear returns it to withholding |
 | `late_forgiven_bytes` | Bytes that arrived for a range this flow had already been forgiven; the charge stands, so the loss the training side saw is `forgiven_bytes` less this |
 | `soft_refusals` | Bytes the soft cap declined for want of vested allowance. With `pacing_refusals` and the forgiven bytes, it decomposes every trim the receiver answered |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |

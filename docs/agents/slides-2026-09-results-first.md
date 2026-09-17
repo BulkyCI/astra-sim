@@ -219,7 +219,7 @@ recovery is go-back-N, and it is still what a large installed base runs,
 though current NICs increasingly offer selective repeat. Our four
 literature reviews found nobody who has quantified what bounded loss is
 worth on that class of transport at LLM scale with matched arms and a
-seed band, and that is what slides 5 to 8 are.
+seed band, which slides 5 to 8 supply.
 
 **The mechanism explanation is what transfers, even where the number does
 not.** The saving is proportional to the trims the policy prevents, and
@@ -353,6 +353,13 @@ the rest of the fabric. No number in this deck comes from it.
   no-congestion-control number.
 - **The simulator computes no gradients**, so nothing here speaks to
   accuracy. That claim needs the GPU experiment on slide 15.
+- **The worst cell is the most incast a group of 8 can produce.**
+  `direct7` is the all-to-all schedule with all 7 DP peers sending at
+  once, so it is the stress case. NCCL's default ring and tree schedules
+  receive from 1 or 2 peers per channel, which the `direct2` cell
+  approximates, and at budget 0.4 that cell recovers 10.5 to 12.5 % of
+  training time for 2.4 % of data-parallel bytes. Map the `direct2`
+  figures onto a production library.
 
 ---
 

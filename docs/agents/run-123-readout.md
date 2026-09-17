@@ -19,8 +19,10 @@ arm the fix could move, and it is the only arm that moved.
 
 The new counter agrees with the old one everywhere: over 21 records the
 share of exempt flows that received an allowance report equals the share
-that re-armed, to the flow. The exemption now ends on the receiver's report
-and on nothing else.
+that re-armed, to the flow. In this run the exemption ended on the
+receiver's report and on nothing else; under the design of record a later
+report that the budget is not gone returns the sender to withholding, which
+#123 did not run.
 
 ## 2. The ceiling was the defect
 

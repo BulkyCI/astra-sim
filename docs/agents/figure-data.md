@@ -620,11 +620,10 @@ Readings.
   intend to operate.
 - The last two columns are equal profile by profile and seed by seed.
   Every flow that received an allowance report re-armed and no other flow
-  did, which is how run #123 verifies that the exemption ends on a spent
-  allowance and on nothing else. The `priority_pull_count` that run #122
-  reported in this position is gone; `pacing_refusal_count` replaces it
-  and reads zero in all 21 records, because v1 refuses on a spent cell
-  rather than on a draw.
+  did, which is how run #123 verifies that the exemption ends on the
+  receiver's report and on nothing else. `pacing_refusal_count` reads zero
+  in all 21 records, because v1 refuses on a spent cell rather than on a
+  draw.
 
 ---
 
@@ -775,13 +774,15 @@ Three numbered points beside it.
    gone for good. If it does not, it sends the ordinary repair request.
 2. The budget is a ledger, not a coin flip. Forgiven plus shed bytes for
    a (destination, step) are bounded by the budget times the eligible
-   bytes for that pair. Counters only grow, and the entry closes when
-   that rank finishes the step. Critical steps carry a tighter budget.
+   bytes for that pair. Counters only grow, and the simulator certifies
+   the cell when that rank's last all-reduce of the step completes.
+   Critical steps carry a tighter budget.
 3. An eligible flow ignores rate cuts while the receiver still has
    allowance to forgive. The receiver grants the exemption on the
-   acknowledgements it already sends, and it withdraws the exemption with
-   one bit the moment the step's allowance is spent, so an exemption
-   cannot outlive the budget that justified it.
+   acknowledgements it already sends, and one bit reports that forgiving
+   every byte the rank is missing would exceed the step's tolerance; the
+   sender obeys its controller while that report stands and withholds
+   signals again once repairs bring the cell back under the line.
 
 Supporting fact for the design choice, worth a line on the slide: the ECN
 marking threshold is 800 KB at 400 Gb/s and the trim point is 4 MiB, so

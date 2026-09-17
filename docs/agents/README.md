@@ -22,7 +22,7 @@ small while retaining the non-obvious project decisions.
 | Reading what CI run #117 measured, what it settles, and the decisions it needs | [Run #117 readout](run-117-readout.md) |
 | Deciding the next wave after run #117: selective-repair canary, no-CC finding, regime map, and the revised order of work | [Next steps after run #117](next-steps-after-run-117.md) |
 | Confirming why the CLR schedule is the pinned explicit critical-step list `[1, 2, 3, 20]`, not a decay/spike proxy | [CLR schedule evidence](clr-schedule-evidence.md) |
-| Understanding or changing the forgive protocol: domains, ledger law, receiver verdict, congestion exemption, telemetry, gate | [Forgive protocol](forgive-protocol.md) |
+| Changing the FORGIVE code: which file and function holds each rule, the wire bits, the telemetry columns, the gate | [FORGIVE implementation notes](forgive-protocol.md) |
 | Planning the next phases toward a full paper: promises, open questions, phase order, kill tests | [Roadmap to a full paper](roadmap-to-full-paper.md) |
 | Positioning the forgive protocol against MLT, trimmable gradients, OptiReduce, partial-reliability transports, and deadline-aware congestion control | [Forgive related work](forgive-related-work.md) |
 | Deciding whether a pooled per-receiver loss budget needs a per-sender rescale, and whether reduce-scatter and all-gather tolerate loss differently | [Uneven-loss literature review](lit-review-uneven-loss.md), 21 retrieved works with read levels |
@@ -31,13 +31,13 @@ small while retaining the non-obvious project decisions.
 | Presenting the go-back-N results as the centre, with FORGIVE as future work: the results-first variant of the progress review | [September 2026 results-first slides](slides-2026-09-results-first.md) |
 | Rebuilding any figure from either progress deck, or handing the numbers to someone outside the repository, including the per-seed rows of runs #125 and #126 | [Figure data and readings](figure-data.md) |
 | Building the nine-slide deck in Google Slides, or handing it to a slides-generating agent | [Google Slides build prompts](slides-prompts-google-slides.md) |
-| Drafting prose that goes out under Joe's name: the ten style invariants with paired evidence | [Writing style invariants](writing-style.md) |
-| Changing the receiver verdict after the v1 fix: the receiver-local budget law, Bernoulli pacing, the cap's base and the step stop, with the arms that price them | [FORGIVE v2 design](forgive-v2-design.md) |
+| Drafting prose that goes out under Joe's name: the style invariants with paired evidence | [Writing style invariants](writing-style.md) |
+| Knowing what v2 changed over v1 and why, the four ablations, the arms of run #127, and what stays open | [FORGIVE v2 design](forgive-v2-design.md) |
 | Reading run #123, FORGIVE v1 with the revocation corrected, and the headline moved to budget 0.1 | [Run #123 readout](run-123-readout.md) |
+| The protocol reference, which every other document defers to: terms, eight invariants, the scheme, the stages per receiver and step with their transition inequality, the rule per event, the application's assumptions | [FORGIVE specification](forgive-spec.md) |
 | Reading the whole FORGIVE design in plain words, every rule and every assumption, with what is open | [FORGIVE in plain words](forgive-design-plain.md) |
 | The morning summary for the 2026-09-17 meeting: headline table, what the references settled, what #127 measured, the open decisions | [Morning summary 2026-09-17](morning-2026-09-17.md) |
 | Deciding which number is quotable: every run since #117 with its code, its caveat, and what replaces it | [Results ledger](results-ledger.md) |
-| Reading run #124 and planning round 2: Bernoulli pacing wins, the one budget law, the cap's base and the step stop | [FORGIVE v2 round 2](forgive-v2-round2.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |
 | Creating a commit | [Git commit skill](../../.github/skills/git-commit/SKILL.md) |
 | Creating or changing an agent skill | [Skill authoring guide](../../.github/skills/author-skill/SKILL.md) |

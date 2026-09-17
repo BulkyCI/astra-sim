@@ -814,12 +814,12 @@ Code main `59cf16c`, ns-3 `3e11ace49`: the soft vested cap, the fresh
 coin, the holes rule for "budget gone", the exemption granted by the
 receiver and following its latest report on every step, the stop at
 `1 - p` of a sender's share, the up-front cap as an ablation. Every arm
-certified locally; worst cell 0.900 to 0.909. The `single` arm at seed
-23172535 was still running when this was written.
+certified locally; worst cell 0.900 to 0.909.
 
 | arm | seed | training time recovered | loss, % of DP bytes | actual loss after late arrivals | re-sent bytes | TP collective time vs baseline | obeying, ms per exempt flow |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | the law, no coin, no stop (v1 point) | 9550582 | 16.66 % | 7.55 % | 7.49 % | 5.88 % | -4.3 % | 0.17 |
+| the law, no coin, no stop (v1 point) | 23172535 | 16.06 % | 7.57 % | 7.51 % | 5.61 % | +4.4 % | 0.17 |
 | the law, no coin, no stop (v1 point) | 94081284 | 16.66 % | 7.56 % | 7.50 % | 5.22 % | -1.3 % | 0.18 |
 | the coin, P = 0.25 | 9550582 | 15.97 % | 5.64 % | 5.59 % | 6.57 % | -7.6 % | 0.13 |
 | the coin, P = 0.25 | 23172535 | 15.84 % | 5.51 % | 5.46 % | 6.48 % | -1.2 % | 0.13 |
@@ -843,7 +843,7 @@ certified locally; worst cell 0.900 to 0.909. The `single` arm at seed
 Readings.
 
 - The law's v1 point moves from 12.9 to 14.1 % (run #123, old rules) to
-  16.7 % on both finished seeds, for 7.5 % loss, with 86 000 exempt flows
+  16.1 to 16.7 %, for 7.55 to 7.57 % loss, with 86 000 exempt flows
   instead of 71 680 because critical steps now grant the exemption too.
 - The coin at 0.25 reads 15.8 to 16.9 % for 5.5 to 5.6 %, the same as run
   #124 measured under the old rules, so the rule changes did not move the
@@ -861,7 +861,7 @@ Readings.
   re-sent. Revocation costs about 2.3 points of time and saves about a
   point of re-sent bytes.
 - TP collective time is never worse than the baseline in any vested arm
-  (-9.6 to +5.1 % across seeds, most negative), so the exempt DP flows do
+  (-9.6 to +5.1 % across seeds, most negative; the v1 point's seed 23172535 is +4.4 %), so the exempt DP flows do
   not slow the job's own tensor-parallel traffic; only the up-front-cap
   arms are slower there.
 - Exempt flows see 0.3 to 0.5 report transitions each and spend 0.1 to

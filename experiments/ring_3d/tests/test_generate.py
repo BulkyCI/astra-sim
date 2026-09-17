@@ -450,6 +450,14 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "regime_64_dcqcn_direct7_4to1_zero.json",
                 "regime_64_dcqcn_direct2_2to1_zero.json",
                 "regime_64_dcqcn_direct7_4to1_recovery_p01.json",
+            }
+            # The healthy 1:1 cell, which differs from the 4:1 cell in the
+            # spine count alone, so congestion control must stay on for the
+            # oversubscription to be the only thing that moved.
+            | {
+                "regime_64_dcqcn_direct7_1to1_exempt_p01.json",
+                "regime_64_dcqcn_direct7_1to1_exempt_p01_b25.json",
+                "regime_64_dcqcn_direct7_1to1_zero.json",
             },
         )
 

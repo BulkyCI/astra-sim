@@ -56,11 +56,13 @@ entry.h::recovery_verdict()   resolves (src, dst, source_port) in the registry
         |
         v
 ExperimentConfig.hh::evaluate_forgiveness()
-  |- ineligible, unknown step, or closed ledger -> repair, no allowance report
+  |- ineligible or unknown step -> repair
   `- trim_verdict() on the cell, under the profile's pacing rule
        |- exhausted budget, or the Bernoulli coin refuses -> repair
        `- inside budget -> charge the ledger, count the flow's bytes, forgive
-        (either answer reports kAllowanceSpent when the cell has no room left)
+        (the allowance report is asked for separately, where the answer is
+         emitted: RdmaHw::AllowanceGone -> entry.h::allowance_gone ->
+         ExperimentConfig.hh::note_holes)
         |
         v
 RdmaRxQueuePair absorbs the range; the cumulative ACK carries the sender past
@@ -69,24 +71,33 @@ the hole and the next ACK carries FLAG_CNP so the rate cut is still taken
 
 There are two caps. The soft one, `forgiven + b <= p x (delivered +
 forgiven)`, decides affordability and grows as the step arrives; a trim it
-refuses is repaired, sets no report, and adds its bytes to the cell's
-`refused_soft`. The hard one is the step's total, `owed_bytes` per (rank,
-step, sender) in `experiment.json`, and it decides revocation: the report
-rides a repair request or a forgiveness acknowledgement when
-`forgiven + 4096 > p x owed` or `refused_soft > p x owed - forgiven`, the
-second clause being what reaches a flooding sender whose stalled delivery
-stalls the soft cap. `selection_policy.cap_base` picks which cap affords:
+refuses is repaired and says nothing about the rest of the step. The hard one
+is the step's total, and it decides the report the sender follows:
+`forgiven + holes + 4096 > p x owed`, where the holes are what the rank is
+missing right now, summed over its receiving flows. It is recomputed wherever
+an acknowledgement or a repair request leaves the receiver, so it turns green
+again as repairs land. `selection_policy.cap_base` picks which cap affords:
 `accounted` (the default) the soft one, `owed` the hard one, which is the
-ablation. Every forgiving domain carries the plan either way, and
-`ForgivenessLedger::close` refuses a run whose launches disagree with it.
+ablation.
 
-`selection_policy.step_stop`, legal only on the owed base, adds a second
-question on the same budget. Every accepted arrival asks
+The step's plan, `owed` per (rank, step, sender) and the count of DP
+All-Reduce collectives per (rank, step), is read out of ASTRA-sim's own
+collective code before the first launch:
+`AstraSimNetwork.cc::install_collective_plan` walks every rank's trace,
+`Workload::plan_dp_all_reduce` finds its DP All-Reduce nodes, and
+`Sys::plan_all_reduce_bytes_per_peer` runs the same phase builder the
+scheduler runs on a copy of the queue allocator. A launch into a cell the plan
+did not name ends the run, and the certification on the step's last collective
+holds the plan to the launches.
+
+`selection_policy.step_stop` adds a second question on the same budget. Every
+accepted arrival asks
 `entry.h::remainder_verdict()`, which reaches
 `ExperimentConfig.hh::evaluate_remainder()` with the cumulative sequence and
 the bytes already accepted above it; the hole is the flow size less both. The
 frontend refuses until `1 - p` of what that sender owes this rank for the step
-has arrived, and then grants the hole if the cap affords it. The arrival that
+has arrived, and then grants the hole if the step pool, `p x owed` less what
+the step has already forgiven, affords it. The arrival that
 crosses `1 - p` also stops that sender's other open flows into the rank
 immediately: `entry.h::stop_sender_flows()` walks the active flow registry and
 calls `RdmaHw::StopFlow` on each, which runs the same remainder path on a queue
@@ -200,7 +211,8 @@ fields are:
 | `forgiven_remainder_bytes` / `pacing_refusals` | The subset of `forgiven_bytes` the step stop took when it ended a sender's step, and the trims the Bernoulli coin declined that the cap could have afforded. Both zero unless the profile names the policy |
 | `cc_exempt` / `cc_signal_withheld` | Whether the queue pair was granted a congestion exemption at birth, and how many congestion signals it withheld from the controller while it held one |
 | `cc_exempt_granted_ns` | When the first acknowledgement marked eligible, with no allowance report, granted this queue pair its exemption; zero means never |
-| `allowance_spent_signalled` / `cc_rearmed_ns` | Receiver reports that the (rank, step) cell can afford no further range, and the simulated time one of them ended the exemption; zero means none did |
+| `allowance_gone_reports` / `cc_transitions` / `cc_obeying_ns` | Receiver reports that the (rank, step) cell can afford no further range, how many reports changed the bit, and the simulated time the sender spent delivering signals to its controller after it had been granted |
+| `late_forgiven_bytes` | Bytes that arrived for a range this flow had already been forgiven; the charge stands, so the loss the training side saw is `forgiven_bytes` less this |
 | `soft_refusals` | Bytes the soft cap declined for want of vested allowance. With `pacing_refusals` and the forgiven bytes, it decomposes every trim the receiver answered |
 | `delivered_bytes` | `physical_bytes` minus `forgiven_bytes`. `physical_bytes` stays the offered figure, because it joins `fct.txt` and denominates W |
 

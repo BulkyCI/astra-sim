@@ -103,24 +103,6 @@ constexpr const char* selection_semantics(SheddingDomain domain) {
     return "";
 }
 
-// What the transport should do with one trimmed range, and what the receiver
-// reports about the budget entry it belongs to. Two bits, because a repair is
-// "not forgive" and room is "not spent", and because the charge that empties
-// an entry is a forgiveness. The values cross into ns-3 as
-// RdmaHw::RecoveryVerdict and must not drift from it.
-enum : uint8_t {
-    kForgive = 1 << 0,
-    kAllowanceSpent = 1 << 1,
-};
-
-constexpr bool forgave(uint8_t verdict) {
-    return verdict & kForgive;
-}
-
-constexpr bool revokes_exemption(uint8_t verdict) {
-    return verdict & kAllowanceSpent;
-}
-
 // What one sender owes a receiving rank for one step, and what of it has
 // arrived. The step stop is a per-sender decision, so the receiver keeps the
 // pair per sender as well as in the cell's totals.
@@ -148,19 +130,20 @@ struct StepLedger {
     // row per rank.
     uint64_t owed = 0;
     std::unordered_map<uint32_t, SenderShare> by_sender;
-    // Bytes the soft cap declined for want of vested allowance, with the coin
-    // counting nowhere. A congested sender stalls delivery, which stalls the
-    // soft cap, so `forgiven` would never reach the hard line and the
-    // controller would never return; this is what reaches it instead.
-    uint64_t refused_soft = 0;
+    // The bytes this rank is missing right now, summed over its receiving
+    // flows: below the highest sequence each has seen, neither received nor
+    // forgiven. It falls on its own as repairs land, which is what lets the
+    // report turn green again.
+    uint64_t holes = 0;
+    // How many DP All-Reduce collectives the plan says this rank runs in this
+    // step, and how many have completed. The step's bytes are accounted for
+    // when the last one does, and that is when the cell is certified.
+    uint32_t collectives = 0;
+    uint32_t completed = 0;
     // Whether this cell affords against `owed` rather than against what the
     // rank has accounted for, which is the ablation. The plan is there either
-    // way, because revocation and `close` read it.
+    // way, because the report and the certification read it.
     bool owed_base = false;
-    // Set when the rank has written its DP All-Reduce row for the step. After
-    // that the step's bytes are accounted for and nothing more may be
-    // forgiven against them.
-    bool closed = false;
 };
 
 // The pacing rule, as a closed sum. Pacing lets the receiver decline a
@@ -197,21 +180,22 @@ inline bool paces_out(const Pacing& pacing, uint64_t coin) {
 
 // The safety law, in one place and the same under every rule: shed and
 // forgiven bytes share one budget, measured against the cell's base. The law
-// of record is the owed base, `forgiven <= p x owed`, with the step's total
-// from the collective library's hint, so the whole cap is available from the
-// step's first packet and the spent report below is monotone within the step.
-// Under the accounted base, which is the ablation, the receiver measures the
+// of record is the vesting cap, the accounted base: the receiver measures the
 // budget against the bytes it has accounted for, kept or forgiven. That law
 // is
 // `forgiven <= p x (delivered + forgiven)`, equivalently
 // `forgiven <= p / (1 - p) x delivered`, and a receiving NIC holds both
 // counters while it never sees what a sender launched. At the end of a step
 // `delivered + forgiven = eligible`, so the ceiling is `p x eligible`, which
-// is the v1 law; `eligible` survives only as the denominator `close` and the
-// analyzer certify against. Pacing does not enter here, because the coin
-// declines a range the budget affords rather than changing what it affords.
+// is the v1 law; `eligible` survives only as the denominator the
+// certification and the analyzer measure against. Under the owed base, which
+// is the ablation, the cap is `forgiven <= p x owed` with the step's total
+// from the plan, so the whole of it is available from the step's first
+// packet. Pacing does not enter here, because the coin declines a range the
+// budget affords rather than changing what it affords.
 //
-// The two agree at step end, where `close` holds the plan to the launches.
+// The two agree at step end, where the certification holds the plan to the
+// launches.
 //
 // Absorbing under both: neither term ever decreases, and under the accounted
 // base a further spend adds kDecisionScale to the charge for every threshold
@@ -241,58 +225,37 @@ inline uint64_t range_coin(uint64_t decision_hash,
     return coin % kDecisionScale;
 }
 
-// The report the sender acts on, and the only thing that ends an exemption.
-// Two ways to reach it, both on the hard side, so that a refusal the vesting
-// cap made says nothing and a step whose allowance is gone says everything.
+// The report the sender acts on: even if every byte the rank is missing right
+// now were forgiven, this step's tolerance would be exceeded. Forgiven bytes
+// and holes are exclusive by construction, because a forgiven range is
+// absorbed as received, so nothing is counted twice; one packet's payload is
+// added because that is the largest range the next trim can carry.
 //
-// The first is the step's own total: no further range will ever be affordable
-// this step, one packet's payload being the largest range a trim can carry.
-// The second is what the soft cap declined: a congested sender stalls its own
-// delivery, so the vesting cap stalls with it, `forgiven` never grows and the
-// first clause is never reached while the fabric throws everything away. Once
-// the receiver has repaired more than the step could ever have absorbed, that
-// is congestion beyond the tolerance rather than vesting lag.
-//
-// Both terms only grow within a step and `owed` is fixed, so the report is
-// monotone: it fires at most once per cell and never at step start.
-inline bool spent_hard(const StepLedger& cell,
-                       uint64_t threshold,
-                       uint64_t payload) {
-    const uint64_t allowance = cell.owed * threshold;
-    const uint64_t charged = (cell.shed + cell.forgiven) * kDecisionScale;
-    if (charged + payload * kDecisionScale > allowance) {
-        return true;
-    }
-    return cell.refused_soft * kDecisionScale > allowance - charged;
+// It is not a latch. `forgiven` only grows, but the holes drain as repairs
+// land, so a cell that reported gone reports room again once the fabric
+// recovers, and the sender follows whichever report reached it last.
+inline bool budget_gone(const StepLedger& cell, uint64_t threshold) {
+    const uint64_t missing = cell.forgiven + cell.holes + kPacketPayload;
+    return missing * kDecisionScale > cell.owed * threshold;
 }
 
 // Trim verdict. Pure and total: the cell, the rule and this range's coin in,
-// the two verdict bits and the cell to store out. The caller has already
-// eliminated a missing or closed cell and an ineligible flow. The report rides
-// on whatever the answer is, because the charge that empties a step's budget
-// is itself a forgiveness and no repair request follows it.
-inline std::pair<uint8_t, StepLedger> trim_verdict(StepLedger cell,
-                                                   uint64_t threshold,
-                                                   const Pacing& pacing,
-                                                   uint64_t coin,
-                                                   uint64_t bytes) {
-    const bool paced_out = paces_out(pacing, coin);
-    const bool affordable = affords_soft(cell, threshold, bytes);
-    const bool forgive = affordable && !paced_out;
+// forgive or repair and the cell to store out. The caller has already
+// eliminated a missing cell and an ineligible flow. The report the sender
+// acts on is not here: it is a property of the cell at the moment an
+// acknowledgement or a repair request leaves the receiver, and a refusal says
+// nothing about it either way.
+inline std::pair<bool, StepLedger> trim_verdict(StepLedger cell,
+                                                uint64_t threshold,
+                                                const Pacing& pacing,
+                                                uint64_t coin,
+                                                uint64_t bytes) {
+    const bool forgive =
+        affords_soft(cell, threshold, bytes) && !paces_out(pacing, coin);
     if (forgive) {
         cell.forgiven += bytes;
-    } else if (!paced_out && !cell.owed_base) {
-        // The soft cap declined it for want of vested allowance. Under the
-        // ablation the cap in force is the hard one, so there is nothing soft
-        // to count and the first clause of the report is the whole rule; the
-        // coin's refusals count nowhere either, because the receiver chose
-        // them and the fabric did not.
-        cell.refused_soft += bytes;
     }
-    const uint8_t verdict = static_cast<uint8_t>(
-        (forgive ? kForgive : 0) |
-        (spent_hard(cell, threshold, kPacketPayload) ? kAllowanceSpent : 0));
-    return {verdict, cell};
+    return {forgive, cell};
 }
 
 // Whether the receiver has heard enough from one sender to stop it. The step
@@ -319,17 +282,21 @@ inline bool sender_stopped(const StepLedger& cell,
 // step, and the stop fires at the end of the step, so the rule is not an
 // argument.
 //
-// With the step stop on, the sender must be stopped before the cap is even
-// asked: the cap is the ceiling and the stop is the trigger, and a remainder
-// that fits the cap while its sender is still owed bytes is a flow the
-// receiver still wants.
+// The stop is the trigger and the step pool is the ceiling. A remainder that
+// fits the pool while its sender is still owed bytes is a flow the receiver
+// still wants, so the sender must be stopped before the pool is even asked;
+// the pool is what is left of the step's tolerance, `p x owed - forgiven`,
+// and not the vesting cap, because the stop fires at the end of the step and
+// takes what the step can still afford.
 inline std::pair<uint64_t, StepLedger> remainder_verdict(StepLedger cell,
                                                          uint64_t threshold,
                                                          uint64_t remainder,
                                                          uint32_t src,
                                                          bool step_stop) {
-    if (remainder == 0 || (step_stop && !sender_stopped(cell, src, threshold)) ||
-        !affords_soft(cell, threshold, remainder)) {
+    if (remainder == 0 || !step_stop ||
+        !sender_stopped(cell, src, threshold) ||
+        (cell.forgiven + remainder) * kDecisionScale >
+            cell.owed * threshold) {
         return {uint64_t{0}, cell};
     }
     cell.forgiven += remainder;
@@ -360,10 +327,23 @@ class ForgivenessLedger {
         return cells_.empty();
     }
 
+    // A launch into a cell the plan did not name is a plan that is wrong
+    // about the collective schedule, and every budget decision downstream is
+    // measured against that plan. It ends the run here rather than moving a
+    // budget nothing certified.
     void register_eligible(uint32_t dst, uint32_t step, uint64_t bytes) {
-        if (StepLedger* cell = find(dst, step)) {
-            cell->eligible += bytes;
+        StepLedger* cell = find(dst, step);
+        if (cell == nullptr) {
+            return;
         }
+        if (cell->owed == 0) {
+            throw std::runtime_error(
+                "the collective plan did not name rank " +
+                std::to_string(dst) + " step " + std::to_string(step) +
+                ", which a DP All-Reduce launched " + std::to_string(bytes) +
+                " B into");
+        }
+        cell->eligible += bytes;
     }
 
     void register_shed(uint32_t dst, uint32_t step, uint64_t bytes) {
@@ -385,9 +365,9 @@ class ForgivenessLedger {
         }
     }
 
-    // The step's plan for one (sender, receiver, step), read from the
-    // generator's hint before the run starts. Every forgiving run carries it,
-    // because the spent report is measured against the step's total.
+    // The step's plan for one (sender, receiver, step), read from ASTRA-sim's
+    // own collective code before the run starts. Every forgiving run carries
+    // it, because the report is measured against the step's total.
     void register_owed(uint32_t dst,
                        uint32_t step,
                        uint32_t src,
@@ -395,6 +375,28 @@ class ForgivenessLedger {
         if (StepLedger* cell = find(dst, step)) {
             cell->owed += bytes;
             cell->by_sender[src].owed += bytes;
+        }
+    }
+
+    // How many DP All-Reduce collectives the plan says this rank runs in this
+    // step. The certification waits for the last of them, because a rank that
+    // runs two has accounted for the step's bytes only when both are done.
+    void register_collectives(uint32_t dst, uint32_t step, uint32_t count) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->collectives += count;
+        }
+    }
+
+    // One flow's holes, as the receiver sees them at this moment. The cell
+    // keeps the sum, so the caller hands over the new count and the flow's
+    // previous one leaves with it.
+    void replace_holes(uint32_t dst,
+                       uint32_t step,
+                       uint64_t before,
+                       uint64_t after) {
+        if (StepLedger* cell = find(dst, step)) {
+            cell->holes -= before;
+            cell->holes += after;
         }
     }
 
@@ -407,18 +409,16 @@ class ForgivenessLedger {
         }
     }
 
-    // Closing a cell also asserts the contract on it; the definition sits
+    // One of the step's DP All-Reduce collectives has completed at this rank.
+    // The last one asserts the contract on the cell; the definition sits
     // beside the verdicts, below, because the threshold it holds the cell to
     // comes from the same mask they charged it against.
-    void close(uint32_t dst, uint32_t step);
+    void note_collective_completed(uint32_t dst, uint32_t step);
 
-    // The one eliminator for a cell a verdict may be computed on, and the
-    // only reader of `closed`. Null means the rank or step is outside the
-    // table, or the rank has already written its row for the step, and both
-    // answer "repair, with nothing to report about the allowance".
-    StepLedger* open_cell(uint32_t dst, uint32_t step) {
-        StepLedger* cell = find(dst, step);
-        return (cell != nullptr && !cell->closed) ? cell : nullptr;
+    // The one lookup. Null means the rank or step is outside the table, which
+    // answers "repair, with nothing to report about the allowance".
+    StepLedger* cell(uint32_t dst, uint32_t step) {
+        return find(dst, step);
     }
 
     const StepLedger* cell(uint32_t dst, uint32_t step) const {
@@ -471,7 +471,8 @@ struct ExperimentConfig {
     // step. `cap_base_owed` measures the cap against the step's plan rather
     // than against what the rank has accounted for, and `step_stop` lets the
     // receiver end a sender's step once `1 - p` of what that sender owes has
-    // arrived, which needs the plan and so needs the owed base.
+    // arrived. The stop reads the plan, which every forgiving domain carries,
+    // so the two are independent.
     Pacing pacing = NoPacing{};
     // Which cap decides affordability. The soft one, the receiver-local
     // vesting cap, is the law of record; `cap_base = owed` is the ablation
@@ -540,28 +541,41 @@ struct FlowRecord {
     // bytes are the difference, derived rather than counted.
     uint64_t forgiven_remainder_bytes = 0;
     // Trims the cap could have afforded and the pacing coin declined anyway.
-    // Nothing else can see them: a cap refusal is allowance_spent_signalled,
+    // Nothing else can see them: a cap refusal is allowance_gone_reports,
     // and a coin refusal leaves the cap untouched.
     uint32_t pacing_refusals = 0;
-    // Bytes the soft cap declined for want of vested allowance, which is what
-    // the hard side's second clause accumulates. With the coin's refusals and
-    // the forgiven bytes, this decomposes every trim the receiver answered.
+    // Bytes the soft cap declined for want of vested allowance. With the
+    // coin's refusals and the forgiven bytes, this decomposes every trim the
+    // receiver answered. Nothing reads it: it is the decomposition itself.
     uint64_t soft_refusals = 0;
+    // Bytes that arrived for a range this flow was already forgiven. The
+    // receiver drops them, so the budget charge stands; the analyzer reads
+    // this beside the forgiven count to report what was actually lost.
+    uint64_t late_forgiven_bytes = 0;
+    // What the receiver is missing on this flow as of its last report, which
+    // is the flow's share of the cell's holes. The cell keeps the sum, so the
+    // previous value has to be here to leave it.
+    uint64_t holes = 0;
     // Verdicts this flow has asked for. It is the coin's attempt number, so a
     // re-trimmed range draws again rather than repeating its refusal.
     uint32_t verdicts_asked = 0;
     // Congestion-exempt domain only. `cc_exempt` records that the receiver
     // granted this flow an exemption at some point, and is never withdrawn:
-    // the exemption ended, but it was granted, and the telemetry is the record
-    // of that. `cc_exempt_granted_ns` is when the first acknowledgement
-    // carrying the grant arrived, `allowance_spent_signalled` counts the
-    // receiver's reports that the step's budget is spent, and `cc_rearmed_ns`
-    // is when one of them ended the exemption; zero means never.
+    // the exemption may have lapsed, but it was granted, and the telemetry is
+    // the record of that. `cc_exempt_granted_ns` is when the first
+    // acknowledgement carrying the grant arrived and
+    // `allowance_gone_reports` counts the reports that said the budget was
+    // gone. The sender follows the latest report either way, so what a flow
+    // spends under its controller is a duration and not an instant:
+    // `cc_transitions` counts the reports that changed the bit and
+    // `cc_obeying_ns` the simulated time it spent delivering signals while
+    // holding a grant.
     bool cc_exempt = false;
     uint64_t cc_exempt_granted_ns = 0;
     uint32_t cc_signal_withheld = 0;
-    uint32_t allowance_spent_signalled = 0;
-    uint64_t cc_rearmed_ns = 0;
+    uint32_t allowance_gone_reports = 0;
+    uint32_t cc_transitions = 0;
+    uint64_t cc_obeying_ns = 0;
     // Zero means never; no packet can be trimmed or repaired at time zero.
     uint64_t first_trim_ns = 0;
     uint64_t first_repair_ns = 0;
@@ -573,6 +587,31 @@ struct FlowRecord {
 
 inline ExperimentConfig experiment_config;
 inline ForgivenessLedger forgiveness_ledger;
+
+// What ASTRA-sim's own collective code says one receiving rank's step will
+// carry: the bytes each sender contributes, and how many DP All-Reduce
+// collectives the rank runs in the step. The planner walks every rank's trace
+// before the first launch and hands the whole table over in one call, because
+// a cell whose senders are still being added would report its budget gone on
+// a total that is not yet the total.
+struct PlannedStep {
+    std::map<uint32_t, uint64_t> by_sender;
+    uint32_t collectives = 0;
+};
+using CollectivePlan = std::map<std::pair<uint32_t, uint32_t>, PlannedStep>;
+
+inline void install_collective_plan(const CollectivePlan& plan) {
+    for (const auto& entry : plan) {
+        const uint32_t dst = entry.first.first;
+        const uint32_t step = entry.first.second;
+        forgiveness_ledger.register_collectives(dst, step,
+                                                entry.second.collectives);
+        for (const auto& sender : entry.second.by_sender) {
+            forgiveness_ledger.register_owed(dst, step, sender.first,
+                                             sender.second);
+        }
+    }
+}
 
 // Offered minus forgiven. A completed queue pair in the recovery domain
 // delivered fewer bytes than it offered, by exactly the forgiven count;
@@ -607,9 +646,10 @@ class ExperimentTelemetry {
                "failure_reason,decision_hash,start_time_ns,end_time_ns,"
                "timeouts,cnp_received,first_trim_ns,first_repair_ns,"
                "forgiven_bytes,forgiven_ranges,forgiven_remainder_bytes,"
-               "pacing_refusals,soft_refusals,delivered_bytes,cc_exempt,"
+               "pacing_refusals,soft_refusals,late_forgiven_bytes,"
+               "delivered_bytes,cc_exempt,"
                "cc_exempt_granted_ns,cc_signal_withheld,"
-               "allowance_spent_signalled,cc_rearmed_ns\n";
+               "allowance_gone_reports,cc_transitions,cc_obeying_ns\n";
         rank_completion << "rank,completion_time_ns\n";
         collective_events
             << "rank,parallelism_domain,collective_type,training_step,"
@@ -652,12 +692,14 @@ class ExperimentTelemetry {
                     << flow.forgiven_bytes << ',' << flow.forgiven_ranges
                     << ',' << flow.forgiven_remainder_bytes << ','
                     << flow.pacing_refusals << ',' << flow.soft_refusals
-                    << ',' << delivered_bytes(flow) << ','
+                    << ',' << flow.late_forgiven_bytes << ','
+                    << delivered_bytes(flow) << ','
                     << (flow.cc_exempt ? "true" : "false") << ','
                     << flow.cc_exempt_granted_ns << ','
                     << flow.cc_signal_withheld << ','
-                    << flow.allowance_spent_signalled << ','
-                    << flow.cc_rearmed_ns << '\n';
+                    << flow.allowance_gone_reports << ','
+                    << flow.cc_transitions << ',' << flow.cc_obeying_ns
+                    << '\n';
     }
 
     void record_collective_completion(
@@ -672,12 +714,12 @@ class ExperimentTelemetry {
         if (end_time_ns < start_time_ns) {
             throw std::runtime_error("collective completion precedes its start time");
         }
-        // The rank has accounted for this step's DP All-Reduce, so its budget
-        // for the step is spent whether or not it was used. A trim arriving
-        // after this can only be pulled.
+        // One of the step's DP All-Reduce collectives is done at this rank.
+        // The step's bytes are accounted for when the last one is, and that
+        // is where the contract is asserted.
         if (rank >= 0 && AstraSim::is_dp_all_reduce_payload(operation)) {
-            forgiveness_ledger.close(static_cast<uint32_t>(rank),
-                                     operation.training_step);
+            forgiveness_ledger.note_collective_completed(
+                static_cast<uint32_t>(rank), operation.training_step);
         }
         collective_events << rank << ','
                           << parallelism_domain_name(operation.parallelism_domain)
@@ -883,16 +925,33 @@ inline uint64_t step_threshold(const FlowRecord& flow) {
 // remainder path, or to the ledger from shipping a run that broke the
 // contract.
 //
-// close resolves the threshold rather than receiving one, because a caller
-// that supplied it could measure a cell against a budget the cell was never
-// charged under, and because the two-argument call keeps close total in what
-// a caller knows: a rank and a step name a cell or they name nothing, and
-// naming nothing closes nothing. A step the mask does not define resolves to
-// zero, which is the budget its verdicts already used, so a cell that spent
-// nothing under it closes and one that spent anything throws.
-inline void ForgivenessLedger::close(uint32_t dst, uint32_t step) {
+// It resolves the threshold rather than receiving one, because a caller that
+// supplied it could measure a cell against a budget the cell was never
+// charged under, and because the two-argument call keeps it total in what a
+// caller knows: a rank and a step name a cell or they name nothing, and
+// naming nothing certifies nothing. A step the mask does not define resolves
+// to zero, which is the budget its verdicts already used, so a cell that
+// spent nothing under it passes and one that spent anything throws.
+//
+// The step's bytes are accounted for when its last DP All-Reduce completes,
+// not its first: a rank that runs two collectives in a step is still
+// receiving the second while the first is done.
+inline void ForgivenessLedger::note_collective_completed(uint32_t dst,
+                                                         uint32_t step) {
     StepLedger* cell = find(dst, step);
     if (cell == nullptr) {
+        return;
+    }
+    cell->completed++;
+    if (cell->completed > cell->collectives) {
+        throw std::runtime_error(
+            "forgiveness ledger saw more DP All-Reduce collectives than its "
+            "plan named at rank " +
+            std::to_string(dst) + " step " + std::to_string(step) + ": " +
+            std::to_string(cell->completed) + " completed, " +
+            std::to_string(cell->collectives) + " planned");
+    }
+    if (cell->completed < cell->collectives) {
         return;
     }
     const uint64_t threshold = step_threshold(step);
@@ -918,7 +977,6 @@ inline void ForgivenessLedger::close(uint32_t dst, uint32_t step) {
             std::to_string(threshold) + " of " +
             std::to_string(kDecisionScale));
     }
-    cell->closed = true;
 }
 
 // Whether the experiment layer may answer a receiver's question about this
@@ -941,8 +999,11 @@ inline bool forgivable(const FlowRecord& flow) {
 // there, because a flow waiting on a repair receives nothing and would
 // otherwise be stopped only by its own timeout. The question is asked only
 // where the step stop is on, since nothing else reads the answer.
-inline bool note_delivered(FlowRecord& flow, uint64_t bytes) {
+inline bool note_delivered(FlowRecord& flow,
+                           uint64_t bytes,
+                           uint64_t late_forgiven) {
     flow.accepted_bytes += bytes;
+    flow.late_forgiven_bytes += late_forgiven;
     if (!flow.admission_eligible || flow.dst < 0) {
         return false;
     }
@@ -963,43 +1024,69 @@ inline bool note_delivered(FlowRecord& flow, uint64_t bytes) {
            sender_stopped(*after, src, threshold);
 }
 
+// The receiver's report, asked wherever an acknowledgement or a repair
+// request leaves the receiver: this flow is missing `holes` bytes right now,
+// is the step's allowance gone. The cell keeps the sum over its flows, so a
+// repair that lands lowers it without anyone subtracting, and the report goes
+// green again on its own. A flow whose cell or step the table does not name
+// reports nothing, which leaves its sender under its controller.
+inline bool note_holes(FlowRecord& flow, uint64_t holes) {
+    if (!forgivable(flow) || flow.dst < 0) {
+        return false;
+    }
+    const uint32_t dst = static_cast<uint32_t>(flow.dst);
+    const uint32_t step = flow.operation.training_step;
+    forgiveness_ledger.replace_holes(dst, step, flow.holes, holes);
+    flow.holes = holes;
+    const StepLedger* cell = forgiveness_ledger.cell(dst, step);
+    if (cell == nullptr) {
+        return false;
+    }
+    return budget_gone(*cell, step_threshold(step));
+}
+
 // The trim verdict the transport asks for. The transport is semantics-blind:
 // it supplies a flow, a range start and a byte count, and learns nothing
 // about steps, phases, or budgets. A thin shell over trim_verdict: it
 // eliminates the cell, draws the coin, stores the answer back, and counts.
 //
-// The allowance bit rides on whatever the answer is, because a sender cannot
-// read a budget entry every other sender to that rank shares.
-inline uint8_t evaluate_forgiveness(FlowRecord& flow,
-                                    uint64_t start,
-                                    uint64_t bytes) {
+// The report the sender acts on is not here. It belongs to the cell and is
+// asked for wherever the answer leaves the receiver, because a refusal the
+// vesting cap made says nothing about the step and a range absorbed as
+// forgiven has stopped being a hole by then.
+inline bool evaluate_forgiveness(FlowRecord& flow,
+                                 uint64_t start,
+                                 uint64_t bytes) {
     if (!forgivable(flow)) {
-        return 0;
+        return false;
     }
     const uint64_t threshold = step_threshold(flow);
     if (threshold == 0) {
-        return 0;
+        return false;
     }
-    StepLedger* cell = forgiveness_ledger.open_cell(
+    StepLedger* cell = forgiveness_ledger.cell(
         static_cast<uint32_t>(flow.dst), flow.operation.training_step);
     if (cell == nullptr) {
-        return 0;
+        return false;
     }
     flow.verdicts_asked++;
     const uint64_t coin =
         range_coin(flow.decision_hash, start, flow.verdicts_asked);
+    const bool paced_out = paces_out(experiment_config.pacing, coin);
+    const bool affordable = affords_soft(*cell, threshold, bytes);
     // Only a range the cap could still have afforded: that is the forgiveness
     // the coin cost, and it makes the two refusals decompose without overlap,
-    // the cap's into allowance_spent_signalled and the coin's into this.
-    if (paces_out(experiment_config.pacing, coin) &&
-        affords_soft(*cell, threshold, bytes)) {
+    // the cap's into soft_refusals and the coin's into this.
+    if (paced_out && affordable) {
         flow.pacing_refusals++;
+    }
+    if (!paced_out && !affordable) {
+        flow.soft_refusals += bytes;
     }
     const auto answer =
         trim_verdict(*cell, threshold, experiment_config.pacing, coin, bytes);
-    flow.soft_refusals += answer.second.refused_soft - cell->refused_soft;
     *cell = answer.second;
-    if (forgave(answer.first)) {
+    if (answer.first) {
         flow.forgiven_bytes += bytes;
         flow.forgiven_ranges++;
     }
@@ -1033,7 +1120,7 @@ inline uint64_t evaluate_remainder(FlowRecord& flow,
     if (remainder == 0 || threshold == 0) {
         return 0;
     }
-    StepLedger* cell = forgiveness_ledger.open_cell(
+    StepLedger* cell = forgiveness_ledger.cell(
         static_cast<uint32_t>(flow.dst), flow.operation.training_step);
     if (cell == nullptr) {
         return 0;
@@ -1052,22 +1139,17 @@ inline uint64_t evaluate_remainder(FlowRecord& flow,
 }
 
 // Whether the receiver may forgive this flow on this step, which is what it
-// marks its acknowledgements with. Pure and total: an unknown step, a critical
-// step or an empty permissive budget all answer false, and so does every
-// domain but the exempt one, which is how an arm without the exemption keeps
-// every sender under its controller. It reads no cell and spends no budget:
-// whether the step still has allowance rides on the same acknowledgement as
-// the spent report, and that is the sender's other half of the grant.
+// marks its acknowledgements with. Pure and total: an unknown step or a step
+// whose own budget is zero answers false, and so does every domain but the
+// exempt one, which is how an arm without the exemption keeps every sender
+// under its controller. A critical step grants like any other; its small p
+// means the pool is gone after a few hundred kilobytes and the report brings
+// the controller back almost at once. It reads no cell and spends no budget:
+// whether the step still has allowance rides on the same acknowledgement, and
+// that is the sender's other half of the grant.
 inline bool exemption_eligible(const FlowRecord& flow) {
-    if (experiment_config.domain != SheddingDomain::RecoveryExempt ||
-        !forgivable(flow) || experiment_config.p_high_threshold == 0) {
-        return false;
-    }
-    const auto clr =
-        experiment_config.clr_mask_by_step.find(flow.operation.training_step);
-    // A critical step obeys congestion control: its budget is the strict one
-    // and the exemption is not part of what it buys.
-    return clr != experiment_config.clr_mask_by_step.end() && !clr->second;
+    return experiment_config.domain == SheddingDomain::RecoveryExempt &&
+           forgivable(flow) && step_threshold(flow) > 0;
 }
 
 inline uint16_t priority_group_for_vnet(uint32_t vnet) {
@@ -1197,8 +1279,8 @@ inline void parse_pacing(const nlohmann::json& policy) {
 }
 
 // Which bytes the cap is measured against, and whether the receiver may end a
-// sender's step. The stop reads the step's plan, so it is legal only on the
-// owed base, and the two are parsed together for that reason.
+// sender's step. The two are independent: the stop reads the step's plan,
+// which every forgiving domain carries, so it composes with either base.
 inline void parse_cap_base(const nlohmann::json& policy) {
     if (policy.contains("cap_base")) {
         const auto& base = policy.at("cap_base");
@@ -1223,12 +1305,6 @@ inline void parse_cap_base(const nlohmann::json& policy) {
     const auto& stop = policy.at("step_stop");
     if (!stop.is_boolean()) {
         throw std::runtime_error("selection_policy.step_stop must be boolean");
-    }
-    if (stop.get<bool>() && !experiment_config.cap_base_owed) {
-        throw std::runtime_error(
-            "selection_policy.step_stop is not available under cap_base "
-            "accounted: the stop fires on a sender's share of the step, "
-            "which is the owed base's own quantity");
     }
     experiment_config.step_stop = stop.get<bool>();
 }
@@ -1342,8 +1418,7 @@ inline void configure_experiment(const std::string& configuration_path,
                          "eligibility", "selection_probability_by_step",
                          "selection_policy", "scale",
                          "default_priority_group", "provenance",
-                         "vnet_to_priority_group", "microburst",
-                         "owed_bytes"},
+                         "vnet_to_priority_group", "microburst"},
                         "experiment configuration");
     if (root.value("schema_version", 0) != 1) {
         throw std::runtime_error("Experiment schema_version must be 1");
@@ -1581,62 +1656,6 @@ inline void configure_experiment(const std::string& configuration_path,
             experiment_config.rank_count, experiment_config.step_count);
     }
 
-    // The step's plan, as (receiving rank, step, sending rank) -> bytes. The
-    // generator derives it from the same collective sizing it wrote the traces
-    // from, and `close` holds it to the launches, so an error here ends the
-    // run rather than moving the budget. Every forgiving domain carries it,
-    // because the spent report is measured against the step's total and the
-    // step stop against one sender's share of it.
-    if (root.contains("owed_bytes")) {
-        if (!forgives(experiment_config.domain)) {
-            throw std::runtime_error(
-                "owed_bytes belongs to a forgiving domain");
-        }
-        const auto& owed = root.at("owed_bytes");
-        if (!owed.is_object()) {
-            throw std::runtime_error("owed_bytes must be an object");
-        }
-        for (auto dst_it = owed.begin(); dst_it != owed.end(); ++dst_it) {
-            const auto dst = parse_uint64_key(dst_it.key(), "owed_bytes");
-            if (!dst_it.value().is_object()) {
-                throw std::runtime_error(
-                    "owed_bytes[rank] must be an object of steps");
-            }
-            for (auto step_it = dst_it.value().begin();
-                 step_it != dst_it.value().end(); ++step_it) {
-                const auto step =
-                    parse_uint64_key(step_it.key(), "owed_bytes step");
-                if (!step_it.value().is_object()) {
-                    throw std::runtime_error(
-                        "owed_bytes[rank][step] must be an object of senders");
-                }
-                for (auto src_it = step_it.value().begin();
-                     src_it != step_it.value().end(); ++src_it) {
-                    const auto src =
-                        parse_uint64_key(src_it.key(), "owed_bytes sender");
-                    if (!src_it.value().is_number_unsigned() ||
-                        src_it.value().get<uint64_t>() == 0) {
-                        throw std::runtime_error(
-                            "owed_bytes values must be nonzero unsigned "
-                            "integers");
-                    }
-                    if (dst > std::numeric_limits<uint32_t>::max() ||
-                        step > std::numeric_limits<uint32_t>::max() ||
-                        src > std::numeric_limits<uint32_t>::max()) {
-                        throw std::runtime_error("owed_bytes key exceeds uint32");
-                    }
-                    forgiveness_ledger.register_owed(
-                        static_cast<uint32_t>(dst), static_cast<uint32_t>(step),
-                        static_cast<uint32_t>(src),
-                        src_it.value().get<uint64_t>());
-                }
-            }
-        }
-    } else if (forgives(experiment_config.domain)) {
-        throw std::runtime_error(
-            "a forgiving domain requires owed_bytes: the spent report is "
-            "measured against the step's total");
-    }
     if (experiment_config.cap_base_owed) {
         forgiveness_ledger.use_owed_base();
     }

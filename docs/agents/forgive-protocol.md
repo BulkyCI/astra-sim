@@ -359,16 +359,17 @@ and it loses 5.1 % of all bytes.
 Per flow, in `telemetry/flow_events.csv`, the columns added by this
 protocol in order: `timeouts`, `cnp_received`, `first_trim_ns`,
 `first_repair_ns`, `forgiven_bytes`, `forgiven_ranges`,
-`forgiven_remainder_bytes`, `pacing_refusals`, `delivered_bytes`,
-`cc_exempt`, `cc_signal_withheld`, `allowance_spent_signalled`,
-`cc_rearmed_ns`.
+`forgiven_remainder_bytes`, `pacing_refusals`, `soft_refusals`,
+`late_forgiven_bytes`, `delivered_bytes`, `cc_exempt`,
+`cc_exempt_granted_ns`, `cc_signal_withheld`, `allowance_gone_reports`,
+`cc_transitions`, `cc_obeying_ns`.
 
 Per run, in `ns3/transport_summary.csv`, the events: `trim_ftd_admission`
 and `trim_ftd_lasthop_admission` (data plane, bytes trimmed),
 `trim_forgiven` and `remainder_forgiven` (data plane, bytes forgiven),
 and the control-plane counts `rto_fired`, `cnp_taken`,
-`cc_signal_withheld`, `allowance_spent_signalled`, `cc_rearmed`,
-`clipped_trim`.
+`cc_signal_withheld`, `allowance_gone_reports`, `cc_exempt_granted`,
+`cc_transition`, `clipped_trim`.
 
 `summary.json` and the report derive from these: the trim ratio W
 (trimmed bytes divided by offered bytes), the net trim ratio W' (W minus

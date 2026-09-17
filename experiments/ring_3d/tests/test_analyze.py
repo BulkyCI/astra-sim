@@ -53,11 +53,13 @@ FLOW_FIELDS = [
     "forgiven_ranges",
     "forgiven_remainder_bytes",
     "pacing_refusals",
+    "late_forgiven_bytes",
     "delivered_bytes",
     "cc_exempt",
     "cc_signal_withheld",
-    "allowance_spent_signalled",
-    "cc_rearmed_ns",
+    "allowance_gone_reports",
+    "cc_transitions",
+    "cc_obeying_ns",
 ]
 
 COLLECTIVE_FIELDS = [
@@ -582,8 +584,8 @@ class Ring3DAnalysisTests(unittest.TestCase):
         The exemption spends no budget, so the ledger law reads exactly as it
         does in the CC-neutral domain; what the exempt arm adds is the count
         of flows granted an exemption, the congestion signals they withheld,
-        the allowance reports they were sent, and the exemptions those reports
-        ended.
+        the allowance reports they were sent, and the time they spent back
+        under their controller when a report said the budget was gone.
         """
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -593,8 +595,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
                 {
                     "cc_exempt": "true",
                     "cc_signal_withheld": "7",
-                    "allowance_spent_signalled": "1",
-                    "cc_rearmed_ns": "500",
+                    "allowance_gone_reports": "1",
+                    "cc_transitions": "2",
+                    "cc_obeying_ns": "500",
                 }
             )
             still_exempt = self.eligible_flow("5", "2", 1_000, 0, "10002")
@@ -602,8 +605,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
                 {
                     "cc_exempt": "true",
                     "cc_signal_withheld": "5",
-                    "allowance_spent_signalled": "0",
-                    "cc_rearmed_ns": "0",
+                    "allowance_gone_reports": "0",
+                    "cc_transitions": "0",
+                    "cc_obeying_ns": "0",
                 }
             )
             obeying = self.eligible_flow("6", "2", 1_000, 0, "10003")
@@ -611,8 +615,9 @@ class Ring3DAnalysisTests(unittest.TestCase):
                 {
                     "cc_exempt": "false",
                     "cc_signal_withheld": "0",
-                    "allowance_spent_signalled": "0",
-                    "cc_rearmed_ns": "0",
+                    "allowance_gone_reports": "0",
+                    "cc_transitions": "0",
+                    "cc_obeying_ns": "0",
                 }
             )
             self.write_telemetry(telemetry, [exempt, still_exempt, obeying])
@@ -625,8 +630,10 @@ class Ring3DAnalysisTests(unittest.TestCase):
         forgiveness = summary["forgiveness"]
         self.assertEqual(forgiveness["cc_exempt_flow_count"], 2)
         self.assertEqual(forgiveness["cc_signal_withheld_count"], 12)
-        self.assertEqual(forgiveness["allowance_spent_signalled_count"], 1)
-        self.assertEqual(forgiveness["cc_rearmed_flow_count"], 1)
+        self.assertEqual(forgiveness["allowance_gone_report_count"], 1)
+        self.assertEqual(forgiveness["cc_transition_count"], 2)
+        self.assertEqual(forgiveness["cc_obeying_ns"], 500)
+        self.assertEqual(forgiveness["cc_obeying_flow_count"], 1)
         self.assertEqual(forgiveness["ledger_law"]["status"], "verified")
         self.assertEqual(forgiveness["ledger_law"]["domain"], "recovery_exempt")
 

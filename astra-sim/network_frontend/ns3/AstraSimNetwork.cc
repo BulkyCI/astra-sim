@@ -446,6 +446,37 @@ void parse_args(int argc, char* argv[]) {
     cmd.Parse(argc, argv);
 }
 
+// The step plan, read out of ASTRA-sim's own collective code before anything
+// launches. Every rank is asked what its DP All-Reduces would send and to
+// whom; rank r's answer for peer p becomes p's owed from r, and the count of
+// r's own collectives tells the ledger which completion certifies the step.
+// One call installs the whole table, because a cell whose senders are still
+// being added would measure its budget against a total that is not yet the
+// total.
+void install_collective_plan(const vector<AstraSim::Sys*>& systems) {
+    if (!AstraSimNs3::experiment_config.enabled ||
+        !AstraSimNs3::forgives(AstraSimNs3::experiment_config.domain)) {
+        return;
+    }
+    AstraSimNs3::CollectivePlan plan;
+    for (AstraSim::Sys* system : systems) {
+        const uint32_t sender = static_cast<uint32_t>(system->id);
+        for (const auto& entry : system->workload->plan_dp_all_reduce()) {
+            const uint32_t step = entry.first;
+            plan[{sender, step}].collectives += entry.second.collectives;
+            for (const auto& peer : entry.second.bytes_by_peer) {
+                if (peer.first < 0) {
+                    throw runtime_error("a collective plan named a negative "
+                                        "peer");
+                }
+                plan[{static_cast<uint32_t>(peer.first), step}]
+                    .by_sender[sender] += peer.second;
+            }
+        }
+    }
+    AstraSimNs3::install_collective_plan(plan);
+}
+
 int main(int argc, char* argv[]) {
     LogComponentEnable("OnOffApplication", LOG_INFO);
     LogComponentEnable("PacketSink", LOG_INFO);
@@ -487,6 +518,7 @@ int main(int argc, char* argv[]) {
                                           experiment_output_dir);
         AstraSimNs3::configure_clr_mask(clr_mask_configuration);
         AstraSimNs3::validate_experiment_contract();
+        install_collective_plan(systems);
     } catch (const exception& error) {
         cerr << "Unable to configure experiment: " << error.what() << "\n";
         Simulator::Destroy();

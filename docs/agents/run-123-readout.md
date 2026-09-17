@@ -38,9 +38,9 @@ exemption, not the fabric running out of congestion. The sentence given to
 Zechen is withdrawn.
 
 What replaces it: forgiven loss is now roughly proportional to the cap.
-With the eligible share of data-parallel bytes at 0.79, the cap is
-79 x budget in percent, and the exempt arm spends 68 to 86 % of it at every
-budget.
+Every DP all-reduce byte is eligible and the cap over 20 steps is the
+mask average, `0.8 x budget + 0.001` in percent of DP bytes, and the
+exempt arm spends 67 to 84 % of it at every budget.
 
 ## 3. The result at the worst cell
 
@@ -52,11 +52,11 @@ gradient lost.
 
 | budget | FORGIVE time | FORGIVE loss | cap | utilisation | efficiency | shedding time | shedding loss | efficiency | exempt flows re-armed |
 | ---: | --- | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
-| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 7.9 % | 86 % | 1.96 | 2.5 to 3.3 % | 7.9 % | 0.37 | 35 to 37 % |
-| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 15.8 % | 74 % | 1.41 | 4.9 to 5.5 % | 15.8 % | 0.33 | 20 to 22 % |
-| 0.4, 5 seeds | 19.6 to 21.0 % | 21.3 to 21.8 % | 31.6 % | 68 % | 0.95 | 10.5 to 12.3 % | 31.6 % | 0.36 | 6.8 to 7.6 % |
-| 0.6 | 23.7 to 24.3 % | 37.7 to 38.6 % | 47.4 % | 80 % | 0.63 | 16.0 to 16.4 % | 47.4 % | 0.34 | 0.2 to 0.3 % |
-| 0.4, mask off | 25.3 to 25.6 % | 25.6 to 26.0 % | 31.6 % | 82 % | 0.98 | 13.2 to 14.9 % | 31.6 % | 0.45 | 7.3 to 7.5 % |
+| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 8.1 % | 84 % | 1.96 | 2.5 to 3.3 % | 7.9 % | 0.37 | 35 to 37 % |
+| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 16.1 % | 73 % | 1.41 | 4.9 to 5.5 % | 15.8 % | 0.33 | 20 to 22 % |
+| 0.4, 5 seeds | 19.6 to 21.0 % | 21.3 to 21.8 % | 32.1 % | 67 % | 0.95 | 10.5 to 12.3 % | 31.6 % | 0.36 | 6.8 to 7.6 % |
+| 0.6 | 23.7 to 24.3 % | 37.7 to 38.6 % | 48.1 % | 79 % | 0.63 | 16.0 to 16.4 % | 47.4 % | 0.34 | 0.2 to 0.3 % |
+| 0.4, mask off | 25.3 to 25.6 % | 25.6 to 26.0 % | 40.0 % | 64 % | 0.98 | 13.2 to 14.9 % | 31.6 % | 0.45 | 7.3 to 7.5 % |
 
 Readings.
 
@@ -98,7 +98,7 @@ The no-incast control forgives nothing and moves nothing, as before.
 
 | claim | before #123 | after #123 |
 | --- | --- | --- |
-| aimed loss self-limits | 9.3 % ceiling at every budget above 0.2 | withdrawn; loss is 68 to 86 % of the cap |
+| aimed loss self-limits | 9.3 % ceiling at every budget above 0.2 | withdrawn; loss is 67 to 84 % of the cap |
 | FORGIVE beats shedding per byte lost | 4 to 5 times, flat across the front | 5.3 times at 0.1, falling to 1.9 times at 0.6 |
 | the mask protects critical steps | 1.0 to 1.5 % of forgiven bytes | unchanged, 1.4 % at 0.1 |
 | the exemption ends on a refusal | measured under a defect | ends on the allowance report, verified by the counter identity on 21 records |

@@ -668,6 +668,360 @@ DataSet* Sys::generate_reduce_scatter(uint64_t size,
     }
 }
 
+namespace {
+
+// What one phase sends, per peer. The algorithm holds the message count, the
+// message size and the ring it walks, so this reads them rather than the
+// group size: a ring puts every message on its one receiver, and a direct
+// exchange rotates its receiver over the other nodes, so its messages land
+// evenly over the G - 1 of them.
+void accumulate_phase_peers(const AstraSim::CollectivePhase& phase,
+                            int id,
+                            std::map<int, uint64_t>& per_peer) {
+    AstraSim::Algorithm* algorithm = phase.algorithm;
+    if (algorithm == nullptr) {
+        return;
+    }
+    if (algorithm->name != AstraSim::Algorithm::Name::Ring &&
+        algorithm->name != AstraSim::Algorithm::Name::AllToAll) {
+        throw std::runtime_error(
+            "the collective plan only knows the ring and direct algorithms");
+    }
+    AstraSim::Ring* ring = static_cast<AstraSim::Ring*>(algorithm);
+    const uint64_t messages = static_cast<uint64_t>(ring->stream_count);
+    if (algorithm->name == AstraSim::Algorithm::Name::Ring) {
+        per_peer[ring->curr_receiver] += messages * ring->msg_size;
+        return;
+    }
+    AstraSim::RingTopology* topology =
+        static_cast<AstraSim::RingTopology*>(ring->logical_topo);
+    const int peers = ring->nodes_in_ring - 1;
+    if (peers <= 0 || messages % static_cast<uint64_t>(peers) != 0) {
+        throw std::runtime_error(
+            "a direct collective's messages do not divide over its peers");
+    }
+    const uint64_t each = messages / static_cast<uint64_t>(peers) *
+                          ring->msg_size;
+    int peer = topology->get_receiver(id, ring->direction);
+    for (int step = 0; step < peers; step++) {
+        per_peer[peer] += each;
+        peer = topology->get_receiver(peer, ring->direction);
+    }
+}
+
+}  // namespace
+
+// One stream's phase list: which dimensions it visits, in what order, and
+// what each of them carries. This is the whole of the decision; the scheduler
+// in generate_collective only turns the list into a stream and hands it to
+// the ready list. The split is what lets the plan pass ask what a collective
+// would send without sending it: it calls this with a copy of the queue
+// allocator and of the round-robin cursor, so the run's own allocation is
+// untouched, reads the algorithms' sizing, and deletes them.
+//
+// An empty list means the collective has no dimension left to visit, which is
+// what ends the loop in both callers.
+list<CollectivePhase> Sys::build_stream_phases(
+    uint64_t& size,
+    uint64_t& chunk_size,
+    uint64_t recommended_chunk_size,
+    LogicalTopology* topology,
+    const vector<CollectiveImpl*>& implementation_per_dimension,
+    vector<bool>& dimensions_involved,
+    ComType collective_type,
+    QueueLevels* levels,
+    int& round_robin) {
+    vector<int> dim_mapper(topology->get_num_of_dimensions());
+    iota(begin(dim_mapper), end(dim_mapper), 0);
+    if (collective_type == ComType::All_Gather) {
+        reverse(dim_mapper.begin(), dim_mapper.end());
+    }
+
+    if (inter_dimension_scheduling ==
+        InterDimensionScheduling::RoundRobin) {
+        rotate(dim_mapper.begin(),
+               dim_mapper.begin() + round_robin,
+               dim_mapper.end());
+        round_robin++;
+        if (round_robin ==
+            topology->get_num_of_dimensions()) {
+            round_robin = 0;
+        }
+    } else if (collective_type != ComType::All_to_All &&
+               (inter_dimension_scheduling ==
+                    InterDimensionScheduling::OfflineGreedy ||
+                inter_dimension_scheduling ==
+                    InterDimensionScheduling::OfflineGreedyFlex)) {
+        uint64_t prev_size = size;
+        dim_mapper = offline_greedy->get_chunk_scheduling(
+            num_streams, size, recommended_chunk_size, dimensions_involved,
+            inter_dimension_scheduling, collective_type);
+        chunk_size = prev_size - size;
+    }
+
+    if (collective_type == ComType::All_to_All ||
+        (inter_dimension_scheduling !=
+             InterDimensionScheduling::OfflineGreedy &&
+         inter_dimension_scheduling !=
+             InterDimensionScheduling::OfflineGreedyFlex)) {
+        if (chunk_size > size) {
+            size = 0;
+        } else {
+            size -= chunk_size;
+        }
+    }
+    uint64_t remain_size = chunk_size;
+    list<CollectivePhase> vect;
+
+    if (collective_type != ComType::All_Reduce ||
+        collectiveOptimization == CollectiveOptimization::Baseline) {
+        for (int dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
+                    1 ||
+                !dimensions_involved[dim_mapper[dim]]) {
+                continue;
+            }
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                collective_type,
+                topology->get_basic_topology_at_dimension(dim_mapper[dim],
+                                                          collective_type),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+    } else if (inter_dimension_scheduling ==
+                   InterDimensionScheduling::OfflineGreedy ||
+               inter_dimension_scheduling ==
+                   InterDimensionScheduling::OfflineGreedyFlex ||
+               inter_dimension_scheduling ==
+                   InterDimensionScheduling::OnlineGreedy) {
+        int dim = 0;
+
+        // Create collective phase for each dimension in ascending order.
+        for (dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
+                    1 ||
+                !dimensions_involved[dim_mapper[dim]]) {
+                continue;
+            }
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level_first(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                ComType::Reduce_Scatter,
+                topology->get_basic_topology_at_dimension(
+                    dim_mapper[dim], ComType::Reduce_Scatter),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+        dim--;
+
+        // Create collective phases for each dimension in descending order.
+        for (; dim >= 0; dim--) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
+                    1 ||
+                !dimensions_involved[dim_mapper[dim]]) {
+                continue;
+            }
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level_last(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                ComType::All_Gather,
+                topology->get_basic_topology_at_dimension(
+                    dim_mapper[dim], ComType::All_Gather),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+    } else {
+        // In this branch, and the branch directly above, a collective
+        // visits each dimension (excluding the last dimension) twice.
+        // Specifically, for example, in 2D AllReduce, there would be 3
+        // collective phases: Phase 0: Reduce Scatter in dim 0, Phase 1: All
+        // Reduce in dim 1, Phase 2: All Gather in dim 0 Similarly, in 3D
+        // AllReduce, there would be 5 collective phases: RS in dim 0, RS in
+        // dim 1, AR in dim 2, AG in dim 1, AG in dim 0. Currently, queues
+        // are allocated per dimension. If we allocate all queues in a
+        // dimension to both phases of a single dimension, a race / deadlock
+        // condition may occur. Therefore, in these cases, we have to
+        // allocate half of the queues to the first phase, and the remaining
+        // half to the second phase. (For example, in the above 2D case, if
+        // we have 4 queues per dim, queues 0~1 are allocated to phase 0,
+        // queues 2~3 are allocated to phase 2. For details, refer to
+        // https://github.com/astra-sim/astra-sim/issues/137 and the linked
+        // document.
+
+        int dim = 0;
+        int last_active_dim = 0;
+        for (dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) !=
+                    1 &&
+                dimensions_involved[dim_mapper[dim]]) {
+                last_active_dim = dim;
+            }
+        }
+
+        // Create collective phase for each dimension, excluding the last
+        // dimension, in ascending order.
+        for (dim = 0; dim < last_active_dim; dim++) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
+                    1 ||
+                !dimensions_involved[dim_mapper[dim]]) {
+                continue;
+            }
+            // Allocate the first half of queues available to this
+            // dimension.
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level_first(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                ComType::Reduce_Scatter,
+                topology->get_basic_topology_at_dimension(
+                    dim_mapper[dim], ComType::Reduce_Scatter),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+        while (dim > 0 && (dimensions_involved[dim_mapper[dim]] == false ||
+                           topology->get_num_of_nodes_in_dimension(
+                               dim_mapper[dim]) == 1)) {
+            dim--;
+        }
+
+        // The last dimension is the 'turning point'. Only one collective
+        // phase is created.
+        if (dimensions_involved[dim_mapper[dim]] &&
+            topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) > 1) {
+            // Despite only one collective phase being allocated to the last
+            // dimension, we only allocate half of the queues available to
+            // this dimension. This is because we want to match the number
+            // of queues allocated to each collective phase. Processing
+            // phases for this dim in n parallel queues, and queueing the
+            // next phases in n/2 parallel queues could cause another
+            // deadlock. Refer to the PR #135 for more details.
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level_first(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                ComType::All_Reduce,
+                topology->get_basic_topology_at_dimension(
+                    dim_mapper[dim], ComType::All_Reduce),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+        dim--;
+
+        // Create collective phases for each dimension, excluding the last
+        // dimension, in descending order.
+        for (; dim >= 0; dim--) {
+            if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
+                    1 ||
+                !dimensions_involved[dim_mapper[dim]]) {
+                continue;
+            }
+            // Allocate the second half of queues available to this
+            // dimension.
+            pair<int, RingTopology::Direction> queue =
+                levels->get_next_queue_at_level_last(dim_mapper[dim]);
+            CollectivePhase phase = generate_collective_phase(
+                ComType::All_Gather,
+                topology->get_basic_topology_at_dimension(
+                    dim_mapper[dim], ComType::All_Gather),
+                remain_size, queue.first, queue.second,
+                InjectionPolicy::Normal,
+                implementation_per_dimension[dim_mapper[dim]]);
+            vect.push_back(phase);
+            remain_size = phase.final_data_size;
+        }
+    }
+    return vect;
+}
+
+// What one All-Reduce of `size` bytes over this rank's group would put on the
+// wire, as (peer -> bytes this rank sends it). It runs the same phase builder
+// the scheduler runs, on a copy of the queue allocator and of the round-robin
+// cursor so the run's own allocation is untouched, and reads each algorithm's
+// own sizing and peer spread rather than re-deriving them.
+//
+// Re-derivation is not safe. determine_chunk_size rounds, the loop's
+// subtract-and-clamp leaves the last stream a full chunk rather than the
+// remainder, and the message size truncates again, so an arithmetic
+// prediction of the total is wrong wherever the size is not a multiple of the
+// group. Asking the algorithm is the only way the plan and the launches agree
+// by construction.
+std::map<int, uint64_t> Sys::plan_all_reduce_bytes_per_peer(
+    uint64_t size,
+    std::vector<bool> involved_dimensions,
+    CommunicatorGroup* communicator_group,
+    uint64_t workload_node_id) {
+    LogicalTopology* topology = nullptr;
+    vector<CollectiveImpl*> implementation_per_dimension;
+    vector<bool> dimensions_involved;
+    if (communicator_group == nullptr) {
+        topology = logical_topologies["AllReduce"];
+        implementation_per_dimension =
+            collective_impl_lookup->get_collective_impl(ComType::All_Reduce,
+                                                        workload_node_id);
+        dimensions_involved = involved_dimensions;
+    } else {
+        CollectivePlan* plan = communicator_group->get_collective_plan(
+            ComType::All_Reduce, workload_node_id);
+        topology = plan->topology;
+        implementation_per_dimension = plan->implementation_per_dimension;
+        dimensions_involved = plan->dimensions_involved;
+    }
+    if (implementation_per_dimension.empty()) {
+        throw std::runtime_error(
+            "an All-Reduce with no implementation cannot be planned");
+    }
+    // The greedy schedulers decide a chunk's dimensions from load they carry
+    // between collectives, so planning one would consume the schedule the run
+    // is about to use. Nothing in the tree configures them for a planned arm.
+    if (inter_dimension_scheduling == InterDimensionScheduling::OfflineGreedy ||
+        inter_dimension_scheduling ==
+            InterDimensionScheduling::OfflineGreedyFlex) {
+        throw std::runtime_error(
+            "the collective plan cannot be built under offline-greedy "
+            "inter-dimension scheduling");
+    }
+    if (implementation_per_dimension[0]->type ==
+        CollectiveImplType::CustomCollectiveImpl) {
+        throw std::runtime_error(
+            "the collective plan cannot be built for a custom collective: it "
+            "carries its own schedule");
+    }
+    std::map<int, uint64_t> per_peer;
+    uint64_t chunk_size = determine_chunk_size(size, ComType::All_Reduce);
+    const uint64_t recommended_chunk_size = chunk_size;
+    QueueLevels levels = *vLevels;
+    int round_robin = round_robin_inter_dimension_scheduler;
+    while (size > 0) {
+        list<CollectivePhase> vect = build_stream_phases(
+            size, chunk_size, recommended_chunk_size, topology,
+            implementation_per_dimension, dimensions_involved,
+            ComType::All_Reduce, &levels, round_robin);
+        if (vect.empty()) {
+            break;
+        }
+        for (CollectivePhase& phase : vect) {
+            accumulate_phase_peers(phase, id, per_peer);
+            delete phase.algorithm;
+        }
+    }
+    return per_peer;
+}
+
 DataSet* Sys::generate_collective(
     uint64_t size,
     LogicalTopology* topology,
@@ -684,7 +1038,6 @@ DataSet* Sys::generate_collective(
     uint64_t chunk_size = determine_chunk_size(size, collective_type);
     uint64_t recommended_chunk_size = chunk_size;
     int streams = ceil(((double)size) / chunk_size);
-    uint64_t remain_size;
     DataSet* dataset = new DataSet(streams);
     int pri = get_priority(explicit_priority);
     int count = 0;
@@ -732,221 +1085,10 @@ DataSet* Sys::generate_collective(
 
     while (size > 0) {
         count++;
-
-        vector<int> dim_mapper(topology->get_num_of_dimensions());
-        iota(begin(dim_mapper), end(dim_mapper), 0);
-        if (collective_type == ComType::All_Gather) {
-            reverse(dim_mapper.begin(), dim_mapper.end());
-        }
-
-        if (inter_dimension_scheduling ==
-            InterDimensionScheduling::RoundRobin) {
-            rotate(dim_mapper.begin(),
-                   dim_mapper.begin() + round_robin_inter_dimension_scheduler,
-                   dim_mapper.end());
-            round_robin_inter_dimension_scheduler++;
-            if (round_robin_inter_dimension_scheduler ==
-                topology->get_num_of_dimensions()) {
-                round_robin_inter_dimension_scheduler = 0;
-            }
-        } else if (collective_type != ComType::All_to_All &&
-                   (inter_dimension_scheduling ==
-                        InterDimensionScheduling::OfflineGreedy ||
-                    inter_dimension_scheduling ==
-                        InterDimensionScheduling::OfflineGreedyFlex)) {
-            uint64_t prev_size = size;
-            dim_mapper = offline_greedy->get_chunk_scheduling(
-                num_streams, size, recommended_chunk_size, dimensions_involved,
-                inter_dimension_scheduling, collective_type);
-            chunk_size = prev_size - size;
-        }
-
-        if (collective_type == ComType::All_to_All ||
-            (inter_dimension_scheduling !=
-                 InterDimensionScheduling::OfflineGreedy &&
-             inter_dimension_scheduling !=
-                 InterDimensionScheduling::OfflineGreedyFlex)) {
-            if (chunk_size > size) {
-                size = 0;
-            } else {
-                size -= chunk_size;
-            }
-        }
-        remain_size = chunk_size;
-        list<CollectivePhase> vect;
-
-        if (collective_type != ComType::All_Reduce ||
-            collectiveOptimization == CollectiveOptimization::Baseline) {
-            for (int dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
-                        1 ||
-                    !dimensions_involved[dim_mapper[dim]]) {
-                    continue;
-                }
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    collective_type,
-                    topology->get_basic_topology_at_dimension(dim_mapper[dim],
-                                                              collective_type),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-        } else if (inter_dimension_scheduling ==
-                       InterDimensionScheduling::OfflineGreedy ||
-                   inter_dimension_scheduling ==
-                       InterDimensionScheduling::OfflineGreedyFlex ||
-                   inter_dimension_scheduling ==
-                       InterDimensionScheduling::OnlineGreedy) {
-            int dim = 0;
-
-            // Create collective phase for each dimension in ascending order.
-            for (dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
-                        1 ||
-                    !dimensions_involved[dim_mapper[dim]]) {
-                    continue;
-                }
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level_first(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    ComType::Reduce_Scatter,
-                    topology->get_basic_topology_at_dimension(
-                        dim_mapper[dim], ComType::Reduce_Scatter),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-            dim--;
-
-            // Create collective phases for each dimension in descending order.
-            for (; dim >= 0; dim--) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
-                        1 ||
-                    !dimensions_involved[dim_mapper[dim]]) {
-                    continue;
-                }
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level_last(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    ComType::All_Gather,
-                    topology->get_basic_topology_at_dimension(
-                        dim_mapper[dim], ComType::All_Gather),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-        } else {
-            // In this branch, and the branch directly above, a collective
-            // visits each dimension (excluding the last dimension) twice.
-            // Specifically, for example, in 2D AllReduce, there would be 3
-            // collective phases: Phase 0: Reduce Scatter in dim 0, Phase 1: All
-            // Reduce in dim 1, Phase 2: All Gather in dim 0 Similarly, in 3D
-            // AllReduce, there would be 5 collective phases: RS in dim 0, RS in
-            // dim 1, AR in dim 2, AG in dim 1, AG in dim 0. Currently, queues
-            // are allocated per dimension. If we allocate all queues in a
-            // dimension to both phases of a single dimension, a race / deadlock
-            // condition may occur. Therefore, in these cases, we have to
-            // allocate half of the queues to the first phase, and the remaining
-            // half to the second phase. (For example, in the above 2D case, if
-            // we have 4 queues per dim, queues 0~1 are allocated to phase 0,
-            // queues 2~3 are allocated to phase 2. For details, refer to
-            // https://github.com/astra-sim/astra-sim/issues/137 and the linked
-            // document.
-
-            int dim = 0;
-            int last_active_dim = 0;
-            for (dim = 0; dim < topology->get_num_of_dimensions(); dim++) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) !=
-                        1 &&
-                    dimensions_involved[dim_mapper[dim]]) {
-                    last_active_dim = dim;
-                }
-            }
-
-            // Create collective phase for each dimension, excluding the last
-            // dimension, in ascending order.
-            for (dim = 0; dim < last_active_dim; dim++) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
-                        1 ||
-                    !dimensions_involved[dim_mapper[dim]]) {
-                    continue;
-                }
-                // Allocate the first half of queues available to this
-                // dimension.
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level_first(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    ComType::Reduce_Scatter,
-                    topology->get_basic_topology_at_dimension(
-                        dim_mapper[dim], ComType::Reduce_Scatter),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-            while (dim > 0 && (dimensions_involved[dim_mapper[dim]] == false ||
-                               topology->get_num_of_nodes_in_dimension(
-                                   dim_mapper[dim]) == 1)) {
-                dim--;
-            }
-
-            // The last dimension is the 'turning point'. Only one collective
-            // phase is created.
-            if (dimensions_involved[dim_mapper[dim]] &&
-                topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) > 1) {
-                // Despite only one collective phase being allocated to the last
-                // dimension, we only allocate half of the queues available to
-                // this dimension. This is because we want to match the number
-                // of queues allocated to each collective phase. Processing
-                // phases for this dim in n parallel queues, and queueing the
-                // next phases in n/2 parallel queues could cause another
-                // deadlock. Refer to the PR #135 for more details.
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level_first(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    ComType::All_Reduce,
-                    topology->get_basic_topology_at_dimension(
-                        dim_mapper[dim], ComType::All_Reduce),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-            dim--;
-
-            // Create collective phases for each dimension, excluding the last
-            // dimension, in descending order.
-            for (; dim >= 0; dim--) {
-                if (topology->get_num_of_nodes_in_dimension(dim_mapper[dim]) ==
-                        1 ||
-                    !dimensions_involved[dim_mapper[dim]]) {
-                    continue;
-                }
-                // Allocate the second half of queues available to this
-                // dimension.
-                pair<int, RingTopology::Direction> queue =
-                    vLevels->get_next_queue_at_level_last(dim_mapper[dim]);
-                CollectivePhase phase = generate_collective_phase(
-                    ComType::All_Gather,
-                    topology->get_basic_topology_at_dimension(
-                        dim_mapper[dim], ComType::All_Gather),
-                    remain_size, queue.first, queue.second,
-                    InjectionPolicy::Normal,
-                    implementation_per_dimension[dim_mapper[dim]]);
-                vect.push_back(phase);
-                remain_size = phase.final_data_size;
-            }
-        }
+        list<CollectivePhase> vect = build_stream_phases(
+            size, chunk_size, recommended_chunk_size, topology,
+            implementation_per_dimension, dimensions_involved, collective_type,
+            vLevels, round_robin_inter_dimension_scheduler);
         if (vect.size() > 0) {
             int stream_id = num_streams++;
             if (communicator_group != nullptr) {

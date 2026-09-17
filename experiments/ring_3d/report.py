@@ -162,8 +162,11 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
         "domain; a violated status invalidates the arm. The worst cell is the "
         "receiving rank and step left with the smallest share of what it was "
         "owed, and that share is the contract the run kept. A CC-exempt flow "
-        "withholds every congestion signal from its controller until a "
-        "receiver reports that cell's allowance spent, which re-arms it. The "
+        "withholds every congestion signal from its controller while the "
+        "receiver's latest report says the cell still has allowance, and "
+        "delivers them while it says the allowance is gone; the transitions "
+        "count the reports that changed the bit and the obeying time is what "
+        "those stretches under the controller cost. The "
         "forgiven remainder is what the receiver took from a quiet flow, and "
         "the part of it never sent is what no sender had put on the wire; the "
         "rest was attempted, trimmed, and awaiting repair. Pacing refusals "
@@ -201,11 +204,19 @@ def _forgiveness_lines(summary: dict[str, Any]) -> list[str]:
                 ],
                 [
                     "Allowance reports",
-                    forgiveness.get("allowance_spent_signalled_count", 0),
+                    forgiveness.get("allowance_gone_report_count", 0),
                 ],
                 [
-                    "Flows re-armed",
-                    forgiveness.get("cc_rearmed_flow_count", 0),
+                    "Report transitions",
+                    forgiveness.get("cc_transition_count", 0),
+                ],
+                [
+                    "Flows that went back under the controller",
+                    forgiveness.get("cc_obeying_flow_count", 0),
+                ],
+                [
+                    "Time obeying while granted (ns)",
+                    forgiveness.get("cc_obeying_ns", 0),
                 ],
                 [
                     "W' (repaired per offered byte)",

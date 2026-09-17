@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-owed-stepstop",
+  "name": "ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-stepstop",
   "parallelism": {
     "tp": 8,
     "pp": 1,
@@ -26,7 +26,6 @@
     "p_low": 0.005,
     "p_high": 0.1,
     "domain": "recovery_exempt",
-    "cap_base": "owed",
     "step_stop": true
   },
   "network": {

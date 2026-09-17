@@ -132,7 +132,7 @@ so far.
 Yashar's second suggestion, a baseline with no loss tolerance, and the
 congestion-neutral recovery arm were planned for the v1 re-run and not
 added to the matrix. Every published delta is
-against the fixed-low control at `p = 0.005`, which sheds about 0.4 % of
+against the fixed-low control at `p = 0.005`, which sheds 0.5 % of
 data-parallel bytes at admission.
 
 **H. Zero is a legal threshold.** `generate.py` and the C++ parser refuse
@@ -295,9 +295,13 @@ forgiven whole, bounded by the cap as always. Flows from that sender still
 receiving are stopped at their next packet; a flow waiting on a repair is
 left to its repair, which is cheap.
 
-Three arms in #127: `p01_owed_stepstop`, seeds 9550582, 23172535,
-94081284, ledger keys `...-exempt-p01-owed-stepstop-seed-<seed>`; the
-filter `exempt-p01-(single|owed)` selects 12.
+Six arms in #127, seeds 9550582, 23172535, 94081284: `p01_stepstop`, the
+stop on the law of record, ledger keys
+`...-exempt-p01-stepstop-seed-<seed>`, and `p01_b25_stepstop`, the design
+of record entire, keys `...-exempt-p01-b25-stepstop-seed-<seed>`. The stop
+reads the step's plan, which every forgiving domain carries, so it needs
+no cap base of its own and the owed base stays the separate ablation it
+was.
 
 Stated in advance: loss settles at `p` on every permissive step, as any
 stop that uses its budget must; the re-arm share stays near v1's, because
@@ -397,9 +401,46 @@ exemption's ceiling and prices what revocation costs us in time against
 what it saves the fabric in re-sent bytes and TP collective time.
 
 #127, budget 0.1, gate `forgive_v2`, filter
-`exempt-p01-(single|owed|b25-seed|noreengage)`: the law's v1 point
-(`p01_single`, soft cap with hard revocation, 3), the owed ablation
-(`p01_owed`, 3), B25 under the fresh coin on the law (`p01_b25`, 3) and
-on the ablation (`p01_owed_b25`, 3), the step stop (`p01_owed_stepstop`,
-3), D (3). Eighteen arms. Read with two extra columns per arm: TP all-reduce span
-and re-sent bytes against the fixed-low baseline.
+`exempt-p01-(single|owed|b25|stepstop|noreengage)`: the design of record
+is the soft law with the coin and the stop (`p01_b25_stepstop`, 3), and
+every other arm removes one piece of it. The law's v1 point
+(`p01_single`, 3) drops both, the coin alone (`p01_b25`, 3) and the stop
+alone (`p01_stepstop`, 3) drop one each, the owed ablation (`p01_owed`,
+3) and the same under the coin (`p01_owed_b25`, 3) replace the vesting
+cap with the plan, and D (3) never re-engages. Twenty-one arms. Read with
+two extra columns per arm: TP all-reduce span and re-sent bytes against
+the fixed-low baseline.
+
+## 11. Pooling and the application's rescale
+
+Joe, 2026-09-16. The budget stays pooled per (receiving rank, step): the
+fabric decides which sender's bytes are lost, and a rank may receive 80 %
+of one peer's contribution and 40 % of another's against a 60 % average.
+Two facts from [lit-review-uneven-loss.md](lit-review-uneven-loss.md)
+decide how that is stated.
+
+**Assumption, stated in the specification.** The application divides
+each element of the reduce-scatter by the number of contributions that
+arrived for it, and the receiver hands the application the forgiven
+ranges of every completed message; the receiver already keeps them as the
+absorbed out-of-order set, so this is an interface sentence and not a
+mechanism. With that division an element averaged over fewer workers is
+an unbiased estimate from a smaller batch, and the per-sender
+distribution of loss stops mattering for the fixed point; what remains is
+a variance term. The DBLP evidence of 40 % on GPT-2 was sender-side
+shedding without rescale, so it is a conservative bound for the rescaled
+reduce-scatter.
+
+**What the assumption does not cover.** The all-gather half. A missing
+reduced value has no local substitute, dividing by anything does not help,
+and the replica that missed it diverges from the others on those elements.
+Every system in the review that touched both halves bounded the second
+tighter and none quantified a separate tolerance. Our budget does not
+distinguish the halves; whether the simulator's operation context can
+identify a DP message's half decides whether a per-half `p` is a knob or
+a stated limitation, and that check has not been made.
+
+**What settles it.** The GPT-2 injection experiment on the May rig: the
+per-(sender, receiver, step) loss pattern from a bundle, uneven as
+measured against the same total spread evenly, with and without the
+rescale, both halves separately.

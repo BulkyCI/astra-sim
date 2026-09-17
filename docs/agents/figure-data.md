@@ -415,22 +415,23 @@ lost:
 | 0.6 | 0.6 | 0.3 |
 | 0.4, mask off | 1.0 | 0.3 to 0.4 |
 
-Budget utilisation, **derived**. The eligible share of DP bytes is 0.79,
-read off the shedding arm whose loss is linear in the budget at that
-slope, so the cap is 79 x budget, in percent of DP bytes:
+Budget utilisation, **derived**. Every DP all-reduce byte is eligible;
+the cap over 20 steps is the mask average, 16 steps at the budget and 4
+critical steps at 0.005, so `0.8 x budget + 0.001` in percent of DP
+bytes (the shedding arm's 8.1 % at budget 0.1 is exactly this):
 
 | budget | cap | FORGIVE spends | utilisation |
 | ---: | ---: | ---: | ---: |
-| 0.1 | 7.9 % | 6.8 % | 86 % |
-| 0.2 | 15.8 % | 11.7 % | 74 % |
-| 0.4 | 31.6 % | 21.5 % | 68 % |
-| 0.6 | 47.4 % | 38.1 % | 80 % |
+| 0.1 | 8.1 % | 6.8 % | 84 % |
+| 0.2 | 16.1 % | 11.7 % | 73 % |
+| 0.4 | 32.1 % | 21.5 % | 67 % |
+| 0.6 | 48.1 % | 38.1 % | 79 % |
 
 Readings.
 
 - Forgiven loss is roughly proportional to the cap. Sender-side shedding
-  discards 0.79 x budget at every setting, exactly what its hash was told
-  to do; the exempt arm spends 68 to 86 % of the same cap, with no
+  discards exactly the mask average at every setting, what its hash was
+  told to do; the exempt arm spends 67 to 84 % of the same cap, with no
   ceiling anywhere on the front.
 - FORGIVE's efficiency falls with the budget, 1.96 at 0.1 to 0.63 at 0.6,
   while shedding's stays at 0.33 to 0.45. The two are furthest apart at

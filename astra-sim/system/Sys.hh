@@ -7,6 +7,9 @@ LICENSE file in the root directory of this source tree.
 #define __SYSTEM_HH__
 
 #include <chrono>
+#include <list>
+#include <map>
+#include <vector>
 
 #include "astra-sim/common/AstraNetworkAPI.hh"
 #include "astra-sim/common/AstraRemoteMemoryAPI.hh"
@@ -157,6 +160,24 @@ class Sys : public Callable {
         int explicit_priority,
         CommunicatorGroup* communicator_group,
         OperationContext operation_context = {});
+    // The phase-list builder generate_collective schedules from, and the plan
+    // pass reads. See the definition for why the two are split.
+    std::list<CollectivePhase> build_stream_phases(
+        uint64_t& size,
+        uint64_t& chunk_size,
+        uint64_t recommended_chunk_size,
+        LogicalTopology* topology,
+        const std::vector<CollectiveImpl*>& implementation_per_dimension,
+        std::vector<bool>& dimensions_involved,
+        ComType collective_type,
+        QueueLevels* levels,
+        int& round_robin);
+    // What one All-Reduce would send this rank's peers, without sending it.
+    std::map<int, uint64_t> plan_all_reduce_bytes_per_peer(
+        uint64_t size,
+        std::vector<bool> involved_dimensions,
+        CommunicatorGroup* communicator_group,
+        uint64_t workload_node_id);
     CollectivePhase generate_collective_phase(ComType collective_type,
                                               BasicLogicalTopology* topology,
                                               uint64_t data_size,

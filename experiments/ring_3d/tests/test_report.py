@@ -470,8 +470,10 @@ class Ring3DReportTests(unittest.TestCase):
                 "forgiven_range_count": 79,
                 "cc_exempt_flow_count": 42,
                 "cc_signal_withheld_count": 1_337,
-                "allowance_spent_signalled_count": 9,
-                "cc_rearmed_flow_count": 9,
+                "allowance_gone_report_count": 9,
+                "cc_transition_count": 18,
+                "cc_obeying_flow_count": 9,
+                "cc_obeying_ns": 4_200,
                 "forgiven_bytes_by_training_step": {"2": 78_608},
                 "ledger_law": {
                     "status": "verified",
@@ -492,7 +494,11 @@ class Ring3DReportTests(unittest.TestCase):
         self.assertIn("| Worst cell delivered | not available |", report)
         self.assertIn("| CC signals withheld | 1337 |", report)
         self.assertIn("| Allowance reports | 9 |", report)
-        self.assertIn("| Flows re-armed | 9 |", report)
+        self.assertIn("| Report transitions | 18 |", report)
+        self.assertIn(
+            "| Flows that went back under the controller | 9 |", report
+        )
+        self.assertIn("| Time obeying while granted (ns) | 4200 |", report)
 
     def test_report_renders_the_v2_receiver_counters(self) -> None:
         """The remainder split and the coin refusals are pre-registered too.

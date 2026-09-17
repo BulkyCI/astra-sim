@@ -33,15 +33,6 @@
 using namespace ns3;
 using namespace std;
 
-// The verdict crosses the boundary as a byte, so the two encodings are pinned
-// to each other here rather than trusted to stay in step.
-static_assert(static_cast<uint8_t>(AstraSimNs3::kForgive) ==
-                  static_cast<uint8_t>(RdmaHw::kForgive),
-              "the forgive bit must match the transport's");
-static_assert(static_cast<uint8_t>(AstraSimNs3::kAllowanceSpent) ==
-                  static_cast<uint8_t>(RdmaHw::kAllowanceSpent),
-              "the allowance-spent bit must match the transport's");
-
 // This bridge owns the ns-3 side of ASTRA send/receive completion. A message
 // remains logically complete only when both its sender and receiver callbacks
 // have been resolved.
@@ -213,12 +204,12 @@ void register_logical_send_event(int src_id,
 // (src, dst, source_port), and lets the experiment layer answer. An unknown
 // five-tuple gets a repair with no allowance report: a range whose flow has
 // already terminated cannot be charged to anything.
-uint8_t recovery_verdict(uint32_t sip,
-                         uint32_t dip,
-                         uint16_t sport,
-                         uint16_t dport,
-                         uint64_t seq,
-                         uint32_t length) {
+bool recovery_verdict(uint32_t sip,
+                      uint32_t dip,
+                      uint16_t sport,
+                      uint16_t dport,
+                      uint64_t seq,
+                      uint32_t length) {
     (void)dport;
     const uint32_t src = ip_to_node_id(Ipv4Address(sip));
     const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
@@ -226,9 +217,30 @@ uint8_t recovery_verdict(uint32_t sip,
                                       static_cast<int>(dst));
     const auto active = active_flow_registry.find(key);
     if (active == active_flow_registry.end()) {
-        return 0;
+        return false;
     }
     return AstraSimNs3::evaluate_forgiveness(active->second, seq, length);
+}
+
+// The transport's question about the report it is about to send: this flow is
+// missing these bytes, is the step's allowance gone. Resolved the way the
+// verdict callbacks are. An unknown five-tuple contributes no holes and
+// reports none spent, which leaves its sender wherever it already was.
+bool allowance_gone(uint32_t sip,
+                    uint32_t dip,
+                    uint16_t sport,
+                    uint16_t dport,
+                    uint64_t holes) {
+    (void)dport;
+    const uint32_t src = ip_to_node_id(Ipv4Address(sip));
+    const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
+    const FlowKey key = make_flow_key(sport, static_cast<int>(src),
+                                      static_cast<int>(dst));
+    const auto active = active_flow_registry.find(key);
+    if (active == active_flow_registry.end()) {
+        return false;
+    }
+    return AstraSimNs3::note_holes(active->second, holes);
 }
 
 // The transport's remainder-verdict callback, asked when a receive queue pair
@@ -303,7 +315,8 @@ void data_accepted(uint32_t sip,
                    uint32_t dip,
                    uint16_t sport,
                    uint16_t dport,
-                   uint64_t bytes) {
+                   uint64_t bytes,
+                   uint64_t late_forgiven) {
     (void)dport;
     const uint32_t src = ip_to_node_id(Ipv4Address(sip));
     const uint32_t dst = ip_to_node_id(Ipv4Address(dip));
@@ -313,7 +326,7 @@ void data_accepted(uint32_t sip,
     if (active == active_flow_registry.end()) {
         return;
     }
-    if (AstraSimNs3::note_delivered(active->second, bytes)) {
+    if (AstraSimNs3::note_delivered(active->second, bytes, late_forgiven)) {
         stop_sender_flows(src, dst, active->second.operation.training_step);
     }
 }
@@ -577,8 +590,15 @@ void copy_transport_counters(AstraSimNs3::FlowRecord& flow,
     flow.cc_exempt = q->m_cc_exempt_granted_ns != 0;
     flow.cc_exempt_granted_ns = q->m_cc_exempt_granted_ns;
     flow.cc_signal_withheld = q->m_cc_signals_withheld;
-    flow.allowance_spent_signalled = q->m_allowance_spent_signalled;
-    flow.cc_rearmed_ns = q->m_cc_rearmed_ns;
+    flow.allowance_gone_reports = q->m_allowance_gone_reports;
+    flow.cc_transitions = q->m_cc_transitions;
+    // A queue pair still obeying when it ends closes its last stretch here,
+    // because the transport only closes one when a report reopens it.
+    flow.cc_obeying_ns =
+        q->m_cc_obeying_ns +
+        (q->m_cc_obey_since_ns != 0
+             ? Simulator::Now().GetNanoSeconds() - q->m_cc_obey_since_ns
+             : 0);
     flow.first_trim_ns = q->m_first_trim_ns;
     flow.first_repair_ns = q->m_first_repair_ns;
     flow.end_time_ns = Simulator::Now().GetNanoSeconds();
@@ -599,6 +619,9 @@ void qp_finish(FILE* fout, Ptr<RdmaQueuePair> q) {
     if (active == active_flow_registry.end()) {
         throw runtime_error("Completed QP has no active flow record");
     }
+    // A terminal flow holds no holes: the cell's sum is over the flows still
+    // receiving, and this one has stopped.
+    AstraSimNs3::note_holes(active->second, 0);
     AstraSimNs3::FlowRecord flow = active->second;
     copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Completed;
@@ -666,6 +689,7 @@ void qp_fail(FILE* fout, Ptr<RdmaQueuePair> q, uint32_t reason) {
     Ptr<RdmaDriver> rdma = dst_node->GetObject<RdmaDriver>();
     rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
 
+    AstraSimNs3::note_holes(active->second, 0);
     AstraSimNs3::FlowRecord flow = active->second;
     copy_transport_counters(flow, q);
     flow.terminal_outcome = AstraSimNs3::FlowTerminalOutcome::Failed;
@@ -733,7 +757,8 @@ int setup_ns3_simulation(string network_configuration) {
                           ? remainder_verdict
                           : nullptr,
                       data_accepted,
-                      AstraSimNs3::experiment_config.reengage)) {
+                      AstraSimNs3::experiment_config.reengage,
+                      allowance_gone)) {
         return -1;
     }
     // The experiment's scale sizes the forgiveness ledger and bounds every

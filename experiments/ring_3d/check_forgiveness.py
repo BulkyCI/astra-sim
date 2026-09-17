@@ -250,10 +250,11 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
     """Assert the exemption reached exactly the flows the policy names.
 
     The receiver grants it: an acknowledgement of an eligible DP payload flow
-    on a non-critical step, with the step's budget not yet spent, is the grant,
-    and the sender obeys its controller until the first one arrives. It ends
-    when the receiver reports that budget spent. Each clause below is one of
-    those words, read back off telemetry the run already wrote.
+    on a step with a budget of its own, with that budget not yet gone, is the
+    grant, and the sender obeys its controller until the first one arrives.
+    The sender follows the latest report from then on, so it is a state the
+    flow enters and leaves rather than one it loses once. Each clause below is
+    one of those words, read back off telemetry the run already wrote.
     """
     failures: list[str] = []
     flows = _flows(run_dir)
@@ -267,17 +268,16 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
             "convert a transfer into a failure"
         )
 
-    clr_steps = _clr_steps(run_dir)
+    # A critical step grants like any other: its small p means the pool is
+    # gone after a few hundred kilobytes and the report brings the controller
+    # back almost at once, so the strict budget is what protects it and there
+    # is no separate rule to check here.
     exempt = [flow for flow in flows if flow["cc_exempt"] == "true"]
     for flow in exempt:
         if flow["flow_kind"] != "foreground_payload":
             failures.append(f"exempted a {flow['flow_kind']} flow")
         if flow["admission_eligible"] != "true":
             failures.append("exempted an ineligible flow")
-        if flow["training_step"] in clr_steps:
-            failures.append(
-                f"exempted a flow on critical step {flow['training_step']}"
-            )
         # The grant is an acknowledgement, so it has a time, and that time is
         # after the flow started: a sender obeys its controller for the round
         # trip before its first acknowledgement.
@@ -305,28 +305,31 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
                 f"a non-exempt {flow['flow_kind']} flow withheld "
                 f"{flow['cc_signal_withheld']} congestion signals"
             )
-    # An exemption ends on the receiver's report that the cell has no
-    # allowance left, and on nothing else. The two counters are written at
-    # different moments, so comparing them catches a report that re-armed
-    # nothing and a re-arm no report explains.
-    signalled = sum(1 for flow in exempt if int(flow["allowance_spent_signalled"]))
-    rearmed = sum(1 for flow in exempt if int(flow["cc_rearmed_ns"]))
-    if signalled != rearmed:
-        failures.append(
-            f"{signalled} exempt flows were told their allowance was spent "
-            f"but {rearmed} re-armed"
-        )
+    # The exemption follows the report both ways, so a transition is a report
+    # whose bit differed from the one before it. A flow that never saw a set
+    # bit can have no transition and can have spent no time obeying, and a
+    # flow that spent time obeying must have been granted first.
     for flow in flows:
-        if int(flow["cc_rearmed_ns"]) == 0:
-            continue
-        if flow["cc_exempt"] != "true":
-            failures.append("a flow that was never exempt was re-armed")
-        if int(flow["cc_rearmed_ns"]) <= int(flow["cc_exempt_granted_ns"]):
-            failures.append("a flow re-armed before it was granted")
-        if int(flow["cnp_received"]) == 0:
+        transitions = int(flow["cc_transitions"])
+        obeying = int(flow["cc_obeying_ns"])
+        if transitions and not int(flow["allowance_gone_reports"]):
             failures.append(
-                "a re-armed flow took no rate cut, so the report that "
-                "re-armed it was not charged"
+                "a flow changed its report without ever being told its "
+                "allowance was spent"
+            )
+        if obeying and not transitions:
+            failures.append(
+                "a flow spent time under its controller with no report that "
+                "put it there"
+            )
+        if (transitions or obeying) and flow["cc_exempt"] != "true":
+            failures.append(
+                "a flow that was never granted an exemption followed a report"
+            )
+        if obeying and int(flow["cnp_received"]) == 0:
+            failures.append(
+                "a flow that went back under its controller took no rate "
+                "cut, so the report that put it there was not charged"
             )
 
     law = _summary(run_dir)["forgiveness"]["ledger_law"]
@@ -339,7 +342,9 @@ def check_congestion_exemption(run_dir: Path) -> list[str]:
         f"congestion-exempt: {len(exempt)} flows granted an exemption, first "
         f"at {min(grants) if grants else 0} ns, "
         f"{forgiveness['cc_signal_withheld_count']} congestion signals "
-        f"withheld, {forgiveness['cc_rearmed_flow_count']} flows re-armed"
+        f"withheld, {forgiveness['cc_transition_count']} report transitions, "
+        f"{forgiveness['cc_obeying_flow_count']} flows back under their "
+        f"controller for {forgiveness['cc_obeying_ns']} ns"
     )
     return failures
 

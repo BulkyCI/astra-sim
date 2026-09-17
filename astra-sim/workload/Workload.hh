@@ -6,9 +6,11 @@ LICENSE file in the root directory of this source tree.
 #ifndef __WORKLOAD_HH__
 #define __WORKLOAD_HH__
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "astra-sim/system/Callable.hh"
 #include "astra-sim/system/CommunicatorGroup.hh"
@@ -52,6 +54,18 @@ class Workload : public Callable {
     void call(EventType event, CallData* data);
     void fire();
 
+    // What this rank's DP All-Reduces would put on the wire, per training
+    // step: how many of them the step runs, and what each peer is sent across
+    // all of them. Read from the trace and from ASTRA-sim's own collective
+    // sizing before anything launches, because a receiver's budget is
+    // measured against its step's total and a total still being added to is
+    // not one.
+    struct PlannedStep {
+        uint32_t collectives = 0;
+        std::map<int, uint64_t> bytes_by_peer;
+    };
+    std::map<uint32_t, PlannedStep> plan_dp_all_reduce();
+
     // stats
     void report();
 
@@ -83,6 +97,12 @@ class Workload : public Callable {
       const std::shared_ptr<Chakra::ETFeederNode>& node,
       TransportRole transport_role,
       ComType collective_type) const;
+    // Which logical dimensions a collective node names, defaulting to the
+    // four the feeder assumes when the attribute is absent. Shared by the
+    // issue path and the plan pass, so the plan cannot disagree with the run
+    // about which dimensions a collective visits.
+    std::vector<bool> involved_dimensions(
+      const std::shared_ptr<Chakra::ETFeederNode>& node) const;
       void register_collective(DataSet* collective,
                    uint64_t node_id,
                    const OperationContext& operation,

@@ -285,8 +285,8 @@ class SelectionPolicy:
     domain: SheddingDomain = SheddingDomain.ADMISSION
     # The receiver policies of FORGIVE v2, all meaningful only where the
     # receiver decides. ``step_stop`` ends a sender's step once ``1 - p`` of
-    # what it owes this rank has arrived, which reads the plan and so requires
-    # the owed base.
+    # what it owes this rank has arrived; it reads the step's plan, which
+    # every forgiving domain carries, so it composes with either cap base.
     pacing: Pacing = Pacing()
     cap_base: CapBase = CapBase.ACCOUNTED
     step_stop: bool = False
@@ -294,13 +294,6 @@ class SelectionPolicy:
     # sender's exemption. False is the reference arm: the report is still
     # carried and counted, and the budget alone bounds the loss.
     reengage: bool = True
-
-    def __post_init__(self) -> None:
-        if self.step_stop and self.cap_base is not CapBase.OWED:
-            raise ValueError(
-                "selection_policy.step_stop requires cap_base owed: the arms "
-                "that measure the stop measure it against the hard cap"
-            )
 
     @property
     def semantics(self) -> str:
@@ -949,10 +942,6 @@ class TraceWriter:
         self.groups = groups
         self.node_id = 1
         self.nodes: list[Node] = []
-        # The DP All-Reduce bytes this rank takes part in, by step. The step's
-        # plan is derived from these, so the plan and the trace cannot drift:
-        # they are the same numbers.
-        self.dp_all_reduce_bytes_by_step: dict[int, int] = {}
 
     def _new_node(self, name: str, node_type: int, dependencies: Iterable[int]) -> Node:
         node = Node(id=self.node_id, name=name, type=node_type)
@@ -976,10 +965,6 @@ class TraceWriter:
         size_bytes: int,
         step: int,
     ) -> int:
-        if domain == "dp":
-            self.dp_all_reduce_bytes_by_step[step] = (
-                self.dp_all_reduce_bytes_by_step.get(step, 0) + size_bytes
-            )
         node = self._new_node(name, COMM_COLL_NODE, dependencies)
         node.attr.extend(
             [
@@ -1517,53 +1502,6 @@ def _microburst_flows(profile: Profile) -> list[dict[str, int]]:
     ]
 
 
-def owed_bytes_by_cell(
-    profile: Profile,
-    dp_all_reduce_bytes_by_rank_step: dict[int, dict[int, int]],
-    groups: dict[str, list[int]],
-    dp_groups: dict[str, int],
-) -> dict[str, dict[str, dict[str, int]]]:
-    """What each sender owes each receiving rank in each step.
-
-    ASTRA-sim runs a direct DP All-Reduce as ``2 x (G - 1)`` streams of
-    ``B / G`` bytes each over the ``G - 1`` peers (``Ring.cc`` sizes the
-    All_Reduce stream count and message; ``AllToAll.cc`` spreads the streams
-    round robin), so every peer sends this rank ``2 x B / G`` bytes per
-    collective. Only the DP All-Reduce is eligible for the budget, so only it
-    is owed. The ring implementation puts all of it on one predecessor and is
-    refused here rather than predicted: nothing measures it, and the
-    simulator's close would reject a wrong plan anyway.
-    """
-    implementation = profile.dp_all_reduce_implementation
-    peer_count = profile.dp - 1
-    if not implementation.startswith("direct") and peer_count > 1:
-        raise ValueError(
-            "a forgiving domain needs a direct DP All-Reduce to plan from: "
-            f"{implementation} spreads its messages over {peer_count} peers "
-            "differently"
-        )
-    plan: dict[str, dict[str, dict[str, int]]] = {}
-    for rank in range(profile.ranks):
-        members = groups[str(dp_groups[str(rank)])]
-        peers = [member for member in members if member != rank]
-        if not peers:
-            continue
-        group_size = len(members)
-        for step, collective_bytes in sorted(
-            dp_all_reduce_bytes_by_rank_step[rank].items()
-        ):
-            if (2 * collective_bytes) % group_size:
-                raise ValueError(
-                    "the DP All-Reduce does not divide evenly across the "
-                    f"group: {collective_bytes} B over {group_size} ranks"
-                )
-            per_peer = 2 * collective_bytes // group_size
-            plan.setdefault(str(rank), {})[str(step)] = {
-                str(peer): per_peer for peer in peers
-            }
-    return plan
-
-
 def dp_fan_in(dp: int, dp_all_reduce_implementation: str) -> int:
     """Peak concurrent inbound DP shard flows per receiving rank.
 
@@ -1639,7 +1577,6 @@ def write_experiment_config(
     profile: Profile,
     clr_schedule: ClrSchedule,
     selection_policy: SelectionPolicy,
-    owed_bytes: dict[str, dict[str, dict[str, int]]] | None = None,
 ) -> None:
     microburst_flows = _microburst_flows(profile)
     policy_document: dict[str, Any] = {
@@ -1694,15 +1631,6 @@ def write_experiment_config(
             "flows": microburst_flows,
         },
     }
-    # The step's plan travels with every forgiving domain, because the spent
-    # report is measured against the step's total and the step stop against one
-    # sender's share of it. The simulator refuses one without the other, and
-    # holds the plan to the launches at close, so a wrong plan ends the run
-    # instead of moving the budget.
-    if selection_policy.domain in FORGIVING_DOMAINS:
-        if owed_bytes is None:
-            raise ValueError("a forgiving domain requires the step's plan")
-        policy["owed_bytes"] = owed_bytes
     path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1841,7 +1769,6 @@ def materialize(
 
     groups, tp_groups, pp_groups, dp_groups = generate_groups(profile)
     workload_dir = output_dir / "workload"
-    dp_all_reduce_bytes_by_rank_step: dict[int, dict[int, int]] = {}
     for rank in range(profile.ranks):
         writer = TraceWriter(
             workload_dir / f"ring_3d.{rank}.et",
@@ -1851,9 +1778,6 @@ def materialize(
         )
         writer.build()
         writer.write()
-        dp_all_reduce_bytes_by_rank_step[rank] = (
-            writer.dp_all_reduce_bytes_by_step
-        )
 
     topology = output_dir / "topology.txt"
     physical_topology = build_topology(profile.network, profile.ranks)
@@ -1874,15 +1798,8 @@ def materialize(
         profile.network.link_rate,
     )
     experiment_config = output_dir / "experiment.json"
-    owed_bytes = (
-        owed_bytes_by_cell(
-            profile, dp_all_reduce_bytes_by_rank_step, groups, dp_groups
-        )
-        if selection_policy.domain in FORGIVING_DOMAINS
-        else None
-    )
     write_experiment_config(
-        experiment_config, profile, clr_schedule, selection_policy, owed_bytes
+        experiment_config, profile, clr_schedule, selection_policy
     )
     system_config = output_dir / "system.json"
     write_system_config(

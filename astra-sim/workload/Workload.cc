@@ -15,6 +15,8 @@ LICENSE file in the root directory of this source tree.
 
 #include <iostream>
 #include <limits>
+#include <unordered_set>
+#include <vector>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -356,8 +358,8 @@ void Workload::register_collective(DataSet* collective,
     collective->set_notifier(this, EventType::CollectiveCommunicationFinished);
 }
 
-void Workload::issue_coll_comm(
-    shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
+std::vector<bool> Workload::involved_dimensions(
+    const shared_ptr<Chakra::ETFeederNode>& node) const {
     std::vector<bool> involved_dims;
     if (node->has_attr("involved_dim")) {
         const ChakraProtoMsg::AttributeProto& attr =
@@ -376,17 +378,77 @@ void Workload::issue_coll_comm(
                  << endl;
             exit(EXIT_FAILURE);
         }
-    } else {
-        // involved_dims does not exist in ETFeeder.
-        // Assume involved_dims = [1,1,1,1,1] which we could simulate
-        // 5-Dimension. Could use Process Group to build involved_dims later.
-        // Once process group is implemented, you should get
-        // that with node->pg_name()
+        return involved_dims;
+    }
+    // involved_dims does not exist in ETFeeder.
+    // Assume involved_dims = [1,1,1,1,1] which we could simulate
+    // 5-Dimension. Could use Process Group to build involved_dims later.
+    // Once process group is implemented, you should get
+    // that with node->pg_name()
+    for (int i = 0; i < 4; i++) {
+        involved_dims.push_back(true);
+    }
+    return involved_dims;
+}
 
-        for (int i = 0; i < 4; i++) {
-            involved_dims.push_back(true);
+// Every node in the trace, reached from the roots over the enabled dependency
+// layer. A finite directed acyclic graph has every node downstream of some
+// node with no parents, and the resolver's dependency-free set is exactly
+// those, so this reaches all of them. It runs before the first fire, when
+// nothing has been taken and the set is still the roots.
+std::map<uint32_t, Workload::PlannedStep> Workload::plan_dp_all_reduce() {
+    std::map<uint32_t, PlannedStep> plan;
+    const auto& layer =
+        et_feeder->getDependancyResolver().get_enabled_dependancy();
+    std::unordered_set<Chakra::FeederV3::NodeId> seen;
+    std::vector<Chakra::FeederV3::NodeId> frontier(
+        layer.get_dependancy_free_nodes().begin(),
+        layer.get_dependancy_free_nodes().end());
+    while (!frontier.empty()) {
+        const Chakra::FeederV3::NodeId node_id = frontier.back();
+        frontier.pop_back();
+        if (!seen.insert(node_id).second) {
+            continue;
+        }
+        for (const auto& child : layer.get_children(node_id)) {
+            frontier.push_back(child);
+        }
+        shared_ptr<Chakra::ETFeederNode> node = et_feeder->lookupNode(node_id);
+        if (node->type() != ChakraNodeType::COMM_COLL_NODE) {
+            continue;
+        }
+        const auto comm_type =
+            static_cast<ChakraCollectiveCommType>(node->comm_type<uint64_t>());
+        if (comm_type != ChakraCollectiveCommType::ALL_REDUCE) {
+            continue;
+        }
+        const OperationContext operation = make_operation_context(
+            node, TransportRole::CollectivePayload, ComType::All_Reduce);
+        if (!is_dp_all_reduce_payload(operation)) {
+            continue;
+        }
+        if (operation.training_step == 0) {
+            throw runtime_error(
+                "a DP All-Reduce with no training step cannot be planned");
+        }
+        std::vector<bool> involved_dims = involved_dimensions(node);
+        const std::map<int, uint64_t> per_peer =
+            sys->plan_all_reduce_bytes_per_peer(node->comm_size<uint64_t>(),
+                                                involved_dims,
+                                                extract_comm_group(node),
+                                                node->id());
+        PlannedStep& step = plan[operation.training_step];
+        step.collectives++;
+        for (const auto& peer : per_peer) {
+            step.bytes_by_peer[peer.first] += peer.second;
         }
     }
+    return plan;
+}
+
+void Workload::issue_coll_comm(
+    shared_ptr<Chakra::FeederV3::ETFeederNode> node) {
+    std::vector<bool> involved_dims = involved_dimensions(node);
 
     CommunicatorGroup* comm_group = extract_comm_group(node);
     const auto comm_type =

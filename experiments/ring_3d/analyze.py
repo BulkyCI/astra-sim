@@ -793,9 +793,9 @@ _HOST_TRANSPORT_EVENTS: Final = frozenset(
         "cnp_taken",
         "clipped_trim",
         "cc_signal_withheld",
-        "allowance_spent_signalled",
+        "allowance_gone_reports",
         "cc_exempt_granted",
-        "cc_rearmed",
+        "cc_transition",
     }
 )
 
@@ -856,13 +856,13 @@ def _summarize_transport_events(ns3_dir: Path) -> dict[str, Any]:
         # The congestion-exempt domain's reactions: a congestion signal the
         # sender withheld from its controller while exempt, the receiver's
         # report that the cell has no allowance left, the acknowledgement that
-        # granted the exemption, and the exemption that report ended. None
+        # granted the exemption, and every report that changed the bit. None
         # carries a packet, so all four are counts and no bytes on the control
         # plane.
         "cc_signal_withheld",
-        "allowance_spent_signalled",
+        "allowance_gone_reports",
         "cc_exempt_granted",
-        "cc_rearmed",
+        "cc_transition",
         # A trim whose range the receiver already partly holds, so the verdict
         # was asked about fewer bytes than the packet carried. Those bytes were
         # delivered, so the event carries a count and no bytes.
@@ -1202,8 +1202,11 @@ _COUNTER_FIELDS: Final = (
     "forgiven_ranges",
     "forgiven_remainder_bytes",
     "pacing_refusals",
+    "late_forgiven_bytes",
     "cc_signal_withheld",
-    "allowance_spent_signalled",
+    "allowance_gone_reports",
+    "cc_transitions",
+    "cc_obeying_ns",
 )
 """Telemetry columns summed verbatim. The column name is the only name they
 have, so the totals stay keyed by it rather than restating each one."""
@@ -1273,7 +1276,7 @@ class _FlowStatistics:
         "flow_count",
         "foreground_traffic",
         "cc_exempt_count",
-        "cc_rearmed_count",
+        "cc_obeying_flow_count",
         "soft_refusal_bytes",
         "forgiven_remainder_unsent_bytes",
         "shed_count",
@@ -1291,13 +1294,13 @@ class _FlowStatistics:
         self.completed_count = 0
         self.failed_count = 0
         self.shed_count = 0
-        # Flows the receiver granted an exemption, and the subset whose
-        # exemption a spent report ended. Neither is a byte count, so neither
-        # belongs in the summed counters; the soft refusals below are bytes,
-        # and they decompose the repairs with the coin's and the hard cap's.
+        # Flows the receiver granted an exemption, and the subset that spent
+        # any time back under their controller afterwards. Neither is a byte
+        # count, so neither belongs in the summed counters; the soft refusals
+        # below are bytes, and they decompose the repairs with the coin's.
         self.cc_exempt_count = 0
         self.soft_refusal_bytes = 0
-        self.cc_rearmed_count = 0
+        self.cc_obeying_flow_count = 0
         # The part of the forgiven remainder no sender put on the wire. The
         # law below computes it per flow, so summing it here costs nothing and
         # keeps the two readings of the same subtraction in one place.
@@ -1392,8 +1395,8 @@ class _FlowStatistics:
         self.soft_refusal_bytes += _optional_nonnegative_int(
             row, "soft_refusals"
         )
-        self.cc_rearmed_count += (
-            _optional_nonnegative_int(row, "cc_rearmed_ns") > 0
+        self.cc_obeying_flow_count += (
+            _optional_nonnegative_int(row, "cc_obeying_ns") > 0
         )
 
         self.total_traffic.add(logical_bytes, physical_bytes)
@@ -1588,6 +1591,13 @@ def summarize(
         "forgiveness": {
             "forgiven_bytes": statistics.counters["forgiven_bytes"],
             "forgiven_range_count": statistics.counters["forgiven_ranges"],
+            # What the budget paid for and the sender delivered anyway: bytes
+            # that arrived for a range the receiver had already given up. The
+            # charge stands, so the loss the training side actually saw is the
+            # difference.
+            "late_forgiven_bytes": statistics.counters["late_forgiven_bytes"],
+            "actual_loss_bytes": statistics.counters["forgiven_bytes"]
+            - statistics.counters["late_forgiven_bytes"],
             # The two v2 receiver policies. Remainder bytes are what the step
             # stop forgave when it ended a sender's step, whether or not that
             # sender had already put them on the wire; pacing refusals are
@@ -1614,10 +1624,14 @@ def summarize(
             "cc_signal_withheld_count": statistics.counters[
                 "cc_signal_withheld"
             ],
-            "allowance_spent_signalled_count": statistics.counters[
-                "allowance_spent_signalled"
+            "allowance_gone_report_count": statistics.counters[
+                "allowance_gone_reports"
             ],
-            "cc_rearmed_flow_count": statistics.cc_rearmed_count,
+            # The exemption follows the report both ways, so what it costs is
+            # a duration and a count of changes, not a single re-arm instant.
+            "cc_transition_count": statistics.counters["cc_transitions"],
+            "cc_obeying_ns": statistics.counters["cc_obeying_ns"],
+            "cc_obeying_flow_count": statistics.cc_obeying_flow_count,
             "forgiven_bytes_by_training_step": _forgiven_by_step(
                 statistics.ledger
             ),

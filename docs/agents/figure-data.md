@@ -16,7 +16,9 @@ Sources are release bundles in `BulkyCI/astra-sim`: run #117
 `uwlaookzhemmwabtbwfe2yhyxepupnmw`, #121
 `b363b3rri7pbgbaudfh3tbnysiranl66`, #122
 `rt4732ejzjqe2hkar2bturuv3qav6pv3`. Run #123 is workflow run
-`34867374086`, and every exempt-arm number in this file comes from it.
+`34867374086`, and every v1 exempt-arm number in this file comes from it.
+Run #124 is main `55d5767`, #125 is main `8213401` and #126 is main
+`a1b30b0`; sections 11 and 12 read their certified per-arm summaries.
 
 ---
 
@@ -26,7 +28,7 @@ Vocabulary, so captions stay consistent. An *arm* is one simulated
 configuration. A *comparison* is a set of arms sharing a seed and a
 random selection stream, so their results can be subtracted. A *run* is
 one dispatch of many comparisons to the cluster, numbered #117, #120,
-#121, #122, #123. A *cell* is one point of the eight-point fabric map.
+#121, #122, #123, #124, #125 and #126. A *cell* is one point of the eight-point fabric map.
 The two sender-side arms are both shedding: *phase-aware shedding*
 protects the critical steps, *unmasked shedding* does not. Quantities marked
 **derived** below were computed from measured counters under a stated
@@ -95,6 +97,9 @@ Cluster waves:
 | 2026-09-07 | #121 | 6 comparisons, 24 arms | forgiveness with congestion exemption |
 | 2026-09-08 | #122 | 14 comparisons, 56 arms | loss-budget sweep and phase-mask ablation |
 | 2026-09-14 | #123 | 21 comparisons, 84 arms | the same front with the revocation corrected |
+| 2026-09-15 | #124 | 18 single arms | Bernoulli pacing at 0.5 and 0.25 |
+| 2026-09-16 | #125 | 24 arms | budget 0.05, and the coin below 0.25 |
+| 2026-09-16 | #126 | 15 single arms | zero tolerance, forgiveness without the exemption, no controller |
 
 Readings. Six weeks of the seven went into the instrument, because the
 backend ASTRA-sim ships with is lossless RoCEv2 and models none of the
@@ -163,7 +168,7 @@ Readings.
 - **Per-rank p99 is not a result.** It is the top three of 320 samples
   and one ECMP path collision moves it by half. Do not put it on a slide.
 - The loose baseline row is the price list for the phase bound. Ten
-  percent everywhere with no protection buys 9.42 %; the phase-aware
+  percent everywhere with no protection gains 9.42 %; the phase-aware
   schedule keeps 3.91 % of that and hands back the rest to protect steps
   1 to 3, where it costs 242 ms.
 
@@ -259,11 +264,11 @@ Readings.
   costs one repair packet and one round trip.
 - The selective-repeat arm runs on a *worse* fabric (2:1 against 4:3) and
   still finishes 4.3 times sooner.
-- Consequence for the policy: the same mechanism, unchanged, buys 3.9 to
+- Consequence for the policy: the same mechanism, unchanged, gains 3.9 to
   11.1 % under go-back-N and 0.78 % under selective repeat. This is the
   boundary of the run #117 result and it should be its own slide rather
   than a footnote.
-- Every bounded-loss result our literature reviews turned up sits on the
+- Every bounded-loss result our literature reviews turned up rests on the
   left-hand side of this chart: MLT and OptiReduce against TCP or UDP with
   millisecond timeouts, our own May evaluation against its bitmap-and-probe
   rounds. Classic RoCEv2 recovery is go-back-N and a large installed base
@@ -437,12 +442,11 @@ Readings.
   while shedding's stays at 0.33 to 0.45. The two are furthest apart at
   the smallest budget, 5.3 times at 0.1, and closest at the largest, 1.9
   times at 0.6.
-- The headline budget is 0.1: 12.9 to 14.1 % of training time for 6.75 to
-  6.89 % of gradient bytes.
+- The headline budget for v1 is 0.1: 12.9 to 14.1 % of training time for
+  6.75 to 6.89 % of gradient bytes.
 - Loss at 0.1 is above the 0.7 to 3.3 % that MLT profiles as tolerable
-  for its workloads. A budget of 0.05 has not been run; it is the
-  cheapest addition to the front and the point most likely to land inside
-  that range.
+  for its workloads. Run #125 added budget 0.05 and the coin, and section
+  11 has the points that land inside that band.
 - Shedding does not overtake on time anywhere on the front. At budget 0.6
   it recovers 16.0 to 16.4 % against FORGIVE's 23.7 to 24.3 %, and it
   discards 47.4 % of data-parallel bytes against FORGIVE's 37.7 to
@@ -453,7 +457,7 @@ Readings.
 
 ---
 
-## 8. What the phase mask costs and whether it holds, run #123
+## 8. What the phase mask costs and whether it works, run #123
 
 Chart: two panels, or a table. Panel A is the cost, panel B is the
 integrity check.
@@ -517,7 +521,7 @@ Same seed with the mask removed, for contrast:
 
 Readings.
 
-- The mask costs 5.1 points of training time and buys back 4.4 points of
+- The mask costs 5.1 points of training time and returns 4.4 points of
   gradient loss on four steps out of twenty. That is the price of the
   safety property, and it is now a number rather than an assertion.
 - Prove the mask with the ledger, not with the clock. Masked runs place
@@ -624,7 +628,139 @@ Readings.
 
 ---
 
-## 11. Mechanism diagram, no data
+## 11. The coin and the small budget, run #125
+
+Chart: the same time-against-loss scatter as section 7, with a second
+series for the coin. Horizontal axis is gradient bytes forgiven as a
+share of all data-parallel bytes, 0 to 40 %. Vertical axis is training
+time recovered, 0 to 25 %. Shade 0.7 to 3.3 %, which is the band MLT
+profiles as tolerable.
+
+Worst cell of the map, `direct7` at 4:1, DCQCN, 64 ranks, three seeds per
+arm, the same seeds as run #123. The coin is Bernoulli pacing at
+probability P: a forgivable trim is forgiven with probability P and
+repaired otherwise. Loss is forgiven bytes over the 191.406 GB of
+data-parallel all-reduce bytes every run offers.
+
+Per-seed, v1 at budget 0.05 and the coin arms:
+
+| arm | seed | baseline ms | arm ms | time recovered % | forgiven bytes | loss, % of DP bytes | exempt flows re-armed |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v1, budget 0.05 | 9550582 | 1696.686 | 1551.126 | 8.58 | 7 204 777 484 | 3.764 | 33 455 |
+| v1, budget 0.05 | 23172535 | 1696.904 | 1555.305 | 8.35 | 7 157 748 556 | 3.740 | 33 466 |
+| v1, budget 0.05 | 94081284 | 1700.562 | 1565.323 | 7.95 | 7 222 088 734 | 3.773 | 35 123 |
+| P = 0.05, budget 0.1 | 9550582 | 1696.686 | 1442.968 | 14.95 | 2 340 175 808 | 1.223 | 0 |
+| P = 0.05, budget 0.1 | 23172535 | 1696.904 | 1423.858 | 16.09 | 2 524 663 516 | 1.319 | 0 |
+| P = 0.05, budget 0.1 | 94081284 | 1700.562 | 1418.140 | 16.61 | 2 457 022 172 | 1.284 | 0 |
+| P = 0.1, budget 0.1 | 9550582 | 1696.686 | 1437.038 | 15.30 | 4 988 812 508 | 2.606 | 3 |
+| P = 0.1, budget 0.1 | 23172535 | 1696.904 | 1413.479 | 16.70 | 5 588 347 452 | 2.920 | 1 |
+| P = 0.1, budget 0.1 | 94081284 | 1700.562 | 1429.070 | 15.96 | 5 046 657 774 | 2.637 | 0 |
+| P = 0.25, budget 0.2 | 9550582 | 1696.686 | 1395.609 | 17.75 | 13 760 422 954 | 7.189 | 15 |
+| P = 0.25, budget 0.2 | 23172535 | 1696.904 | 1398.132 | 17.61 | 14 519 837 176 | 7.586 | 11 |
+| P = 0.25, budget 0.2 | 94081284 | 1700.562 | 1394.943 | 17.97 | 14 150 179 262 | 7.393 | 6 |
+| P = 0.25, budget 0.05 | 9550582 | 1696.686 | 1453.651 | 14.32 | 6 208 910 776 | 3.244 | 11 922 |
+| P = 0.25, budget 0.05 | 23172535 | 1696.904 | 1467.639 | 13.51 | 5 849 444 394 | 3.056 | 11 557 |
+| P = 0.25, budget 0.05 | 94081284 | 1700.562 | 1448.326 | 14.83 | 6 192 469 436 | 3.235 | 12 053 |
+
+Each arm has 71 680 exempt flows, so the last column reads against that
+denominator. The sender-side arms of the budget 0.05 comparison
+recover 0.1 to 1.3 % for admission and 1.1 to 2.2 % for the loose
+baseline.
+
+Plot points at budget 0.1, the coin front, three seeds each. The v1 row
+comes from run #123 and the P = 0.5 and P = 0.25 rows from run #124, both
+joined by seed on the same simulator:
+
+| arm | time recovered | loss, % of DP bytes | exempt flows re-armed |
+| --- | --- | --- | --- |
+| v1, no coin | 12.9 to 14.1 % | 6.75 to 6.89 % | 35 to 37 % |
+| P = 0.5 | 13.9 to 14.8 % | 6.3 to 6.6 % | 18 to 20 % |
+| P = 0.25 | 16.0 to 16.2 % | 5.5 to 5.9 % | 7 to 8 % |
+| P = 0.1 | 15.3 to 16.7 % | 2.6 to 2.9 % | 0 to 3 flows |
+| P = 0.05 | 15.0 to 16.6 % | 1.2 to 1.3 % | none |
+
+Plot points across budgets, v1 against the coin at P = 0.25:
+
+| budget | v1 time | v1 loss | P = 0.25 time | P = 0.25 loss |
+| ---: | --- | --- | --- | --- |
+| 0.05 | 8.0 to 8.6 % | 3.74 to 3.77 % | 13.5 to 14.8 % | 3.1 to 3.2 % |
+| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 16.0 to 16.2 % | 5.5 to 5.9 % |
+| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 17.6 to 18.0 % | 7.2 to 7.6 % |
+
+Readings.
+
+- The headline candidate is P = 0.05 at budget 0.1: about 16 % of
+  training time for 1.2 to 1.3 % of gradient bytes, which is inside the
+  0.7 to 3.3 % band MLT profiles as tolerable.
+- Time is flat from P = 0.25 down to P = 0.05 while loss falls by a
+  factor of four, so the coin moves the operating point left and not
+  down.
+- Lowering the budget instead of slowing the spend costs time: v1 at
+  budget 0.05 recovers 8.0 to 8.6 % for 3.74 to 3.77 %, half the time
+  the coin recovers for three times the loss.
+- The re-arm column is the mechanism. At budget 0.05 v1 loses the
+  exemption on 47 to 49 % of its exempt flows; at budget 0.1 the coin at
+  P = 0.1 loses it on at most 3 flows of 71 680 and at P = 0.05 on none.
+- The coin at P = 0.25 dominates v1 at every budget it was run at, on
+  both axes.
+
+---
+
+## 12. The three references, run #126
+
+Chart: a four-bar panel, training time recovered against the fixed-low
+control, with the loss each reference pays printed under its bar. Worst
+cell of the map unless a row says otherwise.
+
+Zero tolerance, the arm that forgives nothing and sheds nothing, against
+the fixed-low control that sheds 0.5 %:
+
+| fabric | seed | control ms | zero ms | difference % |
+| --- | --- | ---: | ---: | ---: |
+| direct7 4:1 | 9550582 | 1696.686 | 1714.643 | -1.06 |
+| direct7 4:1 | 23172535 | 1696.904 | 1695.433 | +0.09 |
+| direct7 4:1 | 94081284 | 1700.562 | 1711.225 | -0.63 |
+| direct7 4:1 | 28410270 | 1688.397 | 1696.758 | -0.50 |
+| direct7 4:1 | 81117450 | 1709.850 | 1696.880 | +0.76 |
+| direct2 2:1 | 9550582 | 1428.604 | 1443.694 | -1.06 |
+| direct2 2:1 | 23172535 | 1417.726 | 1423.993 | -0.44 |
+| direct2 2:1 | 94081284 | 1408.884 | 1439.198 | -2.15 |
+| no incast | 31415926 | 4.200 | 4.200 | 0.00 |
+
+Forgiveness without the exemption, budget 0.1, and no controller at all:
+
+| arm | seed | baseline ms | arm ms | time recovered % | loss, % of DP bytes | bytes re-sent |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| forgive, obey DCQCN | 9550582 | 1696.686 | 1585.384 | 6.56 | 6.805 | 1.84 % |
+| forgive, obey DCQCN | 23172535 | 1696.904 | 1603.612 | 5.50 | 6.922 | 1.89 % |
+| forgive, obey DCQCN | 94081284 | 1700.562 | 1588.077 | 6.61 | 6.910 | 1.74 % |
+| no controller | 9550582 | 1696.686 | 1355.709 | 20.10 | 0 | 25.35 % |
+| no controller | 23172535 | 1696.904 | 1355.709 | 20.11 | 0 | 25.35 % |
+| no controller | 94081284 | 1700.562 | 1355.709 | 20.28 | 0 | 25.35 % |
+
+Bytes re-sent is retransmitted bytes over the 793.641 GB every run
+offers. The fixed-low control re-sends 3.48 to 3.73 % of that on the same
+cell and times out 10 042 to 10 622 times; the no-controller arm times
+out 93 times.
+
+Readings.
+
+- Zero tolerance reads -1.1 to +0.8 % of the fixed-low control on
+  `direct7` over 5 seeds and -2.2 to -0.4 % on `direct2`, so the control
+  is a true zero within the seed spread and every delta in this file
+  stands against DCQCN with no loss tolerance.
+- Forgiveness that obeys the controller recovers 5.5 to 6.6 % for 6.8 to
+  7.0 % of gradient bytes, against FORGIVE v1's 12.9 to 14.1 % for the
+  same budget and the same loss, so the exemption is about half of the
+  gain.
+- Turning the controller off entirely recovers 20.1 to 20.3 % and puts
+  25.4 % of all bytes back on the wire as repairs. FORGIVE v1 at budget
+  0.4 reaches the same 20 %, so the exemption recovers the whole of what
+  the controller costs.
+
+---
+
+## 13. Mechanism diagram, no data
 
 Three boxes left to right: sender NIC, switch, receiver NIC. Data flows
 left to right; the switch trims a payload and forwards the header; the
@@ -641,10 +777,11 @@ Three numbered points beside it.
    a (destination, step) are bounded by the budget times the eligible
    bytes for that pair. Counters only grow, and the entry closes when
    that rank finishes the step. Critical steps carry a tighter budget.
-3. An eligible flow ignores rate cuts until the receiver refuses it.
-   While exempt, the sender discards every congestion notification. The
-   receiver's first repair request re-arms it, so an exemption cannot
-   outlive the budget that justified it.
+3. An eligible flow ignores rate cuts while the receiver still has
+   allowance to forgive. The receiver grants the exemption on the
+   acknowledgements it already sends, and it withdraws the exemption with
+   one bit the moment the step's allowance is spent, so an exemption
+   cannot outlive the budget that justified it.
 
 Supporting fact for the design choice, worth a line on the slide: the ECN
 marking threshold is 800 KB at 400 Gb/s and the trim point is 4 MiB, so
@@ -656,7 +793,7 @@ provoked could not move the window.
 
 ---
 
-## 12. Numbers that should not be plotted
+## 14. Numbers that should not be plotted
 
 Keep these out of the deck, and be ready to say why.
 

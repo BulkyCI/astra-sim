@@ -1,18 +1,18 @@
 # Phase-aware bounded loss at LLM scale: what it buys, and where it stops
 
-Progress review for Yashar Ganjali, 9 September 2026.
+Progress review for Yashar Ganjali and Zechen Ma, 18 September 2026.
 
 Prepared by Joe Fang, in collaboration with Zechen Ma. The simulation
-platform, the four cluster runs and the analysis reported here are my
+platform, the cluster runs and the analysis reported here are my
 work in this repository; the DBLP line of work they revise is joint.
 
 Results-first framing. The measured result is the centre; the transport
-regime it holds on is stated in the same breath; the protocol work that
-carries it onto next-generation fabrics is future work at the end.
+regime where it holds is stated in the same breath; the protocol work
+that extends it to next-generation fabrics is future work at the end.
 
-Fork of ASTRA-sim at `518bd51`, our first commit `f31d865` on 20 July
-2026, 184 commits to 8 September, plus a fork of the bundled ns-3 RDMA
-backend. Four cluster runs, about 180 simulated configurations.
+A fork of ASTRA-sim at `518bd51` and a fork of its bundled ns-3 RDMA
+backend, from 20 July 2026 to today. Eight cluster runs, numbered #117 to
+#126, over about 300 simulated configurations.
 
 **Terms used throughout.** An *arm* is one simulated configuration; a
 *comparison* is a set of arms sharing a seed and a random selection
@@ -47,14 +47,13 @@ delivers:
 - **9.42 %** if you drop the phase protection entirely, CI [7.03,
   11.82] %, which prices what the protection costs.
 
-And we can now say why, which the May testbed could not. The saving
-tracks the packet trims the policy prevented, at 11.9 ms per million,
-correlation 0.93 across seeds. It does not track the bytes discarded at
-all, correlation -0.01. Discarding 1.98 GiB of gradient removed 156 GiB
+And we can now say why, which the May testbed could not. Packet trims
+prevented explain the saving, at 11.9 ms per million and correlation 0.93
+across seeds; discarded bytes do not, at correlation -0.01. Discarding 1.98 GiB of gradient removed 156 GiB
 from the wire.
 
 We also mapped the boundary. Run the same policy over selective repeat
-instead of go-back-N and it buys 0.78 %. That boundary is a finding, and
+instead of go-back-N and it gains 0.78 %. That boundary is a finding, and
 it is what the last three slides are about.
 
 ---
@@ -130,9 +129,6 @@ it.
 
 ## 6. The gain is steady state, not the burst
 
-This surprised us, and it is worth a slide because it changes what the
-mechanism is for.
-
 Eighty-four percent of the window gain accrues over steps 4 to 17, at
 about 30 ms per permissive step. The burst step and its aftermath
 together improve by 58 ms with a confidence interval of [-68, 184] ms,
@@ -160,10 +156,9 @@ is still full when the sender rewinds, so the re-sent bytes are trimmed
 again. On this configuration, discarding one gradient byte removed about
 79 bytes from the wire.
 
-This is the honest mechanism story, and it is stronger than a bare
-percentage: it says exactly which property of the transport the gain
-comes from, which means it also tells you where the gain will and will
-not appear.
+The mechanism names the property of the transport the gain comes from,
+so it also says where the gain will not appear, and it correctly
+predicted the selective-repeat arm.
 
 ---
 
@@ -180,14 +175,12 @@ is the mean over seeds of each per-seed percentage, so it does not equal
 the ratio of the first column's entries.
 
 Read the third row as the price list. Dropping ten percent everywhere,
-with no protection at all, buys 9.42 %. The phase bound gives up most of
+with no protection at all, recovers 9.42 %. The phase bound gives up most of
 that: it costs 242 ms across steps 1 to 3, which is close to the whole
 292 ms the policy gains, and it costs nothing measurable at the tail.
 
-That is the honest shape of the trade, and it is the argument for phase
-awareness rather than against it. The claim is not that the schedule is
-free. It is that most of the achievable gain sits in the permissive steps
-anyway, so a schedule buys the early phase back cheaply.
+The schedule costs capacity, but most achievable gain comes from
+permissive steps, so it restores the early phase cheaply.
 
 ---
 
@@ -210,9 +203,8 @@ cell reaches a trim ratio of 0.24 against the 0.5 the rule asked for, and
 the worst burst excess is 0.62 % of the window against the 20 % the rule
 asked for.
 
-So the result on slide 5 is a property of one transport regime, and we
-know where its edge is. Presenting it any other way would not
-survive a referee, and we would rather say it than have it said to us.
+The result on slide 5 is a property of one transport regime, and the
+selective-repeat arm defines its edge.
 
 ---
 
@@ -269,35 +261,74 @@ not retransmission, it is the congestion controller. On the worst cell of
 our map, DCQCN cuts packet trimming by a factor of eight and lengthens
 the training window by 24 %. Its tail is the rate cut, not the repair.
 
-So we prototyped the version of bounded loss that aims at that instead.
-The receiver forgives what the fabric trimmed, inside a per-rank,
-per-step byte budget, and a flow with unspent budget ignores rate cuts
-until the receiver's first repair request re-arms it. Nothing new goes on
-the wire: the revocation signal is a message the protocol already has.
+So we built the version of bounded loss that aims at that instead, and
+the design now stands as follows. Each receiving rank opens one allowance
+per training step, a fraction p of the bytes that step owes it, pooled
+across every sender into that rank. On a trimmed packet the receiver
+flips a coin at probability P, and if the coin says yes and the bytes
+already delivered have earned enough allowance, it forgives the missing
+range and acknowledges it as if it had arrived; otherwise it asks for the
+repair. The allowance is gone once forgiven bytes plus the receiver's
+outstanding holes exceed p times what the rank is owed, the receiver says
+so in one bit, and the sender obeys its controller again from the latest
+report onward. The receiver also stops a sender the moment 1 - p of that
+sender's share for the step has arrived. On the application side we
+assume the framework divides each reduce-scatter element by the
+contributions that arrived, an assumption whose conservative bound is our
+own May GPT-2 runs, which survived 40 % with no rescale. Every rank is
+certified after every step to have received at least 1 - p of what it was
+owed. Nothing new goes on the data path: the whole protocol is two bits
+on messages the transport already sends.
 
-This is the piece we would present as ongoing, not as a result.
+The time comes from how long a sender may ignore the congestion
+controller; forgiveness is the currency that licenses it, and the coin
+spends that currency slowly, so the licence lasts the whole step at
+almost no loss.
 
 ---
 
-## 13. Preliminary evidence that it works
+## 13. Evidence that it works, and what it is measured against
 
 ![Budget sweep](figures/dose-front.svg)
 
-One wave, 84 arms on the worst cell of the map, three seeds per budget.
+Worst cell of the map, three seeds per arm, budget 0.1 unless a row says
+otherwise.
 
-At a loss budget of 0.1 the exempt arm recovers 12.9 to 14.1 % of the
-training window for 6.75 to 6.89 % of data-parallel bytes, against 2.4 to
-3.3 % for sender-side shedding at the same budget. Forgiven loss stays
-roughly proportional to the cap, 68 to 86 % of it at every budget, so the
-budget bounds the loss. Dividing time recovered by bytes
-discarded, both in percent, gives 1.96 for forgiveness at budget 0.1
-against 0.37 for shedding, and the gap narrows to 1.9 times at budget
-0.6.
+| arm | training time | gradient lost |
+| --- | ---: | ---: |
+| v1, no coin | 12.9 to 14.1 % | 6.75 to 6.89 % |
+| coin at P = 0.25 | 16.0 to 16.2 % | 5.5 to 5.9 % |
+| coin at P = 0.1 | 15.3 to 16.7 % | 2.6 to 2.9 % |
+| coin at P = 0.05 | 15.0 to 16.6 % | 1.2 to 1.3 % |
+| v1 at budget 0.05 | 8.0 to 8.6 % | 3.74 to 3.77 % |
+| sender-side shedding at 0.1 | 2.4 to 3.3 % | 7.7 % |
+
+The coin keeps the time gain flat from P = 0.25 down to P = 0.05 while
+the loss falls by a factor of four, because spending the allowance slowly
+keeps the exemption alive for the whole step: at P = 0.1 and P = 0.05 all
+but 3 exempt flows of 71 680 keep it. Lowering the budget instead costs
+time, as the v1 row at budget 0.05 shows. The headline candidate is
+P = 0.05 at a budget of 0.1, about 16 % of training time for 1.2 to 1.3 %
+of gradient bytes, inside the 0.7 to 3.3 % band MLT profiles as
+tolerable, against our own May GPT-2 runs surviving 40 %.
+
+Three references say what those deltas are against. An arm that tolerates
+no loss at all reads within -1.1 to +0.8 % of our fixed-low control on
+this cell over 5 seeds, so every delta stands against DCQCN with no loss
+tolerance. Forgiveness that obeys the controller recovers 5.5 to 6.6 %
+for 6.8 to 7.0 % of gradient bytes, so the exemption is about half of the
+gain. No controller at all recovers 20.1 to 20.3 % and puts 25.4 % of
+every byte back on the wire as repairs, and FORGIVE v1 at budget 0.4
+reaches the same 20 % while the fabric keeps its controller.
 
 Three seeds, one cell, one congestion controller, per-flow ECMP rather
-than packet spraying. Preliminary is the right word. But it says the
-idea survives the move to selective repeat, which is the thing slide 9
-put in doubt.
+than packet spraying. Run #127 puts the whole design of record on the
+cluster tonight, 21 arms at budget 0.1: the law's v1 point, the coin, the
+stop, both together, the owed ablation and a reference arm that never
+returns to the controller. It answers which piece earns the time, and it
+is read with the tensor-parallel all-reduce span and re-sent bytes
+against the control, which is how we price what an exempt sender costs
+the rest of the fabric. No number in this deck comes from it.
 
 ---
 
@@ -332,7 +363,8 @@ put in doubt.
 | 1 | Re-run the budget grid matched | one cluster day | the only broken number in run #117 |
 | 2 | Five seeds on the fan-in and burst sweeps | 40 arms, one week | turns the directional sweeps into results |
 | 3 | Tolerance replay on GPUs | 8 GPUs, one to two weeks, needs a collaborator | export the discarded byte ranges, zero those elements in a DDP hook, train a 1B-class model against an unmodified run. This is the only thing that can close the accuracy claim, and it is independent of the cluster |
-| 4 | FORGIVE to a second congestion controller and a sprayed fabric | one to two months | the future-work section, or the next paper |
+| 4 | Read run #127 and fix the design of record | one cluster day, already dispatched | says which piece of FORGIVE earns the time, and prices what an exempt sender costs the rest of the fabric |
+| 5 | FORGIVE to a second congestion controller and a sprayed fabric | one to two months | the future-work section, or the next paper |
 
 ---
 
@@ -344,7 +376,7 @@ put in doubt.
    FORGIVE to mature and write the Ultra Ethernet paper instead, which is
    a stronger paper and roughly three months further out.
 2. **A venue.** The result is a mechanism study in simulation with a seed
-   band and a named regime. We would like your read on where that lands.
+   band and a named regime. We would like your read on where that belongs.
 3. **A GPU collaborator for item 3 above.** It is the one gap that no
    amount of cluster time can close.
 
@@ -356,9 +388,11 @@ put in doubt.
 | --- | --- | --- | --- |
 | #117 | 1 Sep | `zuihrl5stp6ulacoogghyp4loy7xsjpj` | the sixteen-seed 16-rank configuration, the sweeps, and the selective-repeat control |
 | #120 | 6 Sep | `uwlaookzhemmwabtbwfe2yhyxepupnmw` | eight-cell regime map |
-| #121 | 7 Sep | `b363b3rri7pbgbaudfh3tbnysiranl66` | FORGIVE with congestion exemption |
-| #122 | 8 Sep | `rt4732ejzjqe2hkar2bturuv3qav6pv3` | budget sweep and phase-mask ablation |
 | #123 | 14 Sep | run `34867374086` | the same front with the revocation corrected |
+| #124 | 15 Sep | main `55d5767` | Bernoulli pacing at 0.5 and 0.25 |
+| #125 | 16 Sep | main `8213401` | budget 0.05 and the coin below 0.25 |
+| #126 | 16 Sep | main `a1b30b0` | zero tolerance, forgiveness without the exemption, no controller |
+| #127 | running | the design of record | 21 arms at budget 0.1, no number quoted here |
 
 Every figure recomputes from a bundle. Per-seed values for slides 5 and 7
 come from the sixteen `llama3-70b-16-comparison` bundles of run #117;
@@ -367,6 +401,7 @@ paired per-seed differences.
 
 Supporting documents: `run-117-readout.md` for the full run,
 `run-120-regime-map.md` for the map, `run-123-readout.md` for the
-corrected FORGIVE figures, `forgive-protocol.md` for the specification,
+corrected FORGIVE figures, `forgive-design-plain.md` for the design of
+record, `results-ledger.md` for which number is quotable,
 `roadmap-to-full-paper.md` for the longer plan. The companion deck `slides-2026-09-progress.md` presents the same work with
 FORGIVE as the centre.

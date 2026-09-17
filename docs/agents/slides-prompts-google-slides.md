@@ -1,4 +1,4 @@
-Build a complete eight-slide presentation from the specification below.
+Build a complete nine-slide presentation from the specification below.
 
 Build every slide in one pass, in order, without stopping. Do not ask
 clarifying questions, do not summarise the specification back, and do not
@@ -68,11 +68,11 @@ RULES FOR EVERY SLIDE
    when it can stand alone.
 6. Forbidden everywhere: clip art, icons, stock photography, emoji, 3D
    effects, drop shadows on text, gradients, and pill-shaped callouts
-   other than the status chips specified on slide 8.
+   other than the status chips specified on slide 9.
 7. Charts carry no chart junk: no legend boxes, no axis borders on all
    four sides, no data labels on every point. Label each series directly
    beside its own line or bar.
-8. Slide numbers bottom right, 14px, ink at 30%, on slides 2 through 8
+8. Slide numbers bottom right, 14px, ink at 30%, on slides 2 through 9
    only.
 9. The audience did not run these experiments. Every axis, series name and
    label must be readable without that context, so name the quantity in
@@ -82,7 +82,7 @@ RULES FOR EVERY SLIDE
    regime or drain as labels without saying what they are.
 
 ===============================================================
-SLIDE 1 of 8
+SLIDE 1 of 9
 ===============================================================
 
 LAYOUT: full-bleed ink panel (#141413). All text in paper (#faf9f5). No
@@ -97,8 +97,8 @@ SUBTITLE, directly beneath, 34px weight 400, paper at 70%:
 
 BOTTOM LEFT, 20px, three tight lines:
   "Joe Fang, in collaboration with Zechen Ma"
-  "Progress review for Yashar Ganjali"
-  "9 September 2026"
+  "Progress review for Yashar Ganjali and Zechen Ma"
+  "18 September 2026"
 
 BOTTOM RIGHT, a horizontal strip of three statistics, each a figure above
 a label, 58px bold figure and 16px label, 58px apart:
@@ -112,7 +112,7 @@ SPEAKER NOTE: "This is the revision of our own DBLP work. Everything here
 is simulation on a fabric we built. Nothing here speaks to accuracy."
 
 ===============================================================
-SLIDE 2 of 8
+SLIDE 2 of 9
 ===============================================================
 
 This slide states the motivation for the whole deck. Each card names a
@@ -145,9 +145,9 @@ ink-30 at its top left, then a bold 20px line, then 20px body.
     selective repeat limits it."
 
   Card 05, "DBLP under congestion control":
-    "FORGIVE lets DBLP run under congestion control: the
-    receiver accepts trimmed loss, counts the budget in bytes, and revokes
-    sender exemptions."
+    "FORGIVE lets DBLP run under congestion control: the receiver
+    accepts trimmed loss, counts the budget in bytes, and withdraws a
+    sender's exemption once that budget is spent."
 
 CLOSING LINE, centred beneath the row:
   "The simulation includes fabric loss, 64 ranks, and congestion control."
@@ -159,7 +159,7 @@ decision rule written before it was dispatched, and the rule chose the
 next run."
 
 ===============================================================
-SLIDE 3 of 8
+SLIDE 3 of 9
 ===============================================================
 
 Each band names a model dependency, not an implementation task.
@@ -169,14 +169,14 @@ HEADLINE, 34px bold:
 
 VISUAL: a horizontal timeline spanning the full content width. The axis
 is a 2px ink rule with ticks at 20 July, 31 July, 11 August, 22 August,
-1 September and 9 September, labelled at 16px beneath.
+1 September and 16 September, labelled at 16px beneath.
 
 ABOVE THE AXIS: four stacked bands, each an ink-12 rectangle with a 1px
 ink-30 border, 24px tall, labelled inside at 16px bold, spanning:
   "Model packet loss and recovery"      20 Jul to 11 Aug
   "Pair runs deterministically"          9 Aug to  1 Sep
   "Measure seed-dependent effects"       1 Sep to  7 Sep
-  "Model congestion control"             5 Sep to  9 Sep
+  "Model congestion control"             5 Sep to 16 Sep
 
 BETWEEN BANDS AND AXIS: small ink dots on the axis with 16px labels
 above, joined by 1px ink-30 leader lines:
@@ -188,13 +188,14 @@ above, joined by 1px ink-30 leader lines:
   17 Aug  "pin the protected-step schedule"
   22 Aug  "choose seeds"
    5 Sep  "add DCQCN and FORGIVE"
+  14 Sep  "revoke the exemption on a spent budget"
 
 BELOW THE AXIS: four solid ink diamonds on 2px ink stems, each with a
 bold 20px label and a 16px sublabel:
   1 Sep  "16 paired seeds"  /  "go-back-N recovery"
   6 Sep  "8 configurations"  /  "selective repeat"
-   7 Sep  "FORGIVE"  /  "3 seeds, 1 fabric, 1 controller"
-  8 Sep  "Loss-budget sweep"  /  "training time and gradient loss"
+  14 Sep  "FORGIVE"  /  "3 seeds, 1 fabric, 1 controller"
+  16 Sep  "Paced forgiveness"  /  "training time and gradient loss"
 
 CLOSING LINE:
   "Shared seeds and random streams let paired run times be subtracted."
@@ -202,12 +203,12 @@ CLOSING LINE:
 SPEAKER NOTE: "ASTRA-sim's ns-3 patch defaults to lossless RoCEv2. Turning off PFC
 and adding trimming is one change, from lossless RDMA to lossy RDMA, and
 it is the change the whole question depends on. Selective repeat came
-after, and it is what slide 6 turns out to be about. I did not expect the
-second band to take a month, but a comparison that runs for a day is only
-useful if it survives the runner dying halfway through."
+after, and it is what slide 6 turns out to be about. Each paired result
+shares a seed and a random stream, and a comparison runs for about five
+hours on a runner minted for that job."
 
 ===============================================================
-SLIDE 4 of 8
+SLIDE 4 of 9
 ===============================================================
 
 The main result. The chart is the slide.
@@ -266,7 +267,7 @@ are exactly the ones the policy considers. Quote the slowest all-reduce
 as 153 ms, never as a percentage."
 
 ===============================================================
-SLIDE 5 of 8
+SLIDE 5 of 9
 ===============================================================
 
 Two scatter panels side by side, equal width, sharing one vertical axis
@@ -326,7 +327,7 @@ percentage, and it is what told us where the gain would not appear, which
 is the next slide."
 
 ===============================================================
-SLIDE 6 of 8
+SLIDE 6 of 9
 ===============================================================
 
 This slide states the scope of the result. Selective repeat was our own
@@ -387,70 +388,130 @@ tolerance loses most of its value in that move is worth knowing on its
 own, and it is what motivated the mechanism on the next slide."
 
 ===============================================================
-SLIDE 7 of 8
+SLIDE 7 of 9
 ===============================================================
 
-Future work, and the last gap the deck closes. Every modern fabric runs
-congestion control, so DBLP has to work under one. Mark the numbers
-preliminary in the visual itself, not only in the notes.
+The mechanism, and the whole protocol in three facts. Every modern fabric
+runs congestion control, so DBLP has to work under one.
 
 HEADLINE, 34px bold:
-  "FORGIVE applies DBLP under congestion control"
+  "FORGIVE lets a sender ignore congestion control while the receiver
+  still has loss budget"
 
-LEFT HALF: three stacked statements, 22px apart, each with its key figure
-at 34px bold on its own line above 20px body text.
+VISUAL, occupying the left two thirds: three boxes left to right, equal
+size, 16px radius, 1px ink border, paper fill, labelled at 20px bold
+"Sender NIC", "Switch" and "Receiver NIC". A 3px ink-100 arrow runs left
+to right beneath the boxes, labelled at 16px "gradient data". Above the
+switch, a 2px ink-55 arrow turns down and stops, labelled "the switch
+drops the payload and forwards the header". Two 2px ink-30 arrows return
+right to left from the receiver to the sender, labelled at 16px:
+  "repair this range"
+  "this range is forgiven, and you may ignore rate cuts"
 
-  "24 %"
-  "With selective repeat, DCQCN lengthens the 20-step run on the most
-  congested configuration while reducing switch-trimmed bytes 8x. Rate
-  reductions create the slowdown rather than repair."
+THREE SUPPORTING LINES on the right third, 20px, each with its key phrase
+at 34px bold on its own line above 20px body:
 
-  "12.9 to 14.1 %"
-  "FORGIVE recovers time when the receiver accepts trimmed loss and senders
-  with budget remaining ignore rate reductions until the receiver refuses.
-  FORGIVE uses 6.75 to 6.89 % of data-parallel bytes at a budget of 0.1."
+  "one budget per rank per step"
+  "Each receiving rank may forgive a fraction p of the bytes that step
+  owes it, pooled across every sender into that rank."
 
-  "5.3x"
-  "At a budget of 0.1, FORGIVE recovers 5.3 times more time per discarded
-  gradient percent than sender drop. The margin falls to 1.9 times at a
-  budget of 0.6."
+  "a coin at probability P"
+  "The receiver forgives a trimmed range when the coin says yes and the
+  bytes already delivered have earned the allowance, and asks for the
+  repair otherwise."
 
-RIGHT HALF: a scatter chart with two connected series, under a section
-label reading "PRELIMINARY: 3 SEEDS, 1 FABRIC, 1 CONGESTION
-CONTROLLER". Horizontal axis "Gradient bytes discarded (% of all
-data-parallel bytes)", ticks at 0, 10, 20, 30, 40 and 50. Vertical axis "Training time
-recovered (%)", ticks at 0, 4, 8, 12, 16, 20 and 24. Shade the band from
-0.7 % to 3.3 % in ink-12, labelled at 14px "MLT (NSDI 2024) reports
-models tolerating 0.7 % to 3.3 %". Draw a dashed ink-30 vertical line at
-10 %, labelled "MLT's ceiling at a fixed quality target".
+  "two bits, and nothing new on the wire"
+  "The receiver withdraws the exemption with one bit once the budget is
+  spent, and the sender obeys its controller for the rest of the step."
+
+CLOSING LINE:
+  "Every rank is certified after every step to have received at least
+  1 - p of what it was owed, and a run that breaks that certificate
+  fails."
+
+SPEAKER NOTE: "The time comes from how long a sender may ignore the
+congestion controller; forgiveness is the currency that licenses it, and
+the coin spends that currency slowly, so the licence lasts the whole step
+at almost no loss. The receiver also stops a sender the moment 1 - p of
+that sender's share for the step has arrived. On the application side we
+assume the framework divides each reduce-scatter element by the
+contributions that arrived; the conservative bound for that assumption is
+our own May GPT-2 runs, which survived 40 % with no rescale at all."
+
+===============================================================
+SLIDE 8 of 9
+===============================================================
+
+The numbers. Mark them preliminary in the visual itself, not only in the
+notes.
+
+HEADLINE, 34px bold:
+  "Pacing the forgiveness recovers 16 % of training time for 1.3 % of
+  gradient bytes"
+
+VISUAL, occupying the left two thirds: a scatter chart with three
+connected series, under a section label reading "PRELIMINARY: 3 SEEDS,
+1 FABRIC, 1 CONGESTION CONTROLLER". Horizontal axis "Gradient bytes
+discarded (% of all data-parallel bytes)", ticks at 0, 10, 20, 30, 40 and
+50. Vertical axis "Training time recovered (%)", ticks at 0, 4, 8, 12,
+16, 20 and 24. Shade the band from 0.7 % to 3.3 % in ink-12, labelled at
+14px "MLT (NSDI 2024) reports models tolerating 0.7 % to 3.3 %".
 
   Series A, ink-100, solid line with filled circles, labelled directly
-  "FORGIVE", points as (x, y):
-    (6.8, 13.4)   (11.7, 16.5)   (21.5, 20.3)   (38.1, 24.0)
+  "FORGIVE with the coin, budget 0.1", points as (x, y), one per coin
+  probability, 0.05 then 0.1 then 0.25:
+    (1.3, 15.9)   (2.7, 16.0)   (5.7, 16.1)
 
-  Series B, ink-55, solid line with hollow circles, labelled directly
+  Series B, ink-55, solid line with filled circles, labelled directly
+  "FORGIVE without the coin, budget 0.05 to 0.6", points as (x, y):
+    (3.8, 8.3)   (6.8, 13.4)   (11.7, 16.5)   (21.5, 20.3)   (38.1, 24.0)
+
+  Series C, ink-30, solid line with hollow circles, labelled directly
   "Sender drop", points as (x, y):
     (7.7, 2.9)   (15.7, 5.3)   (31.5, 11.4)   (47.9, 16.2)
 
-CLOSING LINE:
-  "Discarded gradient bytes stay proportional to the budget, 68 to 86 % of
-  the cap at every setting, so the budget bounds the loss."
+READING LINE directly beneath the chart, 16px, ink at 55%:
+  "Further right means more gradient thrown away and higher means more
+  training time recovered, so the coin moves the operating point left at
+  the same height."
 
-SPEAKER NOTE: "Present this as ongoing, not as a result. Read the chart
-as: further right means more gradient thrown away, higher means more
-training time back, so the better mechanism is the one that climbs
-fastest while staying left. The design borrows from transports the field
-already trusts: the receiver drives
-repair the way selective acknowledgement does, the budget is a ledger
-rather than a probability, and the exemption revokes itself on the
-receiver's first refusal, so it cannot outlive what justified it.
-Dropping at the sender never overtakes on time across the budgets we
-ran: at a budget of 0.6 it recovers 16.0 to 16.4 % while throwing away
-47.4 % of every gradient, against FORGIVE's 23.7 to 24.3 % for 37.7 to
-38.6 %."
+THREE SUPPORTING LINES on the right third, 20px, each with its key figure
+at 34px bold on its own line above 20px body:
+
+  "4x less loss"
+  "Between a coin of 0.25 and a coin of 0.05 the gradient loss falls by a
+  factor of 4 and the training time recovered stays inside the spread
+  across seeds."
+
+  "-1.1 to +0.8 %"
+  "An arm that tolerates no loss at all reads within this band of our
+  baseline over 5 seeds, so every number here stands against DCQCN with
+  no loss tolerance."
+
+  "5.5 to 6.6 % against 20.1 to 20.3 %"
+  "Forgiveness that obeys the controller recovers the first figure;
+  turning the controller off entirely recovers the second and puts 25.4 %
+  of every byte back on the wire as repairs."
+
+CLOSING LINE:
+  "Run #127 measures the whole design on the cluster tonight, and no
+  number on this slide comes from it."
+
+SPEAKER NOTE: "The headline candidate is a coin of 0.05 at a budget of
+0.1: about 16 % of training time for 1.2 to 1.3 % of gradient bytes,
+which is inside the band MLT profiles as tolerable, against our own May
+GPT-2 runs surviving 40 %. Without the coin the same budget costs 6.75 to
+6.89 % of gradient bytes for 12.9 to 14.1 % of the time, and lowering the
+budget to 0.05 instead recovers only 8.0 to 8.6 % for 3.74 to 3.77 %. The
+mechanism is in the exemption: at a coin of 0.1 and 0.05 all but 3 exempt
+flows of 71 680 keep their exemption for the whole step, against 35 to
+37 % losing it without the coin. Run #127 runs 21 arms at budget 0.1 on
+the design of record and its ablations, read with the tensor-parallel
+all-reduce span and re-sent bytes against the baseline, which is how we
+price what an exempt sender costs the rest of the fabric."
 
 ===============================================================
-SLIDE 8 of 8
+SLIDE 9 of 9
 ===============================================================
 
 HEADLINE, 34px bold:
@@ -490,7 +551,7 @@ FINAL CHECK BEFORE YOU FINISH
 Verify each of these across the finished deck, and fix anything that
 fails rather than reporting it:
 
-  Eight slides exist, no more and no fewer.
+  Nine slides exist, no more and no fewer.
   Slide 1 is a full-bleed ink panel; the rest are paper.
   Every headline is a plain declarative sentence with an active verb.
   Every slide except 1 has exactly one visual and one closing line in ink
@@ -510,11 +571,13 @@ packet trimming. Selective repeat matches modern recovery, and the
 simulation runs at 64 ranks. Each paired result shares a seed and random
 stream, and ephemeral DCS runners archive both results. Selective repeat
 reduces DBLP's 3.9 to 11.1 % go-back-N relief to 0.78 %, which defines the
-result's scope. FORGIVE applies DBLP under congestion control.
+result's scope. FORGIVE applies DBLP under congestion control, and pacing
+its forgiveness with a coin recovers about 16 % of training time for 1.2
+to 1.3 % of gradient bytes.
 
-Context, in case a caption needs it. The numbers come from five cluster
+Context, in case a caption needs it. The numbers come from eight cluster
 runs of an ASTRA-sim and ns-3 simulation on a University of Toronto
-cluster, between 1 and 14 September 2026. Each result is a pair of
+cluster, between 1 and 16 September 2026. Each result is a pair of
 simulated runs that share a seed and a random stream, so their times can
 be subtracted. Trimming is a switch discarding a packet's payload and
 forwarding its header, which is how this fabric signals congestion.

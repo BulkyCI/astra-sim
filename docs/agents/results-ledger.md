@@ -26,7 +26,7 @@ exempt arm.
 | #122 | 2026-09-08 | 942f895, revocation defect | the dose front, budgets 0.1 to 0.6 and the mask ablation, 14 records | same defect; the "loss levels off at 9.3 %" reading was the defect's signature | its exempt arm by #123; baseline, admission and fixed-high columns stand and are byte-identical there |
 | #123 | 2026-09-14 | main c6855f0, ns-3 9717200cc | FORGIVE v1 with the revocation corrected: the dose front, the mild cell, the control, 21 records, 84 arms | the control sheds 0.5 % at p 0.005 rather than zero; the contract was verified after the fact (section 4) | nothing; this is the v1 reference for every later join, pending #126's zero reference for the baseline sentence |
 | #124 | 2026-09-15 | main 55d5767, ns-3 16d7c9d4d | v2 round 1 at budget 0.1: Bernoulli 0.5 and 0.25 stand; the other twelve arms measured mechanisms since deleted | see section 3 | |
-| #125 | 2026-09-16 | main 8213401 | v2 round 2: the budget 0.05 comparison, Bernoulli 0.1 and 0.05 at 0.1, Bernoulli 0.25 at 0.05 and 0.2, 24 arms | in flight; its cluster analyzer predates the hard law, so every bundle is certified locally with the 87ad3ae analyzer before a number is read | |
+| #125 | 2026-09-16 | main 8213401 | v2 round 2: the budget 0.05 comparison, Bernoulli 0.1 and 0.05 at 0.1, Bernoulli 0.25 at 0.05 and 0.2, 24 arms | read 2026-09-17, all 24 arms certified locally (worst cell 0.950 at budget 0.05, 0.94 to 0.98 under the coin at 0.1); measured on the same rules as #123 and #124 (sticky coin, one-way exemption, no exemption on critical steps) | nothing; #127 re-measures the v1 point and the coin under the design of record |
 | #126 | 2026-09-16 | main a1b30b0 | the references: zero tolerance at nine (fabric, seed) pairs, forgive-but-obey-DCQCN at 0.1, no controller at all, 15 single arms | read 2026-09-16, all 15 certified locally (recovery arms verified at 0.9, zero arms not applicable) | nothing |
 | #127 | pending | after sections 9 and 10 of the round-2 doc | one wave, 18 single arms at budget 0.1: the owed law's v1 point, the accounted ablation, Bernoulli 0.25 on each under the fresh coin, the step stop, and arm D (never re-engage) | the v1 point re-measures #123's configuration under the receiver-granted exemption and refusal-based revocation; read with TP all-reduce span and re-sent bytes per arm | |
 
@@ -61,18 +61,20 @@ certified arm.
 | the control is a true zero | #126 against #123 | zero tolerance within -1.1 to +0.8 % of the fixed-low control on `direct7` (5 seeds), -2.2 to -0.4 % on `direct2`; every delta stands as "against DCQCN with no loss tolerance" |
 | forgiveness alone | #126 against #123 | forgive but obey DCQCN at 0.1: 5.5 to 6.6 % for 6.8 to 7.0 % loss; the exemption roughly doubles it |
 | the no-controller ceiling | #126 | 20.1 to 20.3 % faster than the control on three seeds, 25.4 % of bytes re-sent; v1 at 0.4 reaches the same 20 % |
+| v1 at budget 0.05 | #125 | 8.0 to 8.6 % for 3.74 to 3.77 % loss, 47 to 49 % of exempt flows re-armed; admission at 0.05 recovers 0.1 to 1.3 % |
+| the coin below 0.25 | #125 against #123 | at budget 0.1: P = 0.1 gives 15.3 to 16.7 % for 2.6 to 2.9 % loss, P = 0.05 gives 15.0 to 16.6 % for 1.2 to 1.3 % loss, no exempt flow re-armed at either; the time gain is flat from P = 0.25 down while loss falls with P |
+| the coin across budgets | #125 | P = 0.25 at budget 0.2: 17.6 to 18.0 % for 7.2 to 7.6 % (v1 there: 16.0 to 16.7 % for 11.1 to 12.2 %); at budget 0.05: 13.5 to 14.8 % for 3.1 to 3.2 % (v1: 8.0 to 8.6 % for 3.8 %) |
 
 ## 6. What is not quotable yet
 
 - The receiver-local law's v1 point: no number until #127.
-- Anything below budget 0.1 or below Bernoulli 0.25: #125.
-- The step stop: no number until #127.
+- The step stop, the receiver-local law's v1 point, and the coin under the design of record: no number until #127.
 - The 9.3 % ceiling: not a result; it was the defect.
 
 ## 7. Documents and where they stand
 
-`figure-data.md`, the two decks, the slides prompt and `forgive-protocol.md`
-quote #123 for every v1 figure and one sentence each saying #121 and #122
-predate the fix. None of them yet contains a v2 number; those are recorded in
-[forgive-v2-round2.md](forgive-v2-round2.md) until #125, #126 and #127
-are read, after which the decks get one v2 slide.
+`figure-data.md` (sections 11 and 12), the two decks and the slides
+prompt quote #123, #125 and #126 as read above, state the design of
+record in one paragraph, and name #127 as running with no number quoted.
+`forgive-protocol.md` and `forgive-design-plain.md` describe the
+protocol as built at `59cf16c`. No document keeps a pre-fix sentence.

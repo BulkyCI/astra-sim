@@ -35,6 +35,7 @@ small while retaining the non-obvious project decisions.
 | Changing the receiver verdict after the v1 fix: the receiver-local budget law, Bernoulli pacing, the cap's base and the step stop, with the arms that price them | [FORGIVE v2 design](forgive-v2-design.md) |
 | Reading run #123, FORGIVE v1 with the revocation corrected, and the headline moved to budget 0.1 | [Run #123 readout](run-123-readout.md) |
 | Reading the whole FORGIVE design in plain words, every rule and every assumption, with what is open | [FORGIVE in plain words](forgive-design-plain.md) |
+| The morning summary for the 2026-09-17 meeting: headline table, what the references settled, what #127 measured, the open decisions | [Morning summary 2026-09-17](morning-2026-09-17.md) |
 | Deciding which number is quotable: every run since #117 with its code, its caveat, and what replaces it | [Results ledger](results-ledger.md) |
 | Reading run #124 and planning round 2: Bernoulli pacing wins, the one budget law, the cap's base and the step stop | [FORGIVE v2 round 2](forgive-v2-round2.md) |
 | Compiling the ns-3 backend on a machine without root or system protobuf/boost/MPI | [Rootless ephemeral build](rootless-ephemeral-build.md) |

@@ -307,10 +307,13 @@ The coin keeps the time gain flat from P = 0.25 down to P = 0.05 while
 the loss falls by a factor of four, because spending the allowance slowly
 keeps the exemption alive for the whole step: at P = 0.1 and P = 0.05 all
 but 3 exempt flows of 71 680 keep it. Lowering the budget instead costs
-time, as the v1 row at budget 0.05 shows. The headline candidate is
-P = 0.05 at a budget of 0.1, about 16 % of training time for 1.2 to 1.3 %
-of gradient bytes, inside the 0.7 to 3.3 % band MLT profiles as
-tolerable, against our own May GPT-2 runs surviving 40 %.
+time, as the v1 row at budget 0.05 shows. Run #127 then showed that the
+coin's time effect belonged to the old revocation rule: under the vested
+allowance the point without the coin reads 16.1 to 16.7 % for 7.55 % and
+the point with it 15.8 to 16.9 % for 5.5 %. The headline is vesting alone;
+the coin is a side result that lowers the loss at no time cost, and its
+points below P = 0.25 are not yet re-measured under the vested
+allowance.
 
 Three references say what those deltas are against. An arm that tolerates
 no loss at all reads within -1.1 to +0.8 % of our fixed-low control on
@@ -322,13 +325,16 @@ every byte back on the wire as repairs, and FORGIVE v1 at budget 0.4
 reaches the same 20 % while the fabric keeps its controller.
 
 Three seeds, one cell, one congestion controller, per-flow ECMP rather
-than packet spraying. Run #127 puts the whole design of record on the
-cluster tonight, 21 arms at budget 0.1: the law's v1 point, the coin, the
-stop, both together, the owed ablation and a reference arm that never
-returns to the controller. It answers which piece earns the time, and it
-is read with the tensor-parallel all-reduce span and re-sent bytes
-against the control, which is how we price what an exempt sender costs
-the rest of the fabric. No number in this deck comes from it.
+than packet spraying. Run #127 put the whole design on the cluster, 21
+arms at budget 0.1, every arm certified. Vesting earns the time: an
+allowance available in full from the first packet is spent early and the
+sender obeys its controller for the rest of the step, 9.1 to 10.2 %;
+the vested allowance reaches its line only when 1 - p of the step has
+arrived, 16.1 to 16.7 %. The stop adds loss and no time and is out.
+Never returning to the controller recovers 18.7 to 19.0 % for 6.5 to
+6.8 % of bytes re-sent, so the licence's interruptions cost about 3
+points; tensor-parallel all-reduce time was never worse than the control
+in any vested arm.
 
 ---
 
@@ -370,7 +376,7 @@ the rest of the fabric. No number in this deck comes from it.
 | 1 | Re-run the budget grid matched | one cluster day | the only broken number in run #117 |
 | 2 | Five seeds on the fan-in and burst sweeps | 40 arms, one week | turns the directional sweeps into results |
 | 3 | Tolerance replay on GPUs | 8 GPUs, one to two weeks, needs a collaborator | export the discarded byte ranges, zero those elements in a DDP hook, train a 1B-class model against an unmodified run. This is the only thing that can close the accuracy claim, and it is independent of the cluster |
-| 4 | Read run #127 and fix the design of record | one cluster day, already dispatched | says which piece of FORGIVE earns the time, and prices what an exempt sender costs the rest of the fabric |
+| 4 | Re-measure the coin below P = 0.25 and at P = 0 under the vested allowance | one cluster day | says whether forgiveness itself buys time on this fabric, or only the licence it bounds |
 | 5 | FORGIVE to a second congestion controller and a sprayed fabric | one to two months | the future-work section, or the next paper |
 
 ---
@@ -399,7 +405,7 @@ the rest of the fabric. No number in this deck comes from it.
 | #124 | 15 Sep | main `55d5767` | Bernoulli pacing at 0.5 and 0.25 |
 | #125 | 16 Sep | main `8213401` | budget 0.05 and the coin below 0.25 |
 | #126 | 16 Sep | main `a1b30b0` | zero tolerance, forgiveness without the exemption, no controller |
-| #127 | running | the design of record | 21 arms at budget 0.1, no number quoted here |
+| #127 | 17 Sep | main `59cf16c` | the design of record: vesting, the coin, the stop, the up-front cap, never re-engage |
 
 Every figure recomputes from a bundle. Per-seed values for slides 5 and 7
 come from the sixteen `llama3-70b-16-comparison` bundles of run #117;

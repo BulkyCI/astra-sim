@@ -500,21 +500,24 @@ at 34px bold on its own line above 20px body:
   of every byte back on the wire as repairs."
 
 CLOSING LINE:
-  "Run #127 measures the whole design on the cluster tonight, and no
-  number on this slide comes from it."
+  "Vesting earns the time: 16.1 to 16.7 % for 7.55 % of gradient bytes at
+  a budget of 0.1, against 9.1 to 10.2 % when the allowance is available
+  in full from the first packet."
 
-SPEAKER NOTE: "The headline candidate is a coin of 0.05 at a budget of
-0.1: about 16 % of training time for 1.2 to 1.3 % of gradient bytes,
-which is inside the band MLT profiles as tolerable, against our own May
-GPT-2 runs surviving 40 %. Without the coin the same budget costs 6.75 to
-6.89 % of gradient bytes for 12.9 to 14.1 % of the time, and lowering the
-budget to 0.05 instead recovers only 8.0 to 8.6 % for 3.74 to 3.77 %. The
-mechanism is in the exemption: at a coin of 0.1 and 0.05 all but 3 exempt
-flows of 71 680 keep their exemption for the whole step, against 35 to
-37 % losing it without the coin. Run #127 runs 21 arms at budget 0.1 on
-the design of record and its ablations, read with the tensor-parallel
-all-reduce span and re-sent bytes against the baseline, which is how we
-price what an exempt sender costs the rest of the fabric."
+SPEAKER NOTE: "The headline is the vested allowance alone: 16.1 to 16.7 %
+of training time for 7.55 % of gradient bytes at a budget of 0.1, against
+our own May GPT-2 runs surviving 40 %. The mechanism is the licence: an
+allowance available in full from the first packet is spent early, forgiven
+bytes never fall, and the sender obeys its controller for the rest of the
+step, 9.1 to 10.2 %; the vested allowance reaches its line only when 1 - p
+of the step has arrived, so the licence lasts by construction. Yashar's
+coin is a side result: under vesting it reads the same 16 % for 5.5 % of
+gradient bytes at P = 0.25, and under the old rules 1.2 to 1.3 % at
+P = 0.05, inside the band MLT profiles as tolerable; the points below
+0.25 are not yet re-measured under vesting. The stop adds loss and no
+time and is out. Never returning to the controller recovers 18.7 to
+19.0 % for 6.5 to 6.8 % of bytes re-sent, and tensor-parallel all-reduce
+time was never worse than the control in any vested arm."
 
 ===============================================================
 SLIDE 9 of 9

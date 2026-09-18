@@ -867,3 +867,49 @@ Readings.
   arms are slower there.
 - Exempt flows see 0.3 to 0.5 report transitions each and spend 0.1 to
   0.2 ms per flow obeying the controller.
+
+---
+
+## 15. Run #130 (run 35233809033): the healthy cell, `direct7` at 1:1
+
+Eight spines per leaf, so the fabric is not oversubscribed; everything
+else as the worst cell. Nine records, 18 arms, code main `65e98e7`, the
+same three seeds; every arm certified locally (FORGIVE worst cell 0.916
+to 0.948, coin 0.983 to 0.984). The control is each record's own
+fixed-low baseline.
+
+| arm | seed | control ms | arm ms | time recovered % | loss, % of DP bytes | bytes re-sent | bytes trimmed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| vesting, budget 0.1 | 9550582 | 1247.713 | 1191.829 | 4.48 | 1.00 | 0.04 % | 0.27 % |
+| vesting, budget 0.1 | 23172535 | 1253.119 | 1183.659 | 5.54 | 1.30 | 0.04 % | 0.34 % |
+| vesting, budget 0.1 | 94081284 | 1260.232 | 1166.312 | 7.45 | 1.12 | 0.03 % | 0.29 % |
+| vesting with the coin at 0.25 | 9550582 | 1247.713 | 1175.054 | 5.82 | 0.32 | 0.27 % | 0.32 % |
+| vesting with the coin at 0.25 | 23172535 | 1253.119 | 1169.815 | 6.65 | 0.42 | 0.35 % | 0.42 % |
+| vesting with the coin at 0.25 | 94081284 | 1260.232 | 1179.047 | 6.44 | 0.27 | 0.25 % | 0.28 % |
+| zero tolerance | 9550582 | 1247.713 | 1252.296 | -0.37 | 0 | 0.05 % | 0.04 % |
+| zero tolerance | 23172535 | 1253.119 | 1238.755 | 1.15 | 0 | 0.06 % | 0.05 % |
+| zero tolerance | 94081284 | 1260.232 | 1240.412 | 1.57 | 0 | 0.04 % | 0.03 % |
+| sender-side shedding, 0.1 | three seeds | | | 0.13 to 0.29 | 0 forgiven | 0.03 % | 0.02 to 0.03 % |
+| loose baseline, 0.1 | three seeds | | | -0.36 to +0.70 | | 0.02 to 0.03 % | 0.02 % |
+
+The control itself trims 0.02 to 0.04 % of bytes and re-sends 0.03 to
+0.05 %.
+
+Readings.
+
+- The pre-registered kill test did not fire. The control's trim ratio is
+  far below 0.5 %, and FORGIVE recovers 4.5 to 7.5 % rather than under 2
+  points, so the claim is not scoped to degraded fabrics.
+- The incast is at the last hop. Seven senders at 400 Gbps into one
+  400 Gbps receiver link is a 7:1 incast whatever the spine ratio, DCQCN
+  reacts to it on every step, and the exempt senders trim ten times more
+  than the control and still finish sooner.
+- The coin reads the same time as vesting alone within the seed spread
+  (5.8 to 6.7 % against 4.5 to 7.5 %) for a quarter of the loss, as on
+  the worst cell. It re-sends more (0.25 to 0.35 % against 0.04 %),
+  because the trims it refuses are repaired.
+- Zero tolerance reads -0.4 to +1.6 % of the control, so the control is a
+  true zero on this cell too, with a wider seed spread than at 4:1.
+- The seed spread on the vesting arm (4.5 to 7.5 %) is three points on a
+  six-point effect; five seeds would be needed before quoting a single
+  figure.

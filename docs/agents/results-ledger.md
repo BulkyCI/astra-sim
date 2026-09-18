@@ -28,6 +28,7 @@ exempt arm.
 | #124 | 2026-09-15 | main 55d5767, ns-3 16d7c9d4d | v2 round 1 at budget 0.1: Bernoulli 0.5 and 0.25 stand; the other twelve arms measured mechanisms since deleted | see section 3 | |
 | #125 | 2026-09-16 | main 8213401 | v2 round 2: the budget 0.05 comparison, Bernoulli 0.1 and 0.05 at 0.1, Bernoulli 0.25 at 0.05 and 0.2, 24 arms | read 2026-09-17, all 24 arms certified locally (worst cell 0.950 at budget 0.05, 0.94 to 0.98 under the coin at 0.1); measured on the same rules as #123 and #124 (sticky coin, one-way exemption, no exemption on critical steps) | nothing; #127 re-measures the v1 point and the coin under the design of record |
 | #126 | 2026-09-16 | main a1b30b0 | the references: zero tolerance at nine (fabric, seed) pairs, forgive-but-obey-DCQCN at 0.1, no controller at all, 15 single arms | read 2026-09-16, all 15 certified locally (recovery arms verified at 0.9, zero arms not applicable) | nothing |
+| #130 (run 35233809033) | 2026-09-17 | main 65e98e7 | the healthy cell: `direct7` at 1:1 (8 spines), vesting at 0.1 with and without the coin, the zero-tolerance reference, 9 records, 18 arms | read 2026-09-18, all 18 certified locally (FORGIVE worst cell 0.916 to 0.948, coin 0.983 to 0.984); the kill test (control trim ratio under 0.5 % and FORGIVE under 2 points) did not fire | nothing |
 | #127 (GitHub release #129) | 2026-09-17 | main 59cf16c, ns-3 3e11ace49 | the design of record at budget 0.1, 21 single arms: the law's v1 point, the coin, the stop, both, the up-front cap with and without the coin, never re-engage | read 2026-09-17 morning, all 21 certified (worst cell 0.900 to 0.909) | nothing; this is the reference for every later v2 join |
 
 ## 3. Run #124 arm by arm
@@ -64,6 +65,8 @@ certified arm.
 | v1 at budget 0.05 | #125 | 8.0 to 8.6 % for 3.74 to 3.77 % loss, 47 to 49 % of exempt flows re-armed; admission at 0.05 recovers 0.1 to 1.3 % |
 | the coin below 0.25 | #125 against #123 | at budget 0.1: P = 0.1 gives 15.3 to 16.7 % for 2.6 to 2.9 % loss, P = 0.05 gives 15.0 to 16.6 % for 1.2 to 1.3 % loss, no exempt flow re-armed at either; the time gain is flat from P = 0.25 down while loss falls with P |
 | the design of record at 0.1 | #127 against #123 | the law's v1 point 16.1 to 16.7 % for 7.55 to 7.57 % loss; the coin at 0.25 15.8 to 16.9 % for 5.5 to 5.6 %; the stop spends to the cap (8.1 %) and recovers no time; the up-front cap 9.1 to 10.2 %, far below vesting; never re-engage 18.7 to 19.0 % for 7.6 % and 6.5 to 6.8 % re-sent; TP collective time never worse than baseline in any vested arm |
+| the headline (Yashar's decision, 2026-09-17) | #127 against #123 | vesting alone at budget 0.1, arm `p01_single`: 16.1 to 16.7 % for 7.55 to 7.57 %; the coin is quoted as a side result (loss lower at no time cost), the stop is not part of the design |
+| the healthy cell | #130 | `direct7` at 1:1, control 1248 to 1260 ms trimming 0.02 to 0.04 % of bytes: vesting at 0.1 recovers 4.5 to 7.5 % for 1.0 to 1.3 % of DP bytes, the coin at 0.25 5.8 to 6.7 % for 0.27 to 0.42 %; zero tolerance -0.4 to +1.6 % of the control, sender-side shedding 0.1 to 0.3 %, loose baseline -0.4 to +0.7 % |
 | the coin across budgets | #125 | P = 0.25 at budget 0.2: 17.6 to 18.0 % for 7.2 to 7.6 % (v1 there: 16.0 to 16.7 % for 11.1 to 12.2 %); at budget 0.05: 13.5 to 14.8 % for 3.1 to 3.2 % (v1: 8.0 to 8.6 % for 3.8 %) |
 
 ## 6. What is not quotable yet
@@ -78,4 +81,7 @@ certified arm.
 prompt quote #123, #125 and #126 as read above, state the design of
 record in one paragraph, and name #127 as running with no number quoted.
 `forgive-protocol.md` and `forgive-design-plain.md` describe the
-protocol as built at `59cf16c`. No document keeps a pre-fix sentence.
+protocol as built at `59cf16c`. `forgive-paper-section.md` (2026-09-18)
+is the draft section for the preprint's revision, vesting primary and
+the coin secondary, with every number above it. No document keeps a
+pre-fix sentence.

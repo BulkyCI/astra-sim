@@ -314,16 +314,17 @@ protocol is two bits on messages the transport already sends.
 
 Each receiving rank opens one allowance per training step, a fraction p
 of the bytes that step owes it, pooled across every sender into that
-rank. On a trimmed packet the receiver flips a coin at probability P, and
-if the coin says yes and the bytes already delivered have earned enough
-allowance, it forgives the missing range and acknowledges it as if it had
-arrived; otherwise it asks for the repair. The allowance is gone once
-forgiven bytes plus the receiver's outstanding holes exceed p times what
-the rank is owed, the receiver says so in one bit, and the sender obeys
-its controller again from the latest report onward. The receiver also
-stops a sender the moment 1 - p of that sender's share for the step has
-arrived, because everything still to come would fit inside the budget
-anyway. On the application side we assume the framework divides each
+rank. The allowance vests with delivery: on a trimmed packet the receiver
+forgives the missing range and acknowledges it as if it had arrived only
+if the bytes already delivered have earned enough allowance, and asks for
+the repair otherwise. The allowance is gone once forgiven bytes plus the
+receiver's outstanding holes exceed p times what the rank is owed, the
+receiver says so in one bit, and the sender obeys its controller again
+from the latest report onward. Two add-ons were measured and are not in
+the headline: Yashar's coin, which forgives an affordable trim with
+probability P and lowers the loss at no time cost, and a stop that ends a
+sender once 1 - p of its share has arrived, which adds loss and no time.
+On the application side we assume the framework divides each
 reduce-scatter element by the contributions that arrived, an
 assumption whose conservative bound is our own May GPT-2 runs, which
 survived 40 % with no rescale at all. Every rank is certified after every
@@ -414,10 +415,14 @@ controller, and the licence is what recovers the time. At P = 0.1 and
 P = 0.05 the exemption survives the whole step for all but 3 flows of
 71 680.
 
-The headline candidate is P = 0.05 at a budget of 0.1: about 16 % of
-training time for 1.2 to 1.3 % of gradient bytes, inside the 0.7 to 3.3 %
-band MLT profiles as tolerable, against our own May GPT-2 runs surviving
-40 %.
+Under the vested allowance the coin no longer moves time: run #127 reads
+16.1 to 16.7 % without it and 15.8 to 16.9 % with it at P = 0.25 (section
+16). The headline is therefore vesting alone, 16.1 to 16.7 % for 7.55 %
+of gradient bytes at a budget of 0.1; the coin is a side result that
+lowers the loss at no time cost, to 5.5 % at P = 0.25 and, under the old
+rules, to 1.2 to 1.3 % at P = 0.05, which is inside the 0.7 to 3.3 % band
+MLT profiles as tolerable. The old-rule points below P = 0.25 are not yet
+re-measured under the vested allowance.
 
 ---
 
@@ -448,24 +453,42 @@ same 20 % while the fabric keeps its controller.
 
 ---
 
-## 16. Run #127: running tonight
+## 16. Run #127: which piece earns the time
 
-Run #127 puts the design of record on the cluster: 21 arms at budget 0.1
-on the worst cell, three seeds each. The law's v1 point drops both the
-coin and the stop, the coin alone and the stop alone drop one each, one
-arm runs both together, the owed ablation replaces the earned allowance
-with the step's plan known at step start, and a reference arm never
-returns to the controller at all.
+Run #127 put the design of record on the cluster, 21 arms at budget 0.1
+on the worst cell, three seeds each, joined by seed against the fixed-low
+control. Every arm certified; the worst cell delivered 0.900 to 0.909 of
+what it was owed.
 
-It answers which piece of the design earns the time, what the stop adds
-over the coin, and whether an allowance that grows with delivery leaves
-time on the table against one available in full from the first packet.
-Every arm is read with two columns this deck does not yet have: the
-tensor-parallel all-reduce span and re-sent bytes against the fixed-low
-control, which is how we price what an exempt sender costs the rest of
-the fabric.
+| arm | training time recovered | gradient bytes lost | bytes re-sent |
+| --- | ---: | ---: | ---: |
+| vested allowance, no coin, no stop (the headline) | 16.1 to 16.7 % | 7.55 to 7.57 % | 5.2 to 5.9 % |
+| vested allowance with the coin at P = 0.25 | 15.8 to 16.9 % | 5.5 to 5.6 % | 6.5 to 6.6 % |
+| vested allowance with the stop | 15.8 to 16.6 % | 8.10 % | 5.5 to 5.8 % |
+| allowance in full from the first packet, no coin | 9.1 to 10.2 % | 7.9 to 8.1 % | 1.9 to 2.1 % |
+| allowance in full from the first packet, coin at 0.25 | 14.6 to 15.3 % | 6.2 to 6.4 % | 6.0 to 6.3 % |
+| never return to the controller (reference) | 18.7 to 19.0 % | 7.6 % | 6.5 to 6.8 % |
 
-No number in this deck comes from it.
+**Vesting earns the time.** An allowance available in full from the first
+packet is spent in the first part of the step, forgiven bytes never fall,
+so the report stays red and the sender obeys its controller for the rest
+of the step: 9 to 10 %. The vested allowance reaches the line only when
+1 - p of the step has arrived, so the licence lasts by construction: 16 %.
+
+**The coin lowers loss and not time.** Under the vested allowance the coin
+reads the same 16 % for two points less loss. Its time effect in run #125
+was the old revocation rule, under which a spent pool ended the licence
+for good; the coin slowed the spend, and vesting now does that job
+exactly. Without vesting the coin recovers 5 of the 6 to 7 points on its
+own, which is the same mechanism seen from the other side.
+
+**The stop adds loss and no time.** It spends every cell to its cap and
+recovers nothing over the arm without it, so it is out of the design.
+
+**The reference prices the licence.** Never returning to the controller
+recovers 18.7 to 19.0 %, so the red episodes and the one round trip of
+obeying at each flow's start cost about 3 points. Tensor-parallel
+all-reduce time was never worse than the control in any vested arm.
 
 ---
 
@@ -525,10 +548,12 @@ the three references of run #126; the budget law; the mask's price and
 its integrity.
 
 We assume, and name as an assumption, that a real model tolerates the
-1.2 to 1.3 % of gradient bytes we spend at the headline point, and that
-the framework rescales each reduce-scatter element by the contributions
-that arrived. MLT profiles 0.7 to 3.3 % as tolerable and our own May GPT-2
-runs survived 40 % with no rescale, so the point falls inside both;
+7.55 % of gradient bytes we spend at the headline point, and that the
+framework rescales each reduce-scatter element by the contributions that
+arrived. Our own May GPT-2 runs survived 40 % with no rescale, so the
+point falls inside that bound; it is above the 0.7 to 3.3 % band MLT
+profiles as tolerable, which the coin at a small P would reach at no
+time cost;
 nothing in a network simulator can test it, and the GPT-2 injection
 experiment is where the assumption stops being one.
 

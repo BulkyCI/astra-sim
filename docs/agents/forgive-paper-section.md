@@ -5,7 +5,7 @@ Ganjali, arXiv 2605.01989), written 2026-09-18 for sharing. FORGIVE,
 the vesting rule and the protocol are Joe Fang's, in collaboration with
 Zechen Ma; the Bernoulli coin and the non-zero start are Yashar Ganjali's
 suggestions. Every number below comes from a certified arm named in
-section 6, and every number that was measured under a rule since replaced
+section 7, and every number that was measured under a rule since replaced
 says so where it appears. The vesting version is the design; the coin is
 the secondary result.
 
@@ -190,33 +190,146 @@ injection experiment in section 5 is where it stops being an assumption.
 
 ## 3. Evaluation
 
-### 3.1 Method
+### 3.1 Setup
 
-ASTRA-sim drives Llama 3 70B with tensor parallelism 8 and data
-parallelism 8 over 64 ranks for 20 training steps, on an ns-3 fabric with
-packet trimming and selective repeat. The fabric is a two-tier Clos with 8
-hosts per leaf at 400 Gbps and 4 spines, 2:1 by design; the worst cell
-fails two spines (4:1) and the healthy cell adds four (1:1). A tensor-
-parallel group is one leaf; data-parallel peers are on other leaves.
-`direct7` is the all-to-all schedule with all seven peers sending at once,
-the most incast a group of eight can produce and a stress case; NCCL's
-ring and tree schedules receive from one or two peers per channel, which
-the `direct2` cell approximates. DCQCN runs at every sender as configured
-in the repository, with no tuning sweep yet.
+**Simulator.** ASTRA-sim 2.0 drives the workload and the collective
+schedule; a forked ns-3 RDMA back end (BTreeMap/astra-network-ns3,
+branch `astra-sim`) moves the packets. The simulator computes no
+gradient values; it moves bytes, so nothing in this section speaks to
+model accuracy.
 
-Training time is the window makespan, the completion of the last rank.
-Loss is forgiven bytes as a share of the 191.4 GB of data-parallel
-all-reduce bytes every run offers, after subtracting the forgiven bytes
-that arrived late and were dropped. Re-sent bytes are retransmitted bytes
-over the 793.6 GB every run offers. Arms are compared only by seed, on
-identical simulators; the three seeds are 9550582, 23172535 and 94081284.
-The control is the fixed-low baseline, DCQCN with `p_low` on every step,
-which sheds 0.5 % of bytes; a zero-tolerance reference reads within -1.1
-to +0.8 % of it on the worst cell over five seeds and within -0.4 to
-+1.6 % on the healthy cell, so every delta below stands against DCQCN
-with no loss tolerance. Every FORGIVE arm is certified: the analyzer
-recomputes the per-cell ledger and names the worst cell's delivered
-share, which is 0.900 to 0.909 wherever the cap binds.
+**Workload.** A Llama 3 70B-shaped gradient microbenchmark: 70 B
+parameters in 2-byte precision, 80 layers, hidden size 8 192, sequence
+4 096, tensor parallelism 8, pipeline 1, data parallelism 8, 64 ranks,
+20 training steps, 5.4 ms of compute per node overlapped with the
+communication window. Each step every rank runs a data-parallel all-reduce
+of one 68 359 375-byte gradient bucket (the 256-bucket gradient sharded
+eight ways) with its seven data-parallel peers, and two 64 MiB
+tensor-parallel all-reduces per layer with the seven ranks of its
+tensor-parallel group. ASTRA-sim's `direct7` all-reduce sends each
+peer five streams of 17 089 843 bytes, each a reduce-scatter and an
+all-gather phase, so a rank receives 70 data-parallel flows of
+2 136 230 bytes (522 packets) per step and is owed 149 536 100 bytes per
+step in all; the run offers 191.4 GB of data-parallel and 793.6 GB of
+total payload.
+
+**Topology and where the traffic goes.** A two-tier Clos: 8 hosts per
+leaf at 400 Gbps, 4 spines by design (2:1 leaf-to-spine), 32 MB switch
+buffers, PFC off. A tensor-parallel group is the 8 hosts of one leaf, so
+tensor-parallel traffic stays on the leaf (a simplification: real
+tensor-parallel traffic rides a scale-up domain). Data-parallel peers
+are the same-position hosts on the other seven leaves, so every
+data-parallel flow crosses a spine. The worst cell fails two of the four
+spines (4:1), the healthy cell has eight (1:1); oversubscription here is
+only that ratio.
+
+**Where the incast is.** Under `direct7` all seven peers send to a rank
+at once, so seven 400 Gbps senders converge on one 400 Gbps host link.
+That last-hop incast exists at every spine ratio; the spine ratio adds a
+second congestion point on the leaf-to-spine uplinks at 2:1 and 4:1.
+The trim ratio without a controller, measured one seed per cell, is a
+steady-state property of provisioning rather than of any burst: 2.4 % at
+`direct2` 2:1, 6.3 % at `direct7` 2:1, 12.9 % at `direct2` 4:1, 24.1 %
+at `direct7` 4:1, and identical over steps 1 to 17 and over the whole
+run. Fan-in 2 to 7 multiplies it by about 2.7 and oversubscription 2:1
+to 4:1 by about 5.5.
+
+**The microburst.** Every run fires seven background RDMA flows of
+128 MiB each at one downlink rank (rank 8) at step 18, with no offset
+between them. Under selective repair this burst is a non-event: the
+data-parallel span of steps 18 and 19 exceeds the median of steps 4 to
+17 by 0.04 to 0.62 % of the window in every cell of the map, and the
+burst drains in 30 to 37 ms without a controller and 63 to 146 ms under
+DCQCN, which throttles the burst senders. Under go-back-N the same burst
+cost 205 to 935 ms of data-parallel span in run #117. The stressor is
+kept for comparability with that run; no FORGIVE result depends on it,
+and the forgiven bytes spread 5 to 7 % per permissive step with step 18
+not dominant.
+
+**Transport.** RDMA-style flows, one queue pair per message, 4 096-byte
+payload packets. The switch trims under congestion (UEC 1.0.3 style
+"forward trimmed data": the payload is dropped, the header forwarded in
+a class capped at 25 % of the link, trimmed-header queue 1 MiB against a
+4 MiB data queue). The receiver repairs selectively (a NACK per trimmed
+packet, retransmission of that packet only), with a 1 ms retransmission
+timeout and no exponential backoff. The go-back-N variant, in which a
+NACK rewinds the sender's window, is the transport of run #117 and of
+our May setting.
+
+**Congestion control.** DCQCN at every sender, as configured in the
+repository: ECN marking at 400 Gbps between 800 KB and 3.2 MB of queue
+with marking probability 0.2, EWMA gain 1/256, rate-decrease interval 4,
+alpha-resume interval 1, and additive-increase constants
+(`RATE_AI`, `RATE_HAI`, `MIN_RATE`) that are 100 Gbps-era literals not
+rescaled to 400 Gbps. No tuning sweep has been run, so every DCQCN figure
+is "DCQCN as configured". The no-controller arms run the same transport
+with the controller off. No other controller is implemented.
+
+**Load balancing.** Per-flow ECMP across spines; no per-packet spraying.
+With seven data-parallel flows per rank and step, ECMP collisions on the
+uplinks are one source of seed-to-seed variance.
+
+**Seeds.** Three seeds, 9550582, 23172535 and 94081284, on every
+FORGIVE arm; the zero-tolerance reference has five on the worst cell; run
+#117 has sixteen. A seed sets the ECMP hashing and the shedding
+selection stream; arms in one comparison share it, so their windows can
+be subtracted.
+
+### 3.1b Metrics
+
+- **Training window (makespan).** Completion time of the last rank over
+  the 20 steps; every "time recovered" is the paired difference against
+  the fixed-low control on the same seed, as a share of the control.
+- **Loss.** Forgiven bytes (less forgiven bytes that arrived late and
+  were dropped) as a share of the 191.4 GB of data-parallel all-reduce
+  bytes; for sender-side shedding, the bytes suppressed before the
+  fabric.
+- **Trim ratio W** (trimmed payload bytes over offered bytes) and
+  **re-sent bytes** (retransmitted bytes over the 793.6 GB offered),
+  which price what an arm costs the fabric.
+- **Per-step data-parallel span**: for each step, the latest end minus
+  the earliest start of the step's all-reduce over the 64 ranks; its
+  excess at the burst steps over the median steady step is the tail
+  metric of the regime map.
+- **Worst all-reduce of the window**, in milliseconds, is the tail
+  figure quoted for run #117 (1026 to 873 ms, 153 ms saved, CI 5 to
+  302 ms over 16 seeds). Per-rank p99 completion time is not quoted
+  anywhere: over the same 16 seeds it reads -4.9 % with a confidence
+  interval from -19.6 to +9.8 %, because it is the top three of 320
+  samples and one ECMP collision moves it by half.
+- **Tensor-parallel collective time** against the control, to show the
+  exempt senders do not slow the traffic that shares their leaf.
+- **Certification**: per (rank, step) delivered share, worst cell named;
+  every FORGIVE arm must read at least `1 - p`.
+
+### 3.1c The arms, by name
+
+| name in this section | also called | what it does |
+| --- | --- | --- |
+| control, fixed-low baseline | raw DCQCN, tight baseline | DCQCN, `p_low = 0.005` every step; sheds 0.5 % of DP bytes at the sender |
+| zero tolerance | raw DCQCN, strict | DCQCN, no shedding and no forgiveness; within -1.1 to +0.8 % of the control on the worst cell over 5 seeds |
+| loose baseline | fixed tolerance | DCQCN, `p_high` on every step, sender-side shedding; the unmasked reference |
+| sender-side shedding | dynamic tolerance, phase-aware shedding, our May mechanism | DCQCN, `p_low` on critical steps and `p_high` elsewhere, bytes suppressed at the sender before the fabric |
+| forgive, obey the controller | | receiver-side forgiveness under the budget, no licence |
+| FORGIVE | | receiver-side forgiveness, vesting, the licence |
+| no controller | | the same transport with the controller off |
+| never re-engage (D) | | FORGIVE with the licence never withdrawn |
+
+The four-arm comparison in Zechen's terms, worst cell, budget 0.4, three
+seeds (run #123):
+
+| arm | training window | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | re-sent |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| raw DCQCN (control) | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
+| fixed tolerance (loose baseline, 0.4) | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
+| dynamic tolerance (phase-aware shedding, 0.4) | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
+| FORGIVE, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
+
+FORGIVE's critical steps stay within 2.4 ms of the control's while the
+loose baseline's speed up by a third, which is the safety property in one
+row; the same cell without a controller runs in 1367 ms (one seed), so the
+controller's bill here is about 330 ms and FORGIVE at 0.4 returns nearly
+all of it.
 
 ### 3.2 The headline
 
@@ -341,6 +454,32 @@ under vesting the point at 0.1 moves from 12.9 to 14.1 % to 16.1 to
 | `direct7` at 1:1, with the coin at 0.25 | | | 5.8 to 6.7 % | 0.27 to 0.42 % | vesting |
 | 16 ranks, go-back-N, no controller | 7145 ms | | 3.9 % (sender-side shedding, 16 seeds) | 10 % cap | May mechanism |
 
+The regime map (run #120, one seed per cell, fixed-low arm, selective
+repair) is the frame for the table:
+
+| cell | window | trim ratio W | DP flows trimmed | step 18 + 19 excess, % of window |
+| --- | ---: | ---: | ---: | ---: |
+| no controller, `direct2`, 2:1 | 1201 ms | 0.024 | 24 % | 0.08 |
+| no controller, `direct7`, 2:1 | 1200 ms | 0.063 | 53 % | 0.04 |
+| no controller, `direct2`, 4:1 | 1373 ms | 0.129 | 58 % | 0.62 |
+| no controller, `direct7`, 4:1 | 1367 ms | 0.241 | 75 % | 0.55 |
+| DCQCN, `direct2`, 2:1 | 1421 ms | 0.002 | 7 % | 0.23 |
+| DCQCN, `direct7`, 2:1 | 1422 ms | | | 0.34 |
+| DCQCN, `direct2`, 4:1 | 1719 ms | | | 0.60 |
+| DCQCN, `direct7`, 4:1 | 1696 ms | | | 0.10 |
+
+DCQCN divides the trim ratio by 8 to 10 and lengthens the window by 18
+to 24 % in every column; the burst steps never exceed a steady step by
+1 % of the window anywhere. On the go-back-N fabric of run #117 (16
+ranks, no controller, 16 matched seeds) phase-aware shedding at budget
+0.1 shortened the window from 7145 to 6854 ms (3.91 %, CI 1.13 to
+6.68 %), the worst all-reduce of the window from 1026 to 873 ms (CI 5 to
+302 ms), and the relief correlated 0.93 with trims avoided at 11.9 ms per
+million and -0.01 with bytes discarded; the loose baseline recovered
+9.42 % (CI 7.03 to 11.82 %) for 40 % loss. That relief is repair
+amplification under go-back-N, and the same policy recovers 0.78 % under
+selective repeat.
+
 The healthy cell answers the question the worst cell raises. With four
 spines per leaf the fabric is not oversubscribed and the control trims
 0.02 to 0.04 % of bytes, so the pre-registered kill test ("if the 1:1
@@ -455,7 +594,26 @@ hole does.
   modelled as NICs, and tensor-parallel traffic rides the leaf rather than
   a scale-up domain. Pipeline parallelism is not simulated.
 
-## 6. Provenance
+## 6. Figures and data in hand
+
+Drawn, in `docs/agents/figures/`: `regime-map.svg` (the eight cells),
+`run117-paired-seeds.svg` and `run117-mechanism.svg` (the go-back-N
+result and its correlation with trims avoided), `recovery-amplification.svg`
+(go-back-N against selective repeat), `dose-front.svg` (the v1 budget
+front, needs the vesting point added), `rate-versus-volume.svg` (why
+sender-side shedding cannot relieve a controlled fabric),
+`forgive-mechanism.svg` (the protocol diagram, needs the licence and the
+holes rule), `progress-timeline.svg`.
+
+Tabulated and not yet drawn, with the per-seed rows in
+`docs/agents/figure-data.md`: the design-of-record ablation (section 13
+there), the three references (12), the coin front (11), the mask's cost
+and integrity (8), the exemption counters across the front (10), the
+healthy cell (15), and the front-bias split by fifth of the step (in
+`headline-is-vesting` and section 3.4 above). Every figure recomputes
+from a release bundle named in section 7.
+
+## 7. Provenance
 
 | number | run | code | arms |
 | --- | --- | --- | --- |

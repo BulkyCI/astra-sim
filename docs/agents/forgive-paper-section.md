@@ -30,7 +30,7 @@ gone on such a fabric.
 
 What is not gone is the congestion controller's reaction. DCQCN divides
 the trim ratio by 8 to 10 on the same map and lengthens the training
-window by 18 to 24 %, through millions of rate cuts and thousands of
+window by 18 to 25 %, through millions of rate cuts and thousands of
 retransmission timeouts. The time a lossy transport can recover on a
 trimming fabric is that reaction, and the question FORGIVE answers is how
 a bounded loss tolerance can pay for turning it off safely.
@@ -44,7 +44,8 @@ worst cell of the map, at `p = 0.1`, the licence recovers 16.1 to 16.7 %
 of the training window for 7.55 % of the data-parallel bytes, against a
 ceiling of 20.1 to 20.3 % with no controller at all, which re-sends
 25.4 % of every byte. On a healthy 1:1 fabric it recovers 4.5 to 7.5 %
-for 1.0 to 1.3 %.
+for 1.0 to 1.3 %; the controller's whole bill there has not been
+measured.
 
 ## 2. Design
 
@@ -77,9 +78,10 @@ critical step and `p_high` (0.1 in the headline) elsewhere. A byte the
 receiver declines to have re-sent is charged to the budget and never
 refunded.
 
-The guarantee, certified by the simulator and again by the analyzer at
-every step's last collective, is that every rank received at least
-`1 - p` of what it was owed. A run that breaks it fails.
+The guarantee is that every rank received at least `1 - p` of what it
+was owed. The simulator asserts it at every step's last collective and
+the analyzer recomputes it from the telemetry after the run; a run that
+breaks it fails either check.
 
 ### 2.3 Vesting
 
@@ -87,15 +89,17 @@ The budget is not available at once. The receiver may forgive a trimmed
 range only while
 
 ```
-forgiven + range <= p x (received + forgiven),
+forgiven + range <= p x (received + forgiven + range),
 ```
 
-equivalently `forgiven <= p/(1-p) x received`: at every prefix of the
-step, of the bytes the receiver has accepted, at most `p` are forgiven.
-The cap is a line through the origin in received-bytes space that reaches
-`p x owed` exactly when `1 - p` of the step has arrived. It needs no state
-beyond two counters the receiver already keeps, and it holds the hard
-bound by construction under any trim profile the fabric produces.
+equivalently `forgiven + range <= p/(1-p) x received`, with the range
+under decision counted on both sides: at every prefix of the step, of the
+bytes the receiver has accepted or is about to forgive, at most `p` are
+forgiven. The cap is a line through the origin in received-bytes space
+that reaches `p x owed` exactly when `1 - p` of the step has arrived. It
+needs two per-step counters, received and forgiven bytes, and it holds
+the hard bound by construction under any trim profile the fabric
+produces.
 
 The reason for vesting is what happens without it. If the whole budget is
 available from the first byte, the opening incast of a step spends it in
@@ -112,9 +116,11 @@ so forgiving hides no congestion from a sender that is listening.
 
 ### 2.4 The licence
 
-The receiver marks every acknowledgement of an eligible flow, on any step
-with `p > 0`, with a bit saying the flow may be exempt, and with a second
-bit that says whether the step's tolerance is gone:
+The receiver decides once, when a flow's receive queue pair is created,
+whether the flow is eligible (data-parallel all-reduce payload on a step
+with `p > 0`), and every acknowledgement of that flow carries that bit;
+every acknowledgement also carries a second bit that says whether the
+step's tolerance is gone:
 
 ```
 gone  <=>  forgiven + holes + one packet > p x owed,
@@ -134,20 +140,22 @@ lets it withhold again. There is no latch and no hysteresis: the sender is
 exempt exactly when the last report it saw said so. A controller that
 hears nothing raises its own rate on its own timers, so nothing inside it
 is touched. A critical step runs the same rules with `p_low`; its pool is
-gone after a few hundred kilobytes and the controller returns almost at
-once.
+gone after about three quarters of a megabyte and the controller returns
+almost at once.
 
 The licence is the mechanism that recovers time. Forgiveness under the
 controller, with no licence, recovers 5.5 to 6.6 % on the worst cell for
-the same loss (section 3.3); the licence brings it to 16 %.
+6.8 to 6.9 % of bytes (section 3.3); the licence brings it to 16 % for
+7.55 %.
 
 ### 2.5 The coin
 
 Yashar Ganjali suggested spending the budget probabilistically: a trim the
 cap would forgive is forgiven with probability `P` and repaired otherwise,
 with a fresh draw on every trimmed arrival so a range refused once has
-another chance on its next trim. Coin refusals charge nothing and set no
-bit.
+another chance on its next trim. A coin refusal charges nothing; the
+refused range remains a hole until its repair lands, as a cap refusal
+does, so it counts in the gone rule like any other missing byte.
 
 Under vesting the coin does not move time. At `P = 0.25` it reads 15.8 to
 16.9 % against 16.1 to 16.7 % without it, for 5.5 % of bytes instead of
@@ -156,9 +164,9 @@ Under vesting the coin does not move time. At `P = 0.25` it reads 15.8 to
 Its time effect in our earlier rounds belonged to a revocation rule since
 replaced: when a spent pool ended the licence for good, slowing the spend
 was what kept the licence, and vesting now does that by construction.
-Measured against the up-front cap, the coin recovers 5 of the 6 to 7
-points that vesting recovers, which is the same mechanism seen from the
-other side.
+Measured against the up-front cap, the coin recovers 5.1 to 5.5 of the
+5.9 to 7.6 points that vesting recovers, which is the same mechanism
+seen from the other side.
 
 ### 2.6 The wire and the receiver
 
@@ -210,8 +218,11 @@ tensor-parallel group. ASTRA-sim's `direct7` all-reduce sends each
 peer five streams of 17 089 843 bytes, each a reduce-scatter and an
 all-gather phase, so a rank receives 70 data-parallel flows of
 2 136 230 bytes (522 packets) per step and is owed 149 536 100 bytes per
-step in all; the run offers 191.4 GB of data-parallel and 793.6 GB of
-total payload.
+step in all. That is 25 % more than the `2 x 7/8` of the bucket a direct
+all-reduce would move, because ASTRA-sim gives the fifth stream a full
+chunk rather than the remainder; every per-byte figure in this section is
+against the bytes the simulator moved. The run offers 191.4 GB of
+data-parallel and 793.6 GB of total payload.
 
 **Topology and where the traffic goes.** A two-tier Clos: 8 hosts per
 leaf at 400 Gbps, 4 spines by design (2:1 leaf-to-spine), 32 MB switch
@@ -231,8 +242,9 @@ The trim ratio without a controller, measured one seed per cell, is a
 steady-state property of provisioning rather than of any burst: 2.4 % at
 `direct2` 2:1, 6.3 % at `direct7` 2:1, 12.9 % at `direct2` 4:1, 24.1 %
 at `direct7` 4:1, and identical over steps 1 to 17 and over the whole
-run. Fan-in 2 to 7 multiplies it by about 2.7 and oversubscription 2:1
-to 4:1 by about 5.5.
+run. Fan-in 2 to 7 multiplies it by 2.6 at 2:1 and 1.9 at 4:1;
+oversubscription 2:1 to 4:1 multiplies it by 5.4 at fan-in 2 and 3.8 at
+fan-in 7; the two axes do not compound.
 
 **The microburst.** Every run fires seven background RDMA flows of
 128 MiB each at one downlink rank (rank 8) at step 18, with no offset
@@ -259,31 +271,38 @@ our May setting.
 **Congestion control.** DCQCN at every sender, as configured in the
 repository: ECN marking at 400 Gbps between 800 KB and 3.2 MB of queue
 with marking probability 0.2, EWMA gain 1/256, rate-decrease interval 4,
-alpha-resume interval 1, and additive-increase constants
-(`RATE_AI`, `RATE_HAI`, `MIN_RATE`) that are 100 Gbps-era literals not
-rescaled to 400 Gbps. No tuning sweep has been run, so every DCQCN figure
-is "DCQCN as configured". The no-controller arms run the same transport
+alpha-resume interval 1, and additive-increase constants scaled with the
+link rate (`RATE_AI` 200 Mb/s, `RATE_HAI` and `MIN_RATE` 400 Mb/s at
+400 Gbps, the same fractions of the link as the 100 Gbps-era defaults).
+No tuning sweep has been run, so every DCQCN figure is "DCQCN as
+configured". The no-controller arms run the same transport
 with the controller off. No other controller is implemented.
 
 **Load balancing.** Per-flow ECMP across spines; no per-packet spraying.
-With seven data-parallel flows per rank and step, ECMP collisions on the
-uplinks are one source of seed-to-seed variance.
+The hash is seeded by the switch's own identity and source ports are
+allocated deterministically, so path assignment is the same in every
+seed of an arm whose flows are the same.
 
 **Seeds.** Three seeds, 9550582, 23172535 and 94081284, on every
 FORGIVE arm; the zero-tolerance reference has five on the worst cell; run
-#117 has sixteen. A seed sets the ECMP hashing and the shedding
-selection stream; arms in one comparison share it, so their windows can
-be subtracted.
+#117 has sixteen. A seed sets the ECN marking draw and the hash behind the
+shedding selection and the coin; it does not move path selection, so the
+three no-controller runs of the reference are one run (identical to the
+nanosecond), and the spread quoted for any arm without shedding or a coin
+is the control's spread. Arms in one comparison share the seed, so their
+windows can be subtracted.
 
 ### 3.1b Metrics
 
 - **Training window (makespan).** Completion time of the last rank over
   the 20 steps; every "time recovered" is the paired difference against
   the fixed-low control on the same seed, as a share of the control.
-- **Loss.** Forgiven bytes (less forgiven bytes that arrived late and
-  were dropped) as a share of the 191.4 GB of data-parallel all-reduce
-  bytes; for sender-side shedding, the bytes suppressed before the
-  fabric.
+- **Loss.** Forgiven bytes as a share of the 191.4 GB of data-parallel
+  all-reduce bytes the arm offers (gross); where a net figure is given it
+  subtracts forgiven bytes that arrived late and were dropped. For
+  sender-side shedding, the bytes suppressed before the fabric. Sections
+  3.1c and 3.6 come from the run #123 readout, which divides by the
+  control's post-shed 190.4 GB, 0.5 % higher in relative terms.
 - **Trim ratio W** (trimmed payload bytes over offered bytes) and
   **re-sent bytes** (retransmitted bytes over the 793.6 GB offered),
   which price what an arm costs the fabric.
@@ -321,13 +340,14 @@ seeds (run #123):
 | arm | training window | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | raw DCQCN (control) | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
-| fixed tolerance (loose baseline, 0.4) | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.6 % |
+| fixed tolerance (loose baseline, 0.4) | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.7 % |
 | dynamic tolerance (phase-aware shedding, 0.4) | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
-| FORGIVE, 0.4 | 1340 to 1360 ms | 12 to 13 ms | 34 to 36 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
+| FORGIVE, 0.4 | 1340 to 1360 ms | 11.8 to 12.6 ms | 33.7 to 35.7 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
 
-FORGIVE's critical steps stay within 2.4 ms of the control's while the
-loose baseline's speed up by a third, which is the safety property in one
-row; the same cell without a controller runs in 1367 ms (one seed), so the
+FORGIVE's critical steps stay within 2.5 ms of the control's while the
+loose baseline's speed up by a third (the loose-baseline spans are from
+the run #123 readout; that arm's telemetry is not in the local bundle),
+which is the safety property in one row; the same cell without a controller runs in 1367 ms (one seed), so the
 controller's bill here is about 330 ms and FORGIVE at 0.4 returns nearly
 all of it.
 
@@ -336,19 +356,24 @@ all of it.
 Worst cell, budget 0.1, the design of section 2 without the coin, three
 seeds against controls of 1696.7, 1696.9 and 1700.6 ms:
 
-| seed | training time recovered | loss, % of DP bytes | re-sent bytes | TP collective time vs control |
-| ---: | ---: | ---: | ---: | ---: |
-| 9550582 | 16.66 % | 7.55 % | 5.88 % | -4.3 % |
-| 23172535 | 16.06 % | 7.57 % | 5.61 % | +4.4 % |
-| 94081284 | 16.66 % | 7.56 % | 5.22 % | -1.3 % |
+| seed | training time recovered | loss, % of DP bytes (gross / net of late arrivals) | re-sent bytes | timeouts (control) | TP collective time vs control |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 9550582 | 16.66 % | 7.55 / 7.49 % | 5.88 % | 4 177 (10 110) | -4.3 % |
+| 23172535 | 16.06 % | 7.57 / 7.51 % | 5.61 % | 4 145 (10 482) | +4.4 % |
+| 94081284 | 16.66 % | 7.56 / 7.50 % | 5.22 % | 4 348 (10 430) | -1.3 % |
 
 The tensor-parallel collectives, which share the leaf with the exempt
 senders and obey the controller throughout, are never slower than in the
-control beyond the seed spread. The critical steps forgive 1.4 % of the
-forgiven bytes at this budget, and at budget 0.4 their all-reduce time
-stays within 2.4 ms of the control's while the loose baseline's speeds up
-by a third (both measured on the earlier rule set, whose mask is
-unchanged).
+control beyond the seed spread. The critical steps forgive 1.25 to 1.26 % of the
+forgiven bytes in this arm, and at budget 0.4 under the earlier rule set
+their all-reduce time stays within 2.5 ms of the control's. The exempt
+senders trim 2.4 times as much as the control (W 0.067 to 0.076 against
+0.030 to 0.031) and receive a third of its congestion notifications
+(4.4 to 4.6 million against 13.0 to 13.4 million). In the run 96 % of
+the 89 600 data-parallel flows were granted the licence at some point,
+the gone bit changed about 0.5 times per exempt flow, and 19 % of the
+exempt flows spent time obeying the controller after a grant, 0.17 ms
+each on average.
 
 ### 3.3 What the deltas are against
 
@@ -359,16 +384,16 @@ applies:
 | --- | ---: | --- |
 | zero tolerance | -1.1 to +0.8 % (5 seeds) | nothing |
 | forgive but obey the controller | 5.5 to 6.6 % | 6.8 to 7.0 % of DP bytes, 1.7 to 1.9 % re-sent |
-| no controller at all | 20.1 to 20.3 % | 25.4 % of all bytes re-sent, 93 timeouts against the control's 10 042 to 10 622 |
+| no controller at all | 20.1 to 20.3 % (one run; the band is the control's spread, since the seed moves nothing in this arm) | 25.4 % of all bytes re-sent, 93 timeouts against the control's 10 110 to 10 482 |
 | never return to the controller (licence never ends) | 18.7 to 19.0 % | 7.6 % of DP bytes, 6.5 to 6.8 % re-sent |
 
 The controller's whole bill on this cell is about 20 %; the licence
 recovers 16 of it while the fabric keeps its controller, and re-sends a
 quarter of what the no-controller arm does. Forgiveness alone, under the
-controller, is worth 6 points, through the load it removes; the licence
-roughly triples it. The last 3 points to the never-return arm are the
-interruptions of the licence and the one round trip each flow spends
-obeying at its start.
+controller, is worth 5.5 to 6.6 points, through the load it removes; the
+licence multiplies it by 2.4 to 3.0. The 2.0 to 2.9 points to the
+never-return arm, paired by seed, are the interruptions of the licence
+and the one round trip each flow spends obeying at its start.
 
 ### 3.4 Which piece earns the time
 
@@ -380,7 +405,7 @@ Worst cell, budget 0.1, three seeds each, seed ranges:
 | vesting with the coin at 0.25 | 15.8 to 16.9 % | 5.5 to 5.6 % | 6.5 to 6.6 % |
 | budget available in full from the first byte, no coin | 9.1 to 10.2 % | 7.9 to 8.1 % | 1.9 to 2.1 % |
 | budget in full from the first byte, coin at 0.25 | 14.6 to 15.3 % | 6.2 to 6.4 % | 6.0 to 6.3 % |
-| vesting with a per-sender stop at `1 - p` | 15.8 to 16.6 % | 8.10 % | 5.5 to 5.8 % |
+| vesting with a per-sender stop at `1 - p` | 15.8 to 16.6 % | 8.10 % gross, 7.25 to 7.28 % net | 5.5 to 5.8 % |
 
 Vesting earns the time. The up-front budget is spent in the first part of
 the step, forgiven bytes never fall, the report stays red and the sender
@@ -392,9 +417,10 @@ and recovers nothing, so it is not part of the design.
 
 Where the vested cap spends its budget within a step is measurable. On
 seed 9550582, bucketing data-parallel flows by where they start in their
-receiver's step window, the cap forgives 18 % of the trimmed bytes that
-arrive in the first fifth of a step and 60 % of those in the last fifth;
-the first fifth is also where the most trimming happens. The line through
+receiver's step window, of the trimmed bytes the cap is asked about (a range trimmed
+again is asked again), it forgives 18 % in the first fifth of a step and
+60 % in the last fifth; the first fifth is also where the most trimming
+happens (12.3 GB against 1.8 GB in the last). The line through
 the origin is biased toward the end of the step. Under the coin the
 shares are 65 % to 100 %, because at a quarter of the spend rate the cap
 binds only at the opening. Whether the bias costs anything is an open
@@ -410,9 +436,11 @@ licence on critical steps), where it read 15.3 to 16.7 % for 2.6 to 2.9 %
 at `P = 0.1` and 15.0 to 16.6 % for 1.2 to 1.3 % at `P = 0.05`, the
 latter inside the 0.7 to 3.3 % band MLT profiles as tolerable. Those two
 points are not yet re-measured under vesting and are quoted here as the
-trend, not the result. The arm at `P = 0`, which forgives nothing and
-keeps the licence, decides whether forgiveness buys any time at all on
-this fabric or whether the tolerance is purely the bound on the licence.
+trend, not the result. An arm that forgives nothing and keeps the licence (not a
+coin setting, since the parser refuses `P = 0`; a verdict that always
+repairs while the eligible bit stays set) decides whether forgiveness
+buys any time at all on this fabric or whether the tolerance is purely
+the bound on the licence. It has not been built.
 
 ### 3.6 The budget as a dial
 
@@ -424,35 +452,38 @@ share of its eligible bytes before they enter the fabric). Seed ranges:
 | budget | FORGIVE time | FORGIVE loss | shedding time | shedding loss |
 | ---: | --- | --- | --- | --- |
 | 0.05 | 8.0 to 8.6 % | 3.7 to 3.8 % | 0.1 to 1.3 % | 4.1 % |
-| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 7.7 % |
-| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 15.7 % |
-| 0.4 | 19.6 to 21.0 % | 21.3 to 21.8 % | 11.0 to 11.8 % | 31.5 % |
-| 0.6 | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 47.9 % |
-| 0.4, mask off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 39.8 % |
+| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 8.1 % |
+| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 16.1 % |
+| 0.4 | 19.6 to 21.0 % | 21.3 to 21.8 % | 10.5 to 12.3 % | 31.7 to 32.3 % |
+| 0.6 | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 48.0 to 48.2 % |
+| 0.4, mask off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 40.0 to 40.2 % |
 
 Time recovered per point of gradient lost falls from 2.1 to 2.3 at budget
 0.05 and 1.9 to 2.1 at 0.1 to 0.6 at 0.6 for FORGIVE while shedding stays
-at 0.3 to 0.4; the two are furthest apart at the smallest budget. Shedding discards
+at 0.3 to 0.4 from 0.1 upward (0.02 to 0.33 at 0.05, where it recovers
+almost nothing); the two are furthest apart at the smallest budgets. Shedding discards
 exactly its cap; FORGIVE spends 67 to 84 % of the same cap and the loss
 is congestion-proportional. Shedding cannot relieve a controlled fabric:
-peak queue occupancy is identical in the two arms, because removing bytes
-from all seven senders never removes a sender, and the controller reacts
-to the incast either way. The mask, protecting steps 1, 2, 3 and 20 at
+the data queue is pinned at its 4 MiB ceiling in every arm, because
+removing bytes from all seven senders never removes a sender, and the
+controller reacts to the incast either way. The mask, protecting steps 1, 2, 3 and 20 at
 `p_low`, costs 5.1 points of time and 4.4 points of loss at budget 0.4,
-and the ledger shows 1.0 to 1.5 % of forgiven bytes on the protected
-steps against 19 to 21 % without it. These points are the v1 rule set;
+and the ledger shows 0.44 to 0.45 % of forgiven bytes on the protected
+steps at that budget against 19.2 to 20.5 % without the mask (1.25 to
+1.26 % in the budget-0.1 headline arm, whose `p_low` pool is the same
+size against a smaller `p_high` pool). These points are the v1 rule set;
 under vesting the point at 0.1 moves from 12.9 to 14.1 % to 16.1 to
 16.7 %, and the rest of the front has not been re-run.
 
 ### 3.7 Across fabrics
 
-| cell | control window | control trim ratio | FORGIVE, budget 0.1 | loss | rules |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `direct7` at 4:1, DCQCN (worst) | 1697 to 1701 ms | 3.5 to 3.7 % re-sent | 16.1 to 16.7 % | 7.55 % | vesting |
-| `direct2` at 2:1, DCQCN (ring-like) | about 1410 to 1420 ms | | 10.5 to 12.5 % | 2.37 to 2.50 % | v1 |
-| `direct7` at 1:1, DCQCN (healthy) | 1248 to 1260 ms | 0.02 to 0.04 % of bytes trimmed | 4.5 to 7.5 % | 1.0 to 1.3 % | vesting |
-| `direct7` at 1:1, with the coin at 0.25 | | | 5.8 to 6.7 % | 0.27 to 0.42 % | vesting |
-| 16 ranks, go-back-N, no controller | 7145 ms | | 3.9 % (sender-side shedding, 16 seeds) | 10 % cap | May mechanism |
+| cell | control window | control trim ratio W | FORGIVE | budget | loss | rules |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `direct7` at 4:1, DCQCN (worst) | 1697 to 1701 ms | 3.0 to 3.1 % | 16.1 to 16.7 % | 0.1 | 7.55 % | vesting |
+| `direct2` at 2:1, DCQCN (ring-like) | 1409 to 1429 ms | | 10.5 to 12.5 % | 0.4 | 2.37 to 2.50 % | v1 |
+| `direct7` at 1:1, DCQCN (healthy) | 1248 to 1260 ms | 0.02 to 0.04 % | 4.5 to 7.5 % | 0.1 | 1.0 to 1.3 % | vesting |
+| `direct7` at 1:1, with the coin at 0.25 | | | 5.8 to 6.7 % | 0.1 | 0.27 to 0.42 % | vesting |
+| 16 ranks, go-back-N, no controller | 7145 ms | | 3.9 % (sender-side shedding, 16 seeds) | 0.1 | 10 % cap | May mechanism |
 
 The regime map (run #120, one seed per cell, fixed-low arm, selective
 repair) is the frame for the table:
@@ -475,13 +506,13 @@ ranks, no controller, 16 matched seeds) phase-aware shedding at budget
 0.1 shortened the window from 7145 to 6854 ms (3.91 %, CI 1.13 to
 6.68 %), the worst all-reduce of the window from 1026 to 873 ms (CI 5 to
 302 ms), and the relief correlated 0.93 with trims avoided at 11.9 ms per
-million and -0.01 with bytes discarded; the loose baseline recovered
+million and not with bytes discarded; the loose baseline recovered
 9.42 % (CI 7.03 to 11.82 %) for 40 % loss. That relief is repair
 amplification under go-back-N, and the same policy recovers 0.78 % under
 selective repeat.
 
-The healthy cell answers the question the worst cell raises. With four
-spines per leaf the fabric is not oversubscribed and the control trims
+The healthy cell answers the question the worst cell raises. With eight
+spines the fabric is not oversubscribed and the control trims
 0.02 to 0.04 % of bytes, so the pre-registered kill test ("if the 1:1
 control's trim ratio is below 0.5 % and FORGIVE recovers under 2 points,
 the claim is scoped to degraded fabrics") did not fire: FORGIVE recovers
@@ -537,8 +568,10 @@ controller on the receiver's word; those three are the claim.
 Two findings reframe those systems on a modern fabric. The tail they
 shorten is not there under trimming with selective repair (section 1),
 and what a bounded loss can buy back instead is the controller's
-reaction, which is 18 to 24 % of the window under DCQCN and about 6 % on
-a fabric that is not oversubscribed.
+reaction, which is 18 to 25 % of the window under DCQCN on the oversubscribed
+cells and at least 4.5 to 7.5 % on a fabric that is not, the latter
+being what the licence recovers there; the no-controller arm has not
+been run on that cell.
 
 The budget rule itself is an instance of a problem the online-allocation
 literature states as a theorem: a fixed supply spent irrevocably on
@@ -581,8 +614,9 @@ hole does.
   experiment is the instrument.
 - **Whether forgiveness buys time at all on this fabric.** Under vesting
   the marginal time of a forgiven byte measured zero between 7.55 % and
-  5.5 % loss. The arm at `P = 0` decides whether the tolerance is a
-  currency or purely the bound on the licence; if the latter, the design
+  5.5 % loss. A no-forgiveness arm with the licence kept (to be built; the coin's
+  parser refuses `P = 0`) decides whether the tolerance is a currency or
+  purely the bound on the licence; if the latter, the design
   loses nothing and the paper's claim sharpens.
 - **The shape of the vested line.** It is biased toward the end of the
   step (section 3.4). Candidate shapes exist (a burst-sized initial
@@ -606,10 +640,10 @@ sender-side shedding cannot relieve a controlled fabric),
 holes rule), `progress-timeline.svg`.
 
 Tabulated and not yet drawn, with the per-seed rows in
-`docs/agents/figure-data.md`: the design-of-record ablation (section 13
+`docs/agents/figure-data.md`: the design-of-record ablation (section 15
 there), the three references (12), the coin front (11), the mask's cost
 and integrity (8), the exemption counters across the front (10), the
-healthy cell (15), and the front-bias split by fifth of the step (in
+healthy cell (16), and the front-bias split by fifth of the step (in
 `headline-is-vesting` and section 3.4 above). Every figure recomputes
 from a release bundle named in section 7.
 

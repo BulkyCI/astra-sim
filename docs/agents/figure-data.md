@@ -380,7 +380,10 @@ axis, which are MLT's published tolerance bounds.
 Worst cell of the map, three seeds per budget except 0.4, which has two
 seeds in this table and three more at the same cell in section 6.
 
-Per-seed, the fourteen records that carry a shedding partner:
+Per-seed, the fourteen records that carry a shedding partner (the
+shedding-loss column of the per-seed rows below is the pre-audit reading;
+the audited values, equal to the mask-weighted cap, are in the plot-point
+table that follows and in docs/agents/paper-section-audit.md):
 
 | profile | seed | budget | baseline ms | FORGIVE % | shedding % | loose baseline % | FORGIVE loss, % of DP bytes | shedding loss, % of DP bytes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -403,11 +406,11 @@ Plot points, seed ranges:
 
 | budget | mask | FORGIVE time | FORGIVE loss | shedding time | shedding loss |
 | ---: | --- | --- | --- | --- | --- |
-| 0.1 | on | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 7.7 % |
-| 0.2 | on | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 15.7 % |
-| 0.4 | on | 19.6 to 21.0 % | 21.3 to 21.8 % | 11.0 to 11.8 % | 31.5 % |
-| 0.6 | on | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 47.9 % |
-| 0.4 | off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 39.8 % |
+| 0.1 | on | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 8.1 % |
+| 0.2 | on | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 16.1 % |
+| 0.4 | on | 19.6 to 21.0 % | 21.3 to 21.8 % | 10.5 to 12.3 % | 31.7 to 32.3 % |
+| 0.6 | on | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 48.0 to 48.2 % |
+| 0.4 | off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 40.0 to 40.2 % |
 
 Efficiency, points of training time recovered per percent of gradient
 lost:
@@ -807,7 +810,7 @@ Keep these out of the deck, and be ready to say why.
 | the 24.8 % from our own May preprint | measured with a fully blocking worker loop, so it includes network time a modern framework hides. It is our earlier number rather than a rival's, and nothing in this file is comparable with it |
 | single-seed sweeps, fan-in and burst-source counts | directional only, no error bars |
 
-## 13. Run #127 (GitHub release #129, run 35180385479): the design of record, budget 0.1
+## 15. Run #127 (GitHub release #129, run 35180385479): the design of record, budget 0.1
 
 Twenty-one single arms on the worst cell at budget 0.1, joined by seed
 against run #123's fixed-low baseline (1696.7, 1696.9 and 1700.6 ms).
@@ -870,7 +873,7 @@ Readings.
 
 ---
 
-## 15. Run #130 (run 35233809033): the healthy cell, `direct7` at 1:1
+## 16. Run #130 (run 35233809033): the healthy cell, `direct7` at 1:1
 
 Eight spines per leaf, so the fabric is not oversubscribed; everything
 else as the worst cell. Nine records, 18 arms, code main `65e98e7`, the

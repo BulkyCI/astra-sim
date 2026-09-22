@@ -1,13 +1,10 @@
 # FORGIVE: receiver-budgeted forgiveness with a bounded congestion-control exemption
 
-Draft section for the revision of our May preprint (Ma, Qu, Yi, Lin,
-Ganjali, arXiv 2605.01989), written 2026-09-18 for sharing. FORGIVE,
-the vesting rule and the protocol are Joe Fang's, in collaboration with
-Zechen Ma; the Bernoulli coin and the non-zero start are Yashar Ganjali's
-suggestions. Every number below comes from a certified arm named in
-section 7, and every number that was measured under a rule since replaced
-says so where it appears. The vesting version is the design; the coin is
-the secondary result.
+Draft section for the revision of our May preprint (arXiv 2605.01989).
+Every number below comes from a certified arm named in section 7, and
+every number that was measured under a rule since replaced says so where
+it appears. The vesting version is the design; the coin is the secondary
+result.
 
 ## 1. The observation
 
@@ -150,8 +147,8 @@ controller, with no licence, recovers 5.5 to 6.6 % on the worst cell for
 
 ### 2.5 The coin
 
-Yashar Ganjali suggested spending the budget probabilistically: a trim the
-cap would forgive is forgiven with probability `P` and repaired otherwise,
+The coin spends the budget probabilistically: a trim the cap would
+forgive is forgiven with probability `P` and repaired otherwise,
 with a fresh draw on every trimmed arrival so a range refused once has
 another chance on its next trim. A coin refusal charges nothing; the
 refused range remains a hole until its repair lands, as a cap refusal
@@ -334,8 +331,8 @@ windows can be subtracted.
 | no controller | | the same transport with the controller off |
 | never re-engage (D) | | FORGIVE with the licence never withdrawn |
 
-The four-arm comparison in Zechen's terms, worst cell, budget 0.4, three
-seeds (run #123):
+The four-arm comparison, worst cell, budget 0.4, three seeds (run
+#123):
 
 | arm | training window | all-reduce, non-critical steps | all-reduce, critical steps | gradient lost | re-sent |
 | --- | ---: | ---: | ---: | ---: | ---: |

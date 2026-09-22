@@ -916,3 +916,57 @@ Readings.
 - The seed spread on the vesting arm (4.5 to 7.5 %) is three points on a
   six-point effect; five seeds would be needed before quoting a single
   figure.
+
+---
+
+## 17. Goodput and completion-time distribution of the data-parallel all-reduce
+
+Drawn 2026-09-22 from the local bundles of runs #123, #126 and #127,
+worst configuration (`direct7`, 4:1, DCQCN unless stated), the three
+seeds 9550582, 23172535 and 94081284. Files:
+`figures/dp-allreduce-goodput-per-step.svg`,
+`figures/dp-allreduce-goodput-summary.svg`,
+`figures/dp-allreduce-time-cdf.svg`; script `figures/dp-allreduce-goodput.py` (run with the bundle root in
+`SP`); numbers in `goodput.json` in the session scratchpad.
+
+Definitions. For each (rank, step) the all-reduce completion time is the
+end minus the start of that rank's data-parallel all-reduce collective
+(`collective_events.csv`). The step span is the latest end minus the
+earliest start over the 64 ranks. Delivered gradient bytes for a rank and
+step are the algorithmic bucket size, 68 359 375 B, times the rank's
+delivered share, `1 - forgiven / owed` from the flow telemetry (1 for the
+arms that forgive nothing). Goodput per step is the sum over ranks of
+delivered bytes divided by the step span, in GB/s; it nets out the loss,
+so a forgiving arm is credited only for the bytes it delivered. The
+summary goodput is the mean over the 16 non-critical steps, then the
+mean and min to max over seeds. Sender-side shedding is not in these
+figures because its per-flow telemetry is not in the local bundles.
+
+| configuration | goodput, GB/s (3-seed mean; min to max) | relative to the p_low baseline | all-reduce time median | p99 | max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DCQCN baseline (no loss) | 118.1 (117.2 to 118.7) | -2 % | 32.5 ms | 43.2 ms | 46.7 ms |
+| p_low baseline (0.5 % shed) | 120.1 (119.5 to 121.1) | 0 | 32.3 ms | 38.5 ms | 41.1 ms |
+| forgiveness with congestion control on, p = 0.1 | 132.9 (132.0 to 133.8) | +11 % | 25.8 ms | 36.4 ms | 39.4 ms |
+| FORGIVE, vesting and the exemption, p = 0.1 | 186.2 (184.2 to 187.8) | +55 % | 17.4 ms | 28.4 ms | 31.1 ms |
+| no congestion control | 212.2 (one run) | +77 % | 18.4 ms | 23.0 ms | 23.8 ms |
+
+The completion-time columns are over the 3 072 (rank, step) samples of
+the non-critical steps pooled across the three seeds; p99 here is a
+percentile of that pool, not a per-rank tail estimate with a confidence
+interval.
+
+Readings.
+
+- Goodput rises more than the training time falls: FORGIVE's all-reduce
+  goodput is 55 % above the p_low baseline's for a 16 % shorter training
+  time, because the training time also contains compute and the
+  tensor-parallel collectives, which FORGIVE does not touch.
+- The goodput figure nets out the loss. FORGIVE delivers 92.4 % of the
+  gradient bytes in 54 % of the all-reduce time of the baseline, which is
+  the 55 %.
+- FORGIVE's median all-reduce time is below the no-controller run's
+  (17.4 against 18.4 ms) while its tail is longer (p99 28.4 against
+  23.0 ms), which is the exemption's interruptions; the no-controller run
+  has the shorter tail because it never reacts at all.
+- On the critical steps the per-step figure shows FORGIVE at the
+  baseline's goodput, which is the phase-aware schedule holding.

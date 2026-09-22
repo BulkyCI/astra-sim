@@ -325,6 +325,13 @@ Where "the baseline" appears alone below, it is the p_low baseline.
   sender-side shedding, the bytes suppressed before the fabric. Sections
   3.1c and 3.6 come from the run #123 readout, which divides by the
   baseline's post-shed 190.4 GB, 0.5 % higher in relative terms.
+- **All-reduce goodput.** Per step, the sum over the 64 ranks of the
+  algorithmic bucket size (68 359 375 B) times each rank's delivered
+  share, divided by the step's span (latest end minus earliest start of
+  the step's data-parallel all-reduce over the ranks), in GB/s. It credits
+  a forgiving configuration only for the bytes it delivered.
+- **All-reduce completion time per (rank, step)**, whose distribution
+  over the non-critical steps is the latency figure.
 - **Trim ratio W** (trimmed payload bytes over offered bytes) and
   **retransmitted bytes** (retransmitted bytes over the 793.6 GB offered),
   which measure what a configuration costs the fabric.
@@ -419,6 +426,31 @@ multiplies that reduction by 2.4 to 3.0. The 2.0 to 2.9 points to the run
 in which congestion control never resumes, paired by seed, are the
 interruptions of the exemption and the one round trip in which each flow
 reacts to congestion signals at its start.
+
+### 3.3b Goodput and completion-time distribution
+
+Worst configuration, three seeds, the 16 non-critical steps
+(figures `dp-allreduce-goodput-summary.svg`,
+`dp-allreduce-goodput-per-step.svg`, `dp-allreduce-time-cdf.svg`):
+
+| configuration | all-reduce goodput, GB/s | relative to the p_low baseline | completion time median | p99 (pooled samples) |
+| --- | ---: | ---: | ---: | ---: |
+| DCQCN baseline | 117.2 to 118.7 | -2 % | 32.5 ms | 43.2 ms |
+| p_low baseline | 119.5 to 121.1 | 0 | 32.3 ms | 38.5 ms |
+| forgiveness, congestion control on, p = 0.1 | 132.0 to 133.8 | +11 % | 25.8 ms | 36.4 ms |
+| FORGIVE, p = 0.1 | 184.2 to 187.8 | +55 % | 17.4 ms | 28.4 ms |
+| no congestion control | 212.2 (one run) | +77 % | 18.4 ms | 23.0 ms |
+
+Goodput nets out the loss: FORGIVE delivers 92.4 % of the gradient bytes
+in 54 % of the baseline's all-reduce time. The goodput gain exceeds the
+training-time reduction because the training time also contains compute
+and the tensor-parallel collectives, which FORGIVE leaves unchanged. The
+p99 is a percentile of the 3 072 pooled (rank, step) samples, not a
+per-rank tail estimate with a confidence interval. FORGIVE's median
+completion time is below the no-congestion-control run's and its tail is
+longer, which is the cost of the exemption's interruptions. Sender-side
+shedding is absent from this table because its per-flow telemetry is not
+in the local bundles.
 
 ### 3.4 Which piece produces the reduction
 
@@ -663,7 +695,19 @@ outstanding trimmed byte does.
 
 ## 6. Figures and data in hand
 
-Drawn, in `docs/agents/figures/`: `regime-map.svg` (the eight
+Current, drawn 2026-09-22 from the bundles of runs #123, #126 and #127
+and named in section 3.3b: `dp-allreduce-goodput-per-step.svg`,
+`dp-allreduce-goodput-summary.svg`, `dp-allreduce-time-cdf.svg`.
+
+Not yet drawn, from data in hand: the per-(rank, step) delivered-share
+histogram (the loss bound at every rank and step, worst 0.900 to 0.909);
+retransmitted bytes, trim ratio, timeouts and CNPs per configuration as
+one grouped chart; tensor-parallel collective time against the baseline;
+the budget sweep as goodput against loss; and the exemption's duty cycle
+per step from the transition counters.
+
+Older, from the go-back-N and v1 eras, to be redrawn before use, in
+`docs/agents/figures/`: `regime-map.svg` (the eight
 configurations), `run117-paired-seeds.svg` and `run117-mechanism.svg` (the
 go-back-N result and its correlation with trims avoided),
 `recovery-amplification.svg` (go-back-N against selective repeat),

@@ -1105,7 +1105,11 @@ distinct peers in ring order (`curr_receiver` advances after each
 message); by symmetry it receives from as many peers at once. The number
 bounds each direction separately: `direct7` is fan-out 7 and fan-in 7 at
 the same time, `direct2` two and two, `ring` one. It is not a bound on the
-sum of inbound and outbound transfers. Because each sender divides its
+sum of inbound and outbound transfers. `direct2` is not a ring: a ring
+receives from one predecessor and sends to one successor (fan-in 1,
+ASTRA-sim's `ring` implementation, not run in any FORGIVE wave; `direct1`
+would be its direct analogue and has not been run); fan-in 2 is a tree or
+a ring over two channels. Because each sender divides its
 NIC among the peers it is sending to, the sustained aggregate into any
 receiver is about one link's worth; the queue at the host link is
 burstiness and finish-time imbalance, and the leaf-to-spine hop is the

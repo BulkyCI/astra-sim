@@ -228,7 +228,10 @@ AllToAll collective, `direct<w>`: each rank sends its shard to each of its
 seven peers and keeps `min(w, 7)` transfers in flight at once, to distinct
 peers in ring order, and by symmetry receives from as many at once; the
 number bounds each direction, so `direct7` is fan-out 7 and fan-in 7, and
-`direct2` two at a time. `direct7` sends each peer
+`direct2` two at a time. A ring all-reduce receives from one predecessor
+and sends to one successor, fan-in 1; ASTRA-sim's `ring` implementation
+is that schedule and was not run in any FORGIVE wave, and `direct2` is
+not a ring but the fan-in of a tree or of a ring over two channels. `direct7` sends each peer
 five streams of 17 089 843 bytes, each a reduce-scatter and an all-gather
 phase, so a rank receives 70 data-parallel flows of 2 136 230 bytes (522
 packets) per step and is owed 149 536 100 bytes per step in all. That is

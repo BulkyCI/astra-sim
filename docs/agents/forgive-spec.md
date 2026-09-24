@@ -31,10 +31,11 @@ The numbers are those of the 64-rank `direct7` profile every #123 to
 #127 arm ran (TP 8, DP 8, Llama 3 70B, 20 steps, 4 096 B packets);
 other profiles change the counts, not the containment. `direct7` means
 the all-to-all schedule with all 7 DP peers sending at once, the most
-incast a group of 8 can produce; it is the stress case. NCCL's default
-ring and tree schedules receive from 1 or 2 peers per channel, which the
-`direct2` cell (fan-in 2) approximates, and that cell's figures are the
-ones to map onto a production library.
+incast a group of 8 can produce; it is the stress case. NCCL's default ring
+receives from one peer per channel (fan-in 1, ASTRA-sim's `ring`, not
+run in any FORGIVE wave) and its tree from two; `direct2` is fan-in 2,
+the low end of what a NIC running a few channels sees, and it is not a
+ring. Its figures are the ones to map onto a production library.
 
 | level | contains | count in the profile |
 | --- | --- | --- |

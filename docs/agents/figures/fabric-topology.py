@@ -41,7 +41,7 @@ fig.text(0.5,0.035,
  'Tensor-parallel group = the 8 hosts of one leaf (orange, leaf 0: ranks 0 to 7); data-parallel group = the same host position on every leaf (red: ranks 0, 8, 16, ..., 56), so every DP flow crosses a spine. '
  'Oversubscription is the leaf ratio 8 x 400 in : live spines x 400 out.\n'
  'direct<w> (ASTRA-sim\'s AllToAll collective used for the DP all-reduce): each rank sends its shard to each of its 7 peers, keeping min(w, 7) transfers in flight at once to distinct peers in ring order; '
- 'by symmetry it receives from as many at once. direct7 = all 7 peers at once (fan-out 7 and fan-in 7); direct2 = 2 at a time. The number bounds each direction, not their sum. ring = fan-in 1.',
+ 'by symmetry it receives from as many at once. direct7 = all 7 peers at once (fan-out 7 and fan-in 7); direct2 = 2 at a time (a tree, or a ring over two channels; not a ring). The number bounds each direction, not their sum. A ring all-reduce is fan-in 1 (ASTRA-sim ring implementation, not run in the FORGIVE waves).',
  ha='center',va='bottom',fontsize=7.3,wrap=True)
 fig.tight_layout(rect=(0,0.10,1,1)); fig.savefig(f'{OUT}/fabric-topology.svg')
 if PNG: fig.savefig(f'{PNG}/fabric-topology.png',dpi=110)

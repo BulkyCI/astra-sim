@@ -970,3 +970,101 @@ Readings.
   has the shorter tail because it never reacts at all.
 - On the critical steps the per-step figure shows FORGIVE at the
   baseline's goodput, which is the phase-aware schedule holding.
+
+---
+
+## 18. Five more metrics from the bundles in hand
+
+Drawn 2026-09-22 from the local bundles of runs #123, #125, #126 and
+#127, worst configuration (`direct7`, 4:1, DCQCN unless stated), budget
+0.1 where a budget applies, seeds 9550582, 23172535 and 94081284 (five
+at budget 0.4). Script `figures/forgive-metrics.py` (bundle root in
+`SP`); numbers in `metrics2.json` in the session scratchpad. Every
+summary counter the figures use (timeouts, CNPs, forgiven bytes,
+retransmitted bytes) was recomputed from the per-flow telemetry of the
+same bundle: 97 cross-checks, 0 mismatches; the minimum delivered share
+recomputed from the flows equals the verified minimum (0.9001 on
+non-critical steps, 0.9950 on critical steps).
+
+**`dp-delivered-share-cdf.svg`.** CDF of the share of owed gradient bytes
+delivered per (rank, step) under FORGIVE, 3 072 non-critical and 768
+critical samples. Non-critical steps run from 0.9001 to about 0.925,
+median 0.9056: the vesting cap spends the budget almost to the bound on
+nearly every rank and step. Critical steps sit at 0.9950 to 0.9958, so
+the 0.5 % budget is spent in full there too. No sample falls below its
+bound.
+
+**`fabric-cost-per-configuration.svg`.** Four panels, 3-seed mean with
+min to max:
+
+| configuration | retransmitted, % of bytes offered | trim ratio W, % | retransmission timeouts | CNPs received, millions |
+| --- | ---: | ---: | ---: | ---: |
+| DCQCN baseline | 3.48 to 3.73 | 2.97 to 3.18 | 10 042 to 10 622 | 12.70 to 13.51 |
+| p_low baseline | 3.53 to 3.67 | 3.00 to 3.12 | 10 110 to 10 482 | 12.99 to 13.40 |
+| forgiveness, congestion control on | 1.74 to 1.89 | 3.19 to 3.32 | 4 362 to 4 673 | 15.11 to 15.51 |
+| FORGIVE | 5.22 to 5.88 | 6.71 to 7.36 | 4 145 to 4 348 | 4.43 to 4.59 |
+| FORGIVE with pacing at 0.25 | 6.48 to 6.57 | 7.47 to 7.58 | 3 477 to 3 726 | 3.69 to 3.90 |
+| budget in full at step start | 1.93 to 2.09 | 3.57 to 3.72 | 5 197 to 5 564 | 7.73 to 8.16 |
+| exemption never withdrawn | 6.52 to 6.75 | 8.10 to 8.32 | 2 102 to 2 187 | 2.10 to 2.20 |
+| no congestion control | 25.35 | 25.09 | 93 | 0 |
+
+Exempt senders trim 2.2 to 2.4 times as much as the baseline and
+retransmit 1.5 times as much, and they receive a third of the CNPs and
+time out 40 % as often, because they finish sooner. Forgiveness without
+the exemption receives more CNPs than the baseline (15.1 to 15.5 million
+against 13.0 to 13.4), since every forgiven range's acknowledgement
+carries the congestion mark the trim would have produced. The
+up-front-budget configuration is the one with a low retransmission share
+and a high timeout count, the signature of senders under rate cuts for
+most of the step.
+
+**`tp-collective-time-vs-baseline.svg`.** Tensor-parallel all-reduce time
+(each collective's span across its 8 ranks, summed over steps) against
+the p_low baseline on the same seed: DCQCN baseline +0.3 to +3.6 %,
+forgiveness with congestion control on -3.8 to +4.5 %, FORGIVE -4.3 to
++4.4 %, pacing at 0.25 -7.6 to -1.2 %, budget in full at step start +4.1
+to +6.1 %, exemption never withdrawn -9.0 to -2.6 %, no congestion
+control -22.0 to -18.2 %. The seed spread of this metric is about
+8 points, so only the up-front-budget (slower) and the never-withdrawn
+and no-controller (faster) configurations are outside it.
+
+**`goodput-vs-loss-sweep.svg`.** Goodput (section 17's definition) against
+loss for the budget sweep. v1 rules (run #123): budget 0.05 153.7 to
+155.7 GB/s at 3.74 to 3.77 % loss; 0.1 181.3 to 192.9 at 6.71 to 6.85 %;
+0.2 213.4 to 226.6 at 11.0 to 12.1 %; 0.4 242.3 to 257.5 at 21.2 to
+21.7 % (5 seeds); 0.6 238.1 to 249.6 at 37.5 to 38.4 %; 0.4 without the
+phase-aware schedule 252.0 to 261.0 at 25.5 to 25.9 %. Vesting (run
+#127): 184.2 to 187.8 at 7.55 to 7.57 %; with pacing at 0.25, 195.5 to
+198.5 at 5.51 to 5.64 %. Pacing under the old rules (run #125): P = 0.1
+202.7 to 211.5 at 2.61 to 2.92 %, P = 0.05 204.4 to 209.9 at 1.22 to
+1.32 %. The p_low baseline is 119.5 to 121.1 and no congestion control
+212.2.
+
+Readings.
+
+- Goodput saturates at budget 0.4 (242 to 258 GB/s) and falls at 0.6,
+  because goodput nets out the loss and the extra loss at 0.6 no longer
+  shortens the all-reduce.
+- Pacing raises goodput at equal training time, because it lowers the
+  loss: 195 to 199 against 184 to 188 under vesting at 0.25, and 203 to
+  212 at P = 0.1 and 0.05 under the old rules, which is above the
+  no-congestion-control run's 212 at a fortieth of its retransmission.
+- v1 at 0.1 and vesting at 0.1 have the same DP all-reduce goodput
+  (181 to 193 against 184 to 188) although their training-time
+  reductions differ (12.9 to 14.1 % against 16.1 to 16.7 %). On seed
+  9550582 the two configurations' DP all-reduce spans sum to 477.5 and
+  473.1 ms while the training times differ by 64 ms, and the difference
+  is in the tensor-parallel windows (994 against 900 ms, baseline 962).
+  The residual between the two rule sets is therefore outside the DP
+  all-reduce and not yet explained; it is an open item.
+
+**`exemption-duty-cycle-per-step.svg`.** Share of data-parallel flow time
+during which the sender is exempt (per exempt flow, time from the grant
+to the flow's end less the time spent reacting to congestion signals;
+summed over flows and divided by the total DP flow time of the step).
+On non-critical steps FORGIVE is exempt 77 to 83 % of flow time (mean
+81 %), pacing at 0.25 86 to 88 %, the up-front budget 30 to 38 %, and the
+never-withdrawn configuration 85 to 87 % (its remainder is the one round
+trip each flow spends before the grant). On critical steps FORGIVE is
+exempt 15 to 25 % of flow time, the never-withdrawn configuration 52 to
+55 %, and the up-front budget 0 to 1 %.

@@ -452,6 +452,52 @@ longer, which is the cost of the exemption's interruptions. Sender-side
 shedding is absent from this table because its per-flow telemetry is not
 in the local bundles.
 
+### 3.3c Fabric cost, collateral effect, delivered share and exemption duty cycle
+
+Same configuration and seeds (figures `fabric-cost-per-configuration.svg`,
+`tp-collective-time-vs-baseline.svg`, `dp-delivered-share-cdf.svg`,
+`exemption-duty-cycle-per-step.svg`, `goodput-vs-loss-sweep.svg`; every
+counter cross-checked against the per-flow telemetry, 97 checks, 0
+mismatches):
+
+| configuration | retransmitted, % of bytes | trim ratio W, % | timeouts | CNPs, millions | TP collective time vs p_low baseline | exempt share of DP flow time, non-critical steps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| DCQCN baseline | 3.5 to 3.7 | 3.0 to 3.2 | 10 042 to 10 622 | 12.7 to 13.5 | +0.3 to +3.6 % | 0 |
+| p_low baseline | 3.5 to 3.7 | 3.0 to 3.1 | 10 110 to 10 482 | 13.0 to 13.4 | 0 | 0 |
+| forgiveness, congestion control on | 1.7 to 1.9 | 3.2 to 3.3 | 4 362 to 4 673 | 15.1 to 15.5 | -3.8 to +4.5 % | 0 |
+| FORGIVE | 5.2 to 5.9 | 6.7 to 7.4 | 4 145 to 4 348 | 4.4 to 4.6 | -4.3 to +4.4 % | 77 to 83 % |
+| FORGIVE with pacing at 0.25 | 6.5 to 6.6 | 7.5 to 7.6 | 3 477 to 3 726 | 3.7 to 3.9 | -7.6 to -1.2 % | 86 to 88 % |
+| budget in full at step start | 1.9 to 2.1 | 3.6 to 3.7 | 5 197 to 5 564 | 7.7 to 8.2 | +4.1 to +6.1 % | 30 to 38 % |
+| exemption never withdrawn | 6.5 to 6.8 | 8.1 to 8.3 | 2 102 to 2 187 | 2.1 to 2.2 | -9.0 to -2.6 % | 85 to 87 % |
+| no congestion control | 25.4 | 25.1 | 93 | 0 | -22.0 to -18.2 % | 0 |
+
+Exempt senders trim 2.2 to 2.4 times as much as the baseline and
+retransmit 1.5 times as much; they receive a third of the CNPs and time
+out 40 % as often because they finish sooner. The tensor-parallel
+collectives that share the leaf move within the seed spread of this
+metric (about 8 points) for FORGIVE; the up-front-budget configuration
+slows them by 4 to 6 % and the never-withdrawn one speeds them up by 3
+to 9 %. The delivered share per (rank, step) under FORGIVE runs from
+0.9001 to about 0.925 on non-critical steps (median 0.906) and 0.9950
+to 0.9958 on critical steps, so the budget is spent to the bound on
+nearly every rank and step and no sample falls below its bound. FORGIVE
+is exempt for 77 to 83 % of data-parallel flow time on non-critical
+steps and 15 to 25 % on critical steps; the configuration that never
+withdraws the exemption reaches 85 to 87 %, the remainder being the one
+round trip each flow spends before the grant.
+
+Goodput against loss across the budget sweep (v1 rules unless stated)
+saturates at budget 0.4 (242 to 258 GB/s) and falls at 0.6 (238 to 250),
+because goodput nets out the loss. Pacing raises goodput at equal
+training time by lowering the loss: 195 to 199 GB/s against 184 to 188
+under vesting at 0.25, and 203 to 212 at P = 0.1 and 0.05 under the old
+rules. v1 and vesting at 0.1 have the same DP all-reduce goodput (181 to
+193 against 184 to 188) although their training-time reductions differ
+by 3 points; on one seed their DP all-reduce spans sum to 477.5 and
+473.1 ms while the training times differ by 64 ms, so the residual
+between the two rule sets is outside the DP all-reduce and is not yet
+explained.
+
 ### 3.4 Which piece produces the reduction
 
 The most congested configuration, budget 0.1, three seeds each, seed
@@ -695,16 +741,14 @@ outstanding trimmed byte does.
 
 ## 6. Figures and data in hand
 
-Current, drawn 2026-09-22 from the bundles of runs #123, #126 and #127
-and named in section 3.3b: `dp-allreduce-goodput-per-step.svg`,
-`dp-allreduce-goodput-summary.svg`, `dp-allreduce-time-cdf.svg`.
-
-Not yet drawn, from data in hand: the per-(rank, step) delivered-share
-histogram (the loss bound at every rank and step, worst 0.900 to 0.909);
-retransmitted bytes, trim ratio, timeouts and CNPs per configuration as
-one grouped chart; tensor-parallel collective time against the baseline;
-the budget sweep as goodput against loss; and the exemption's duty cycle
-per step from the transition counters.
+Current, drawn 2026-09-22 from the bundles of runs #123, #125, #126 and
+#127 and named in sections 3.3b and 3.3c: `dp-allreduce-goodput-per-step.svg`,
+`dp-allreduce-goodput-summary.svg`, `dp-allreduce-time-cdf.svg`,
+`dp-delivered-share-cdf.svg`, `fabric-cost-per-configuration.svg`,
+`tp-collective-time-vs-baseline.svg`, `goodput-vs-loss-sweep.svg`,
+`exemption-duty-cycle-per-step.svg`; scripts `dp-allreduce-goodput.py`
+and `forgive-metrics.py` beside them regenerate every one from the
+release bundles.
 
 Older, from the go-back-N and v1 eras, to be redrawn before use, in
 `docs/agents/figures/`: `regime-map.svg` (the eight

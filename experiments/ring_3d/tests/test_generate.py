@@ -458,6 +458,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "regime_64_dcqcn_direct7_1to1_exempt_p01.json",
                 "regime_64_dcqcn_direct7_1to1_exempt_p01_b25.json",
                 "regime_64_dcqcn_direct7_1to1_zero.json",
+                "regime_64_dcqcn_direct7_1to1_zero_burst63.json",
+                "regime_64_dcqcn_direct7_1to1_exempt_p01_burst63.json",
             },
         )
 

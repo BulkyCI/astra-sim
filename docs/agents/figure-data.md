@@ -1068,3 +1068,51 @@ never-withdrawn configuration 85 to 87 % (its remainder is the one round
 trip each flow spends before the grant). On critical steps FORGIVE is
 exempt 15 to 25 % of flow time, the never-withdrawn configuration 52 to
 55 %, and the up-front budget 0 to 1 %.
+
+---
+
+## 19. The fabric and the meaning of `direct<w>`
+
+`figures/fabric-topology.svg`, drawn 2026-09-24 by `figures/fabric-topology.py`
+from the code, not from memory. Facts, with their source:
+
+- Two-tier leaf-spine Clos, 64 ranks, one host per rank, 8 hosts per leaf,
+  8 leaves (`topology.py`: `leaf_count = host_count // hosts_per_leaf`).
+- One 400 Gbps link from each host to its leaf and one 400 Gbps link from
+  each leaf to every live spine (`_build_clos_topology`: one `TopologyLink`
+  per host and one per (leaf, live spine) pair, all at `link_rate`). The
+  leaf tier is fully connected to the live spine tier.
+- One-way delays: host to leaf 5 us, leaf to spine 12.5 us
+  (`HOST_TO_SWITCH_DELAY`, `SWITCH_TO_SWITCH_DELAY`).
+- Oversubscription is the leaf ratio 8 x 400 Gbps in against live spines
+  x 400 Gbps out: 1:1 = `spine_count 8, failed_spine_count 0`; 2:1 =
+  `spine_count 4`; 4:1 = `spine_count 4, failed_spine_count 2`. A failed
+  spine is absent from the built fabric and terminates no link; the
+  manifest keeps the designed count.
+- Rank layout (`rank_for`, TP fastest): rank = dp_rank x 8 + tp_rank, so a
+  tensor-parallel group is the 8 hosts of one leaf and a data-parallel
+  group is the same host position on every leaf; every DP flow crosses a
+  spine.
+- Per-flow ECMP across the live spines, seeded by the switch's node id
+  (`switch-node.cc`), no spraying; PFC off; trimming in forward-trimmed-data
+  mode with the trimmed class at 25 % WDRR weight and a 1 MiB queue.
+
+`direct<w>` (`generate.py` `dp_fan_in`, ASTRA-sim `AllToAll.cc`): the DP
+all-reduce runs ASTRA-sim's AllToAll collective with
+`parallel_reduce = min(w, dp - 1)`. Each rank sends its shard to each of
+its 7 peers and keeps `parallel_reduce` transfers in flight at once, to
+distinct peers in ring order (`curr_receiver` advances after each
+message); by symmetry it receives from as many peers at once. The number
+bounds each direction separately: `direct7` is fan-out 7 and fan-in 7 at
+the same time, `direct2` two and two, `ring` one. It is not a bound on the
+sum of inbound and outbound transfers. Because each sender divides its
+NIC among the peers it is sending to, the sustained aggregate into any
+receiver is about one link's worth; the queue at the host link is
+burstiness and finish-time imbalance, and the leaf-to-spine hop is the
+second congestion point under oversubscription.
+
+Checked against what was remembered: fully connected leaf-spine, yes;
+the ideal case 8 leaves and 8 spines, yes (`*_1to1_*`); 8 GPUs per leaf,
+yes; the stressed case 4:1, yes, and it is 4 designed spines with 2 failed
+rather than 8 with 6 failed; `direct7` as "incast 7", yes for fan-in, and
+also fan-out 7, not a sum of the two.

@@ -223,7 +223,12 @@ communication phase. Each step every rank runs a data-parallel all-reduce
 of one 68 359 375-byte gradient bucket (the 256-bucket gradient sharded
 eight ways) with its seven data-parallel peers, and two 64 MiB
 tensor-parallel all-reduces per layer with the seven ranks of its
-tensor-parallel group. ASTRA-sim's `direct7` all-reduce sends each peer
+tensor-parallel group. The data-parallel all-reduce runs ASTRA-sim's
+AllToAll collective, `direct<w>`: each rank sends its shard to each of its
+seven peers and keeps `min(w, 7)` transfers in flight at once, to distinct
+peers in ring order, and by symmetry receives from as many at once; the
+number bounds each direction, so `direct7` is fan-out 7 and fan-in 7, and
+`direct2` two at a time. `direct7` sends each peer
 five streams of 17 089 843 bytes, each a reduce-scatter and an all-gather
 phase, so a rank receives 70 data-parallel flows of 2 136 230 bytes (522
 packets) per step and is owed 149 536 100 bytes per step in all. That is
@@ -233,9 +238,12 @@ remainder. Every per-byte figure in this section is against the bytes the
 simulator moved. The run offers 191.4 GB of data-parallel and 793.6 GB of
 total payload.
 
-**Topology and where the traffic goes.** A two-tier Clos: 8 hosts per leaf
-at 400 Gbps, 4 spines by design (2:1 leaf-to-spine), 32 MB switch buffers,
-PFC off. A tensor-parallel group is the 8 hosts of one leaf, so
+**Topology and where the traffic goes** (figure `fabric-topology.svg`). A
+two-tier leaf-spine Clos of 8 leaves: 8 hosts per leaf, one host per rank,
+one 400 Gbps link from each host to its leaf and one 400 Gbps link from
+each leaf to every live spine, 4 spines by design (2:1 leaf-to-spine),
+one-way delays of 5 us host to leaf and 12.5 us leaf to spine, 32 MB
+switch buffers, PFC off. A tensor-parallel group is the 8 hosts of one leaf, so
 tensor-parallel traffic stays on the leaf (a simplification, since real
 tensor-parallel traffic runs on a scale-up domain). Data-parallel peers
 are the same-position hosts on the other seven leaves, so every
@@ -243,11 +251,15 @@ data-parallel flow crosses a spine. The most congested configuration (4:1)
 fails two of the four spines, and the non-oversubscribed configuration
 (1:1) has eight. Oversubscription here is only that ratio.
 
-**Where the incast is.** Under `direct7` all seven peers send to a rank at
-once, so seven 400 Gbps senders converge on one 400 Gbps host link. That
-last-hop incast exists at every oversubscription ratio; the
-oversubscription ratio adds a second congestion point on the leaf-to-spine
-uplinks at 2:1 and 4:1. The trim ratio without congestion control,
+**Where the incast is.** Under `direct7` seven flows, one from each peer,
+converge on every host link at once. Because each sender divides its own
+400 Gbps among its seven peers, their sustained aggregate is about one
+link's worth; the queue at the host link comes from the flows' burstiness
+and from the imbalance as flows finish at different times, and congestion
+control reacts to that queue at every oversubscription ratio. The
+oversubscription ratio adds the second congestion point, the leaf-to-spine
+uplinks, at 2:1 and 4:1, and that is where most of the trimming at 4:1
+happens. The trim ratio without congestion control,
 measured one seed per configuration, is a steady-state property of
 provisioning rather than of any burst: 2.4 % at `direct2` 2:1, 6.3 % at
 `direct7` 2:1, 12.9 % at `direct2` 4:1, 24.1 % at `direct7` 4:1, and
@@ -599,9 +611,9 @@ With eight spines the fabric is not oversubscribed and the baseline trims
 baseline's trim ratio is below 0.5 % and FORGIVE recovers under 2 points,
 the claim is scoped to degraded fabrics") did not fire, because FORGIVE
 recovers 4.5 to 7.5 % for 1.0 to 1.3 % of bytes, and pacing 5.8 to 6.7 %
-for 0.27 to 0.42 %. The incast is at the last hop. Seven senders at
-400 Gbps into one 400 Gbps receiver link is a 7:1 incast whatever the
-oversubscription ratio, DCQCN reacts to it with rate cuts on every step,
+for 0.27 to 0.42 %. The incast is at the last hop. Seven flows converge on
+every receiver link whatever the oversubscription ratio, DCQCN reacts to
+the queue they build with rate cuts on every step,
 and the exempt senders trim ten times more than the baseline (0.27 to
 0.34 % of bytes) and still complete sooner. Sender-side shedding recovers
 0.1 to 0.3 % on the same configuration and the loose baseline -0.4 to
@@ -776,9 +788,11 @@ Current, drawn 2026-09-22 from the bundles of runs #123, #125, #126 and
 `dp-allreduce-goodput-summary.svg`, `dp-allreduce-time-cdf.svg`,
 `dp-delivered-share-cdf.svg`, `fabric-cost-per-configuration.svg`,
 `tp-collective-time-vs-baseline.svg`, `goodput-vs-loss-sweep.svg`,
-`exemption-duty-cycle-per-step.svg`; scripts `dp-allreduce-goodput.py`
-and `forgive-metrics.py` beside them regenerate every one from the
-release bundles.
+`exemption-duty-cycle-per-step.svg`, and `fabric-topology.svg` (the
+three fabrics and the `direct<w>` definition, from the topology builder
+and the collective's source); scripts `dp-allreduce-goodput.py`,
+`forgive-metrics.py` and `fabric-topology.py` beside them regenerate
+every one.
 
 Older, from the go-back-N and v1 eras, to be redrawn before use, in
 `docs/agents/figures/`: `regime-map.svg` (the eight

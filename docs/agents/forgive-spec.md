@@ -117,7 +117,8 @@ Per flow at the sender: `exempt` (a bool), the last report seen, the
 count of report transitions, and the time spent obeying.
 
 Parameters per profile: `p_low`, `p_high`, the critical-step set,
-`pacing = none | bernoulli{P}`, `step_stop`, and the two ablation
+`pacing = none | bernoulli{P}` with `0 < P < 1` (both parsers refuse
+`P = 0` and `P = 1`), `step_stop`, and the two ablation
 switches `cap_base = accounted | owed` and `reengage`.
 
 ## 5. Stages, per receiver and per step
@@ -126,7 +127,7 @@ A cell passes through these stages; a sender's flows follow their cell.
 
 | stage | the sender | the receiver | leaves when |
 | --- | --- | --- | --- |
-| **Opening** | obeys its controller | forgives under the rules of section 6; marks its acknowledgements eligible on any step with `p > 0` | the sender's first acknowledgement arrives with the eligible bit set and the gone bit clear: the sender enters Forgiving |
+| **Opening** | obeys its controller | forgives under the rules of section 6; the flow's eligibility is decided once when its receive queue pair is created (DP all-reduce payload on a step with `p > 0`) and every acknowledgement carries it | the sender's first acknowledgement arrives with the eligible bit set and the gone bit clear: the sender enters Forgiving |
 | **Forgiving** | withholds every congestion signal from its controller | forgives, repairs, reports | a report with the gone bit set: the sender enters Controlled |
 | **Controlled** | delivers every congestion signal to its controller | forgives under the same rules, repairs, reports | a report with the gone bit clear: the sender returns to Forgiving |
 | **Stopped** (per sender) | has nothing left to send to this receiver this step | has told the sender to stop | the step ends |
@@ -166,8 +167,9 @@ computes the range it still lacks, and decides in this order:
 2. Pacing is Bernoulli and a fresh coin, `hash(flow, range, attempt)`,
    falls above `P`: repair. The readout counts it as a pacing refusal
    when the cap could have afforded it; no rule reads that count.
-3. The soft cap: forgive if `forgiven + range <= p x (received + forgiven)`,
-   i.e. `forgiven + range <= p/(1-p) x received`. The range is absorbed
+3. The soft cap: forgive if `forgiven + range <= p x (received + forgiven + range)`,
+   the range under decision counted on both sides, i.e.
+   `forgiven + range <= p/(1-p) x received`. The range is absorbed
    as received, charged to `forgiven`, and acknowledged; the
    acknowledgement includes the congestion mark the trim would have
    produced, so forgiving hides no congestion from a sender that is

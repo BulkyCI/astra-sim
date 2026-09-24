@@ -251,9 +251,10 @@ class Pacing:
                 "selection_policy.pacing.p is required by kind 'bernoulli' "
                 "and rejected by every other kind"
             )
-        if self.p is not None and not 0.0 < self.p < 1.0:
+        if self.p is not None and not 0.0 <= self.p < 1.0:
             raise ValueError(
-                "selection_policy.pacing.p must be strictly between 0 and 1"
+                "selection_policy.pacing.p must be at least 0 and below 1; "
+                "0 forgives nothing and keeps the exemption, 1 is no pacing"
             )
 
     def document(self) -> dict[str, Any]:

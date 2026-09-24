@@ -460,6 +460,8 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "regime_64_dcqcn_direct7_1to1_zero.json",
                 "regime_64_dcqcn_direct7_1to1_zero_burst63.json",
                 "regime_64_dcqcn_direct7_1to1_exempt_p01_burst63.json",
+                "regime_64_dcqcn_direct7_4to1_exempt_p01_p0.json",
+                "regime_64_dcqcn_direct2_2to1_exempt_p01.json",
             },
         )
 
@@ -621,7 +623,6 @@ class Ring3DGeneratorTests(unittest.TestCase):
         broken = {
             "pacing.p": {"pacing": {"kind": "none", "p": 0.5}},
             "pacing.p ": {"pacing": {"kind": "bernoulli"}},
-            "pacing.p  ": {"pacing": {"kind": "bernoulli", "p": 0.0}},
             "pacing.p   ": {"pacing": {"kind": "bernoulli", "p": 1.0}},
             "pacing.kind": {"pacing": {"kind": "poisson"}},
             # An unknown kind, because the receiver measures every cap

@@ -1235,10 +1235,12 @@ inline void require_scaled_threshold(const nlohmann::json& policy,
     }
 }
 
-// The one smart constructor for the pacing rule. A probability outside the
-// open interval is not a pacing rule: zero forgives nothing, which is the
-// admission domain, and one declines nothing, which is no pacing. A
-// probability beside any other kind is a value that would be read by nothing.
+// The one smart constructor for the pacing rule. A probability of one
+// declines nothing, which is no pacing, and is refused. A probability of zero
+// is a rule: the receiver forgives nothing while the exemption-eligible flag
+// and the budget-exhausted flag behave as usual, which is the arm that asks
+// whether forgiveness or the exemption recovers the time. A probability
+// beside any other kind is a value that would be read by nothing.
 inline void parse_pacing(const nlohmann::json& policy) {
     if (!policy.contains("pacing")) {
         return;
@@ -1259,9 +1261,9 @@ inline void parse_pacing(const nlohmann::json& policy) {
         }
         const uint64_t threshold = parse_probability_threshold(
             pacing.at("p"), "selection_policy.pacing.p");
-        if (threshold == 0 || threshold >= kDecisionScale) {
+        if (threshold >= kDecisionScale) {
             throw std::runtime_error(
-                "selection_policy.pacing.p must be strictly between 0 and 1");
+                "selection_policy.pacing.p must be below 1; 1 is no pacing");
         }
         experiment_config.pacing = Bernoulli{threshold};
         return;

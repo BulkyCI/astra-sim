@@ -632,54 +632,72 @@ to 20.3 % faster than the p_low baseline, FORGIVE 16.1 to 16.7 %, and the
 no-congestion-control run loses no gradient bytes; its only measured
 costs are 25.4 % of bytes retransmitted and a trim ratio of 25 %, and the
 tensor-parallel collectives that share the leaf finish 18 to 22 % sooner
-rather than unchanged. In a single-job simulation nothing converts that
-retransmission into training time. If training time is the only metric,
-the data of sections 3.2 to 3.7 argue for turning congestion control off,
-and every loss-tolerant design in this section, ours included, is a way
-of approaching that run while keeping congestion control, without a
-demonstration of why one would keep it.
+rather than unchanged. On the non-oversubscribed fabric the same run is
+9.7 to 10.6 % faster than the p_low baseline (1126.3 ms against 1247.7
+to 1260.2 ms), which is the whole time lost to DCQCN there; FORGIVE
+recovered 4.5 to 7.5 of those points. In a single-job simulation with a
+symmetric collective nothing converts the retransmission into training
+time: in `direct7` each sender divides its NIC among its seven peers, so
+each receiver is offered about one link's worth, blasting at line rate
+wastes upstream capacity, and a trimmed packet costs one round trip. If
+training time is the only metric and the traffic is a symmetric
+collective, the data argue for turning congestion control off.
 
-Why a symmetric collective does not make the no-congestion-control run
-fail. In `direct7` each sender divides its NIC among its seven peers, so
-each receiver is offered about one link's worth in aggregate whatever the
-fan-in; the trimming at 4:1 comes from the leaf-to-spine hop, and at 1:1
-the baseline trims 0.02 to 0.04 % of bytes. Blasting at line rate wastes
-upstream capacity and never overloads the last hop beyond what the
-switch trims, and a trimmed packet costs the sender one round trip. The
-transport fails only when the trimmed headers themselves cannot get
-through. A trimmed packet is a minimum-size frame, about 2 % of a 4 KB
-packet on the wire; the trimmed class has a WDRR weight of 25 % of the
-link and a 1 MiB queue; at a sustained many-to-one of fan-in F at full
-rate the headers alone need (F - 1) x 2 % of the link, which exceeds the
-class at F of about 14. Beyond that, headers are dropped at the switch,
-the sender learns of the loss only by the 1 ms retransmission timeout
-(no exponential backoff), and while the incast lasts every sender's leaf
-uplinks carry the blast, so every data-parallel flow in the fabric
-competes with it. Under DCQCN the incast senders are rate-cut and the
-uplinks stay free. Under FORGIVE the incast flows, which are not
-data-parallel payload, run under DCQCN, while the data-parallel flows
-keep the exemption and, at the receiver under the incast, the
-budget-exhausted flag returns them to congestion control as soon as the
-outstanding trimmed bytes exceed the tolerance.
+The transport fails when the load is a sustained many-to-one that a
+symmetric collective never produces and expert-parallel all-to-all does:
+every rank sends its routed tokens to the rank that holds a popular
+expert, of order gigabytes per step. Run #131 measured that case on the
+non-oversubscribed fabric, three seeds: a burst of 63 sources of 128 MiB
+each into one rank at step 10 (8 GB, 160 ms at line rate), under no
+congestion control, under DCQCN with zero tolerance, and under the four
+matched configurations of the p = 0.1 comparison; the burst flows are
+outside every FORGIVE rule and run under whatever congestion control the
+configuration has. The pre-registered kill test was that
+no-congestion-control-with-burst within its no-burst spread would mean
+naive trimming does not fail at this fan-in, and that FORGIVE-with-burst
+not below no-congestion-control-with-burst would mean the direction is
+dead.
 
-Such an incast is the traffic pattern of a hot expert in expert-parallel
-all-to-all, where every rank sends its routed tokens to the rank that
-holds a popular expert, of order gigabytes per step. The experiment
-that decides the question, dispatched 2026-09-24 as run 35956943724
-(twelve records, three seeds, `direct7` at 1:1): a burst of 63 sources
-of 128 MiB each into rank 8 at step 10 (8 GB, 160 ms at line rate), under
-no congestion control, under DCQCN with zero tolerance, and under the
-four matched arms of the p = 0.1 comparison with FORGIVE as the recovery
-arm, together with the no-congestion-control run without the burst. The
-pre-registered kill test: if the no-congestion-control run's training
-time with the burst is within the seed spread of its time without it,
-naive trimming does not fail at this fan-in and FORGIVE has no training
-time to claim over it; if FORGIVE's training time with the burst is not
-below the no-congestion-control run's, the direction is dead. The
-quantities read are training time against the p_low baseline, the
-burst's drain time at rank 8, timeouts and trimmed-header drops at the
-switches, and the data-parallel all-reduce span per step around the
-burst. The result is not in yet.
+| configuration | training time | against the no-burst p_low baseline | burst drain at rank 8 | retransmitted, % of bytes | timeouts |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| no congestion control, no burst | 1126.3 ms (one run) | +9.7 to +10.6 % | | 0.87 | 96 |
+| no congestion control, burst | 1751.2 ms (one run) | -39.0 to -40.4 % | 845.8 ms | 64.9 | 28 887 |
+| DCQCN baseline (zero tolerance), burst | 1304.4 to 1325.3 ms | -3.5 to -6.0 % | 226 to 235 ms | 0.10 to 0.12 | 439 to 505 |
+| p_low baseline, burst | 1303.4 to 1323.7 ms | -4.1 to -5.6 % | 225 to 227 ms | 0.08 to 0.09 | 304 to 367 |
+| sender-side shedding 0.1, burst | 1312.6 to 1321.3 ms | -4.9 to -5.2 % | 221 to 222 ms | 0.08 | 264 to 330 |
+| FORGIVE 0.1, burst | 1242.1 to 1246.2 ms | +0.1 to +1.4 % | 219 to 222 ms | 0.07 to 0.09 | 322 to 422 |
+
+Neither kill test fired. Without congestion control the burst raises
+training time by 55 % over the same transport without it (625 ms, with
+no seed spread, since the seed moves nothing in that run). The
+mechanism is retransmission amplification rather than the trimmed-header
+overflow predicted before the run: the switches dropped 1 945 trimmed
+headers in the whole run, but 63 senders at line rate into one 400 Gbps
+link have 62 of every 63 packets trimmed, each trimmed packet is
+retransmitted at once and trimmed again, 119.5 million trim notifications
+are sent, 65 % of all bytes on the fabric are retransmissions, the 8 GB
+burst takes 846 ms to drain against 160 ms at line rate, and the flood on
+every leaf's uplinks slows the data-parallel all-reduce of every rank by
+7 to 29 times for five steps (100, 232, 184, 118 and 58 ms at steps 10
+to 14 against 8 ms). DCQCN rate-cuts the incast senders, the burst
+drains in 226 to 235 ms, and training time rises 3.5 to 6.0 %. FORGIVE
+under the burst runs in 1242 to 1246 ms, as fast as the baseline without
+any burst, 4.4 to 6.2 % faster than its own paired baseline with the
+burst, for 1.05 to 1.38 % of DP bytes (worst delivered share 0.905 to
+0.940); the burst itself drains in the same 219 to 222 ms as under the
+baseline, and the data-parallel all-reduce spans at steps 10, 13 and 14
+return to their no-burst values. Sender-side shedding and the loose
+baseline move within -1.1 to +0.6 % of their own baseline under the
+burst.
+
+The claim this fixes: on a trimming fabric with selective
+retransmission, turning congestion control off is the fastest transport
+for a symmetric collective and collapses under a sustained many-to-one
+incast; congestion control absorbs the incast at the cost of 10 to 25 %
+of training time everywhere else; FORGIVE keeps congestion control on
+the traffic that needs it and, within a bounded loss on the traffic that
+tolerates it, gives the data-parallel all-reduce back the time congestion
+control takes, under the incast as well as without it.
 
 ## 4. Prior work
 

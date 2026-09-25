@@ -1120,3 +1120,77 @@ the ideal case 8 leaves and 8 spines, yes (`*_1to1_*`); 8 GPUs per leaf,
 yes; the stressed case 4:1, yes, and it is 4 designed spines with 2 failed
 rather than 8 with 6 failed; `direct7` as "incast 7", yes for fan-in, and
 also fan-out 7, not a sum of the two.
+
+---
+
+## 20. Run #131 (run 35956943724): the 63-source incast on the 1:1 fabric
+
+Twelve records, main `7f787ba`, `direct7` at 1:1 (8 spines), the three
+seeds, read 2026-09-25 from release tag `miiav5rlagazhvmyhwpiw4c5dlxyxmx5`
+(local r131); all 21 arms re-analysed, the three FORGIVE arms verified
+(worst delivered share 0.905, 0.916, 0.940). The burst is 63 sources of
+128 MiB each into rank 8 at step 10 (8 GB, 160 ms at line rate),
+priority group 3, outside every FORGIVE rule. "vs no-burst baseline" is
+against the 1:1 p_low baselines without the burst (1247.7, 1253.1,
+1260.2 ms); "vs own baseline" is against the paired p_low baseline that
+ran with the burst.
+
+| configuration | seed | training time | vs no-burst p_low baseline | vs own baseline | timeouts | retransmitted, % of bytes | trim ratio W, % | loss, % of DP bytes | burst drain at rank 8 | DP span, steps 10 / 11 / 12 / 13 / 14, ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| no congestion control, no burst | all three | 1126.3 ms | +9.7 to +10.6 % | | 96 | 0.87 | 0.81 | 0 | 30.8 ms (7 flows) | 8.5 / 8.0 / 6.5 / 8.1 / 9.1 |
+| no congestion control, burst | all three | 1751.2 ms | -39.0 to -40.4 % | | 28 887 | 64.86 | 61.70 | 0 | 845.8 ms | 100.0 / 231.6 / 183.9 / 118.1 / 57.5 |
+| DCQCN baseline (zero tolerance), burst | 9550582 | 1322.0 ms | -5.95 % | | 467 | 0.11 | 0.093 | 0 | 235.0 ms | 25.3 / 39.4 / 41.4 / 15.2 / 13.2 |
+| | 23172535 | 1325.3 ms | -5.76 % | | 505 | 0.12 | 0.101 | 0 | 227.4 ms | 32.2 / 45.3 / 40.4 / 13.0 / 14.3 |
+| | 94081284 | 1304.4 ms | -3.51 % | | 439 | 0.10 | 0.088 | 0 | 226.4 ms | 21.7 / 43.7 / 39.7 / 15.0 / 14.0 |
+| p_low baseline, burst | 9550582 | 1303.4 ms | -4.46 % | 0 | 319 | 0.09 | 0.075 | 0.5 (shed) | 226.2 ms | 21.3 / 44.3 / 42.5 / 11.8 / 13.6 |
+| | 23172535 | 1323.7 ms | -5.63 % | 0 | 304 | 0.08 | 0.071 | 0.5 (shed) | 227.4 ms | 29.3 / 44.1 / 38.8 / 12.2 / 14.8 |
+| | 94081284 | 1311.9 ms | -4.10 % | 0 | 367 | 0.09 | 0.082 | 0.5 (shed) | 224.8 ms | 21.9 / 41.8 / 38.8 / 15.2 / 16.1 |
+| sender-side shedding 0.1, burst | 9550582 | 1312.6 ms | -5.20 % | -0.70 % | 330 | 0.08 | 0.072 | 8.1 (shed) | 221.5 ms | 21.3 / 42.8 / 40.8 / 14.4 / 13.7 |
+| | 23172535 | 1315.9 ms | -5.01 % | +0.59 % | 264 | 0.08 | 0.070 | 8.1 (shed) | 221.5 ms | 32.4 / 42.1 / 35.4 / 13.6 / 10.4 |
+| | 94081284 | 1321.3 ms | -4.85 % | -0.72 % | 312 | 0.08 | 0.066 | 8.1 (shed) | 221.2 ms | 20.4 / 42.9 / 37.3 / 13.9 / 15.4 |
+| loose baseline 0.1, burst | 9550582 | 1317.9 ms | -5.63 % | -1.11 % | 398 | 0.08 | 0.066 | 10 (shed) | 219.7 ms | 28.5 / 45.7 / 38.3 / 13.7 / 12.0 |
+| | 23172535 | 1316.1 ms | -5.03 % | +0.57 % | 314 | 0.08 | 0.072 | 10 (shed) | 222.9 ms | 30.7 / 43.5 / 33.7 / 12.4 / 16.1 |
+| | 94081284 | 1315.1 ms | -4.35 % | -0.25 % | 335 | 0.08 | 0.072 | 10 (shed) | 223.5 ms | 25.7 / 45.2 / 38.6 / 9.4 / 14.9 |
+| FORGIVE 0.1, burst | 9550582 | 1246.2 ms | +0.12 % | +4.39 % | 422 | 0.09 | 0.399 | 1.38 | 221.6 ms | 12.9 / 35.1 / 41.6 / 10.9 / 7.2 |
+| | 23172535 | 1242.1 ms | +0.88 % | +6.16 % | 322 | 0.07 | 0.312 | 1.05 | 218.6 ms | 10.7 / 36.9 / 36.7 / 13.2 / 9.8 |
+| | 94081284 | 1242.3 ms | +1.42 % | +5.30 % | 367 | 0.08 | 0.385 | 1.32 | 220.9 ms | 13.2 / 36.9 / 39.3 / 12.2 / 6.9 |
+
+Switch counters, seed 9550582: the no-congestion-control run with the
+burst sent 119.5 million trim notifications (57.7 million at the last
+hop) and 119.5 million retransmissions, and the switches dropped 1 945
+trimmed headers; the DCQCN run with the burst sent 181 114 trim
+notifications and dropped no trimmed header; the no-congestion-control
+run without the burst sent 1.55 million.
+
+Readings.
+
+- The no-congestion-control runs are one run each (the seed moves
+  nothing in them), so their two figures have no spread and the kill
+  test's "within the seed spread" is a difference of 625 ms.
+- Naive trimming with selective retransmission and no congestion control
+  fails at this incast, and not by the predicted mechanism. The trimmed
+  class overflowed only 1 945 times; the failure is retransmission
+  amplification: 63 senders at line rate into one link have 62 of every
+  63 packets trimmed, every trimmed packet is retransmitted at once, and
+  the retransmission is trimmed again, so 65 % of all bytes on the fabric
+  are retransmissions, the 8 GB burst takes 846 ms to drain (5.3 times
+  line rate), 28 887 flows time out, and the flood on every leaf's
+  uplinks slows the data-parallel all-reduce of every rank by 7 to 29
+  times for five steps. Training time rises 55 % over the same transport
+  without the burst.
+- DCQCN absorbs the burst: the incast senders are rate-cut, the burst
+  drains in 226 to 235 ms (1.4 times line rate), and training time rises
+  3.5 to 6.0 % over the no-burst baseline.
+- FORGIVE under the burst runs as fast as the baseline without any burst
+  (1242 to 1246 ms against 1247.7 to 1260.2 ms), 4.4 to 6.2 % faster than
+  its own paired baseline with the burst, for 1.05 to 1.38 % of DP bytes.
+  The burst flows themselves run under DCQCN and drain in the same 219
+  to 227 ms as in every DCQCN configuration; what FORGIVE recovers is the
+  data-parallel time around the burst (steps 10, 13 and 14 return to
+  their no-burst spans).
+- Sender-side shedding and the loose baseline move within -1.1 to +0.6 %
+  of their own baseline under the burst.
+- The whole time lost to DCQCN on the 1:1 fabric without a burst is 9.7
+  to 10.6 % (the no-congestion-control run at 1126.3 ms against the
+  p_low baselines); FORGIVE recovered 4.5 to 7.5 of those points in run
+  #130.

@@ -400,13 +400,18 @@ were measured under the earlier rule set and are in section 7.
 
 The most congested configuration, budget 0.1, the design of section 2
 without pacing, three seeds against p_low baselines of 1696.7, 1696.9 and
-1700.6 ms:
+1700.6 ms (run #127); two further seeds from run #132 follow the table:
 
 | seed | training-time reduction % | loss, % of DP bytes (gross / net of late arrivals) | retransmitted bytes | timeouts (baseline) | TP collective time vs baseline |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 9550582 | 16.66 % | 7.55 / 7.49 % | 5.88 % | 4 177 (10 110) | -4.3 % |
 | 23172535 | 16.06 % | 7.57 / 7.51 % | 5.61 % | 4 145 (10 482) | +4.4 % |
 | 94081284 | 16.66 % | 7.56 / 7.50 % | 5.22 % | 4 348 (10 430) | -1.3 % |
+| 28410270 | 15.72 % | 7.50 / 7.44 % | 5.64 % | 4 296 | |
+| 81117450 | 16.93 % | 7.64 / 7.58 % | 5.91 % | 4 430 | |
+
+Over five seeds the headline is 15.7 to 16.9 % for 7.50 to 7.64 % of
+DP bytes, against p_low baselines of 1688.4 to 1709.9 ms.
 
 The tensor-parallel collectives, which share the leaf with the exempt
 senders and run congestion control normally throughout, are never slower
@@ -427,16 +432,16 @@ budget applies:
 | reference | training-time reduction % | what it costs |
 | --- | ---: | --- |
 | DCQCN baseline (zero tolerance) | -1.1 to +0.8 % (5 seeds) | nothing |
-| forgive but react to congestion signals | 5.5 to 6.6 % | 6.8 to 7.0 % of DP bytes, 1.7 to 1.9 % retransmitted |
+| forgive but react to congestion signals (vested cap, run #132) | 5.8 to 7.5 % | 6.3 to 6.9 % of DP bytes, 1.8 to 2.1 % retransmitted |
 | no congestion control at all | 20.1 to 20.3 % (one run; the band is the p_low baseline's spread, since the seed moves nothing in this run) | 25.4 % of all bytes retransmitted, 93 timeouts against the p_low baseline's 10 110 to 10 482 |
 | congestion control never resumes (exemption never ends) | 18.7 to 19.0 % | 7.6 % of DP bytes, 6.5 to 6.8 % retransmitted |
 
 The total time lost to congestion control on this configuration is about
 20 %. The exemption recovers 16 of it while the fabric keeps congestion
 control, and it retransmits a quarter of what the run without congestion
-control does. Forgiveness alone, under congestion control, recovers 5.5 to
-6.6 points through the reduction in retransmission load, and the exemption
-multiplies that reduction by 2.4 to 3.0. The 2.0 to 2.9 points to the run
+control does. Forgiveness alone, under congestion control, recovers 5.8 to
+7.5 points through the reduction in retransmission load, and the exemption
+multiplies that reduction by 2.2 to 2.9. The 2.0 to 2.9 points to the run
 in which congestion control never resumes, paired by seed, are the
 interruptions of the exemption and the one round trip in which each flow
 reacts to congestion signals at its start.
@@ -547,38 +552,61 @@ question (section 5), because forgiving early converts an outstanding
 trimmed byte that would clear when its retransmission arrives into loss
 that never clears.
 
-### 3.5 Pacing as a loss dial
+### 3.5 Pacing as a loss dial, and the exemption without forgiveness
 
 Under vesting, pacing at P = 0.25 reads the same training time as no
 pacing for two points less loss (section 3.4) and a higher goodput
 (section 3.3c). Pacing below 0.25 has not been measured under vesting;
-the points measured under the earlier rule set are in section 7 and are
-not quoted as results. A configuration that forgives nothing and keeps
-the exemption (not a pacing setting, since the parser refuses `P = 0`; a
-verdict that always retransmits while the exemption-eligible flag stays
-set) decides whether forgiveness recovers any training time at all on
-this fabric or whether the tolerance is purely the bound on the
-exemption. It has not been built.
+the points measured under the earlier rule set are in section 7.
+
+The limiting case P = 0 was measured in run #132: the receiver forgives
+nothing, the exemption-eligible flag is set as usual, and the
+budget-exhausted flag follows the outstanding trimmed bytes alone. On
+the most congested configuration at budget 0.1 it reduces training time
+by 15.0, 15.6 and 15.7 % on the three seeds at zero loss, against 16.1,
+16.7 and 16.7 % for vesting on the same seeds, with 9.5 to 10.5 % of
+bytes retransmitted against 5.2 to 5.9 % and the exemption held for 88
+to 89 % of data-parallel flow time. Forgiveness is therefore worth about
+one point of the sixteen on this fabric, and halves the retransmission
+load; the other fifteen points are the exemption, whose safety bound is
+the tolerance whether or not any of it is spent.
 
 ### 3.6 The budget as a dial
 
-Under the design of record only budget 0.1 has been measured (sections
-3.2 to 3.4). The budget sweep from 0.05 to 0.6, the phase-aware
-schedule's cost, and the comparison against sender-side shedding across
-budgets were measured under the earlier rule set and are in section 7.
-One reading carries over because it concerns the sender-side arms alone:
-shedding discards exactly its cap at every budget and recovers 0.3 to 0.4
-points of training time per point of loss, because removing bytes from
-all seven senders never removes a sender and congestion control reacts
-to the incast either way; the data queue stays at its 4 MiB ceiling in
-every configuration. The sweep is to be re-run under vesting before any
-budget other than 0.1 is quoted.
+The budget sweep under the design of record (run #132, single FORGIVE
+runs joined by seed against the p_low baselines of runs #123 and #125),
+most congested configuration, three seeds unless stated:
+
+| budget | training-time reduction | loss, % of DP bytes (gross) | retransmitted | worst delivered share | bound |
+| ---: | --- | --- | --- | --- | --- |
+| 0.05 | 14.2 to 15.4 % | 3.84 to 3.86 % | 6.6 to 6.8 % | 0.950 | 0.95 |
+| 0.1 (five seeds) | 15.7 to 16.9 % | 7.50 to 7.64 % | 5.2 to 5.9 % | 0.900 | 0.90 |
+| 0.2 | 17.7 to 18.6 % | 13.3 to 13.5 % | 3.0 to 3.2 % | 0.800 | 0.80 |
+| 0.4 | 18.3 to 18.4 % | 16.1 to 16.4 % | 1.8 to 1.9 % | 0.637 to 0.683 | 0.60 |
+| 0.6 | 17.5 to 18.4 % | 16.1 to 17.2 % | 1.8 to 1.9 % | 0.569 to 0.684 | 0.40 |
+| 0.4, phase-aware schedule off (two seeds, third pending) | 22.4 to 22.5 % | 20.0 to 20.3 % | 1.5 % | 0.651 to 0.694 | 0.60 |
+
+Three readings. The budget is spent to its bound at 0.05, 0.1 and 0.2
+and not above: at 0.4 and 0.6 the loss stops near 16 to 17 % because the
+fabric no longer trims enough for the vested cap to bind (trim ratio 5.5
+to 5.8 %), so the two budgets read the same. The training-time reduction
+rises from 14 % at 0.05 to 18 % at 0.2 and is flat above it; budget 0.05
+under vesting recovers what the earlier rule set needed budget 0.2 for.
+Turning the phase-aware schedule off at budget 0.4 adds 4 points of
+training time for 4 points of loss, all of it on the critical steps.
+
+Sender-side shedding across the same budgets is unchanged by the rule
+set (it is in section 7): it discards exactly its cap and recovers 0.3
+to 0.4 points of training time per point of loss, because removing bytes
+from all seven senders never removes a sender and congestion control
+reacts to the incast either way.
 
 ### 3.7 Across fabrics
 
 | configuration | p_low baseline training time | p_low baseline trim ratio W | FORGIVE | budget | loss | rules |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `direct7` at 4:1, DCQCN (most congested) | 1697 to 1701 ms | 3.0 to 3.1 % | 16.1 to 16.7 % | 0.1 | 7.55 % | vesting |
+| `direct2` at 2:1, DCQCN (fan-in 2) | 1409 to 1429 ms | 0.2 % | 5.8 to 6.5 % (two seeds, third pending) | 0.1 | 0.89 to 0.93 % | vesting |
 | `direct7` at 1:1, DCQCN (non-oversubscribed) | 1248 to 1260 ms | 0.02 to 0.04 % | 4.5 to 7.5 % | 0.1 | 1.0 to 1.3 % | vesting |
 | `direct7` at 1:1, with pacing at P = 0.25 | | | 5.8 to 6.7 % | 0.1 | 0.27 to 0.42 % | vesting |
 | 16 ranks, go-back-N, no congestion control | 7145 ms | | 3.9 % (sender-side shedding, 16 seeds) | 0.1 | 10 % cap | May mechanism |
@@ -847,58 +875,30 @@ and the sender-side arms of #123 are unaffected by those rules and stand.
 Nothing in this section is quoted as a result; each entry names what
 replaces it.
 
-**The v1 point at budget 0.1 (#123):** 12.9 to 14.1 % for 6.75 to
-6.89 % of DP bytes, 35 to 37 % of exempt flows losing the exemption.
-Replaced by section 3.2 (16.1 to 16.7 % for 7.55 %).
+**Replaced by run #132 (sections 3.2 to 3.7):** the v1 point at budget
+0.1 (12.9 to 14.1 % for 6.75 to 6.89 %), the v1 budget sweep (8.0 to
+8.6 % at 0.05, 16.0 to 16.7 % at 0.2, 19.6 to 21.0 % at 0.4, 23.7 to
+24.3 % at 0.6, 25.3 to 25.6 % with the schedule off), the `direct2` 2:1
+point at budget 0.4 (10.5 to 12.5 % for 2.37 to 2.50 %), and the
+forgive-only reference under the earlier cap (5.5 to 6.6 %). The v1 sweep
+lost more and recovered more at large budgets than vesting does because
+its cap was not vested and the fabric's trims were consumed early.
 
-**The four configurations at budget 0.4 (#123, three seeds):**
-
-| configuration | training time | all-reduce, non-critical steps | all-reduce, critical steps | gradient bytes lost | retransmitted |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| p_low baseline | 1697 to 1701 ms | 36 to 37 ms | 36 to 37 ms | 0.5 % | 3.5 to 3.7 % |
-| loose baseline, 0.4 | 1444 to 1477 ms | 23 to 25 ms | 22 to 26 ms | 40 % | 1.5 to 1.7 % |
-| sender-side shedding, 0.4 | 1491 to 1519 ms | 25 to 26 ms | 35 to 37 ms | 32 % | 2.1 % |
-| FORGIVE v1, 0.4 | 1340 to 1360 ms | 11.8 to 12.6 ms | 33.7 to 35.7 ms | 21.3 to 21.5 % | 2.7 to 3.0 % |
-
-FORGIVE v1's critical steps stayed within 2.5 ms of the baseline's while
-the loose baseline's sped up by a third (the loose-baseline and shedding
-spans come from the run #123 readout; their telemetry is not in the
-local bundles). The same configuration without congestion control ran in
-1367 ms on one seed. No design-of-record run exists at budget 0.4.
-
-**The budget sweep (#123 and #125, v1 rules), seed ranges:**
-
-| budget | FORGIVE v1 training-time reduction | FORGIVE v1 loss | shedding training-time reduction | shedding loss |
-| ---: | --- | --- | --- | --- |
-| 0.05 | 8.0 to 8.6 % | 3.7 to 3.8 % | 0.1 to 1.3 % | 4.1 % |
-| 0.1 | 12.9 to 14.1 % | 6.75 to 6.89 % | 2.4 to 3.3 % | 8.1 % |
-| 0.2 | 16.0 to 16.7 % | 11.1 to 12.2 % | 4.9 to 5.5 % | 16.1 % |
-| 0.4 | 19.6 to 21.0 % | 21.3 to 21.8 % | 10.5 to 12.3 % | 31.7 to 32.3 % |
-| 0.6 | 23.7 to 24.3 % | 37.7 to 38.6 % | 16.0 to 16.4 % | 48.0 to 48.2 % |
-| 0.4, phase-aware schedule off | 25.3 to 25.6 % | 25.6 to 26.0 % | 13.2 to 14.9 % | 40.0 to 40.2 % |
-
-Under v1 the reduction per point of loss fell from 2.1 to 2.3 at 0.05 to
-0.6 at 0.6; the schedule cost 5.1 points of time and 4.4 of loss at 0.4
-and held the protected steps to 0.44 to 0.45 % of forgiven bytes against
-19.2 to 20.5 % without it. To be re-run under vesting.
-
-**The `direct2` 2:1 configuration (#123, v1, budget 0.4):** baselines
-1409 to 1429 ms, 10.5 to 12.5 % for 2.37 to 2.50 % of DP bytes. Not
-re-run.
-
-**Pacing below 0.25 (#125, earlier rules, budget 0.1):** P = 0.1, 15.3
-to 16.7 % for 2.6 to 2.9 %; P = 0.05, 15.0 to 16.6 % for 1.2 to 1.3 %;
-no exempt flow lost the exemption at either. Under vesting the pacing
-probability no longer moves training time (section 3.4), so these points
-are expected to keep the time and the loss, and they have not been
-re-run.
+**Kept as history only:** the four-configuration table at budget 0.4
+(p_low baseline 1697 to 1701 ms; loose baseline 1444 to 1477 ms for 40 %;
+sender-side shedding 1491 to 1519 ms for 32 %; FORGIVE v1 1340 to 1360 ms
+for 21.3 to 21.5 %), whose FORGIVE column is superseded and whose
+shedding columns stand; and pacing below 0.25 under the earlier rules
+(P = 0.1: 15.3 to 16.7 % for 2.6 to 2.9 %; P = 0.05: 15.0 to 16.6 % for
+1.2 to 1.3 %), not re-run because under vesting the pacing probability
+does not move training time (section 3.4).
 
 ## 8. Provenance
 
 | number | run | code | configurations |
 | --- | --- | --- | --- |
 | the configuration sweep (section 1) | #120, 2026-09-06 | map-only rerun 34055188995 | 8 unpaired runs, one seed |
-| the earlier rule set's sweep, schedule cost and `direct2` configuration (section 7); the baselines and shedding arms of 3.1c | #123, 2026-09-14 | main c6855f0, ns-3 9717200cc | 21 records, 84 runs, all verified |
+| the p_low baselines and shedding arms joined in 3.1c, 3.6 and 3.7; the superseded v1 points of section 7 | #123, 2026-09-14 | main c6855f0, ns-3 9717200cc | 21 records, 84 runs, all verified |
 | pacing below P = 0.25 and budget 0.05 under the earlier rule set (section 7) | #125, 2026-09-16 | main 8213401 | 24 runs, all verified, earlier rule set |
 | the references (3.3) | #126, 2026-09-16 | main a1b30b0 | 15 runs, all verified |
 | the design of record and its ablations (3.2, 3.4) | #127, 2026-09-17 | main 59cf16c, ns-3 3e11ace49 | 21 runs, all verified, worst (rank, step) pair 0.900 to 0.909 |

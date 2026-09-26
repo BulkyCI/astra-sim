@@ -1194,3 +1194,65 @@ Readings.
   to 10.6 % (the no-congestion-control run at 1126.3 ms against the
   p_low baselines); FORGIVE recovered 4.5 to 7.5 of those points in run
   #130.
+
+---
+
+## 21. Run #132 (run 36093633307): the sweep, the references and P = 0 under the design of record
+
+Twenty-six single FORGIVE runs at main `b6b81a5` (rules of `59cf16c`),
+each joined by seed against the p_low baseline of the paired record that
+already exists for its profile and seed (runs #123 and #125), read
+2026-09-26 from release tag `luvt3kt6cduyzd7lqounyprr3uplta7t` (local
+r132; baselines in scratchpad/base); every run re-analysed and verified.
+Two runs pending at the time of writing: schedule off seed 9550582 and
+`direct2` seed 23172535 (courier to be re-run).
+
+| profile | seed | training time | p_low baseline | reduction | loss gross / net, % of DP bytes | retransmitted | W | worst delivered share | timeouts | exempt share of DP flow time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| budget 0.05 | 9550582 | 1456.5 ms | 1696.7 ms | 14.16 % | 3.86 / 3.80 | 6.78 % | 7.32 % | 0.9500 | 4 473 | 74 % |
+| budget 0.05 | 23172535 | 1443.7 ms | 1696.9 ms | 14.92 % | 3.84 / 3.79 | 6.60 % | 7.14 % | 0.9500 | 4 508 | 73 % |
+| budget 0.05 | 94081284 | 1438.4 ms | 1700.6 ms | 15.42 % | 3.86 / 3.81 | 6.60 % | 7.15 % | 0.9500 | 4 761 | 72 % |
+| budget 0.1 | 28410270 | 1422.9 ms | 1688.4 ms | 15.72 % | 7.50 / 7.44 | 5.64 % | 7.11 % | 0.9002 | 4 296 | 81 % |
+| budget 0.1 | 81117450 | 1420.4 ms | 1709.9 ms | 16.93 % | 7.64 / 7.58 | 5.91 % | 7.40 % | 0.9001 | 4 430 | 80 % |
+| budget 0.1, P = 0 | 9550582 | 1432.5 ms | 1696.7 ms | 15.57 % | 0 / 0 | 9.86 % | 9.53 % | 1.000 | 3 130 | 88 % |
+| budget 0.1, P = 0 | 23172535 | 1442.5 ms | 1696.9 ms | 15.00 % | 0 / 0 | 10.47 % | 10.12 % | 1.000 | 3 312 | 89 % |
+| budget 0.1, P = 0 | 94081284 | 1434.0 ms | 1700.6 ms | 15.67 % | 0 / 0 | 9.50 % | 9.16 % | 1.000 | 3 304 | 88 % |
+| budget 0.2 | 9550582 | 1381.2 ms | 1696.7 ms | 18.60 % | 13.29 / 13.24 | 3.18 % | 6.11 % | 0.8004 | 4 022 | 85 % |
+| budget 0.2 | 23172535 | 1396.5 ms | 1696.9 ms | 17.70 % | 13.50 / 13.44 | 3.02 % | 6.01 % | 0.8007 | 4 090 | 85 % |
+| budget 0.2 | 94081284 | 1397.6 ms | 1700.6 ms | 17.81 % | 13.50 / 13.44 | 3.04 % | 6.02 % | 0.8004 | 4 374 | 85 % |
+| budget 0.4 | 9550582 | 1384.4 ms | 1696.7 ms | 18.40 % | 16.38 / 16.32 | 1.90 % | 5.61 % | 0.674 | 4 232 | 85 % |
+| budget 0.4 | 23172535 | 1386.0 ms | 1696.9 ms | 18.32 % | 16.08 / 16.02 | 1.82 % | 5.47 % | 0.683 | 4 140 | 85 % |
+| budget 0.4 | 94081284 | 1387.6 ms | 1700.6 ms | 18.40 % | 16.15 / 16.09 | 1.84 % | 5.51 % | 0.637 | 4 324 | 85 % |
+| budget 0.6 | 9550582 | 1384.1 ms | 1696.7 ms | 18.42 % | 17.21 / 17.15 | 1.85 % | 5.77 % | 0.569 | 4 221 | 86 % |
+| budget 0.6 | 23172535 | 1389.3 ms | 1696.9 ms | 18.13 % | 16.81 / 16.75 | 1.80 % | 5.63 % | 0.684 | 4 119 | 85 % |
+| budget 0.6 | 94081284 | 1402.3 ms | 1700.6 ms | 17.54 % | 16.10 / 16.04 | 1.81 % | 5.46 % | 0.670 | 4 519 | 85 % |
+| budget 0.4, schedule off | 23172535 | 1315.0 ms | 1696.9 ms | 22.50 % | 20.34 / 20.27 | 1.47 % | 6.24 % | 0.651 | 2 313 | 85 % |
+| budget 0.4, schedule off | 94081284 | 1320.5 ms | 1700.6 ms | 22.35 % | 20.01 / 19.94 | 1.54 % | 6.22 % | 0.694 | 2 473 | 85 % |
+| forgive only, congestion control on, 0.1 | 9550582 | 1599.2 ms | 1696.7 ms | 5.75 % | 6.85 / 6.78 | 2.13 % | 3.52 % | 0.9001 | 4 938 | 0 |
+| forgive only, congestion control on, 0.1 | 23172535 | 1575.7 ms | 1696.9 ms | 7.14 % | 6.27 / 6.22 | 1.84 % | 3.13 % | 0.9001 | 4 340 | 0 |
+| forgive only, congestion control on, 0.1 | 94081284 | 1573.9 ms | 1700.6 ms | 7.45 % | 6.79 / 6.74 | 1.88 % | 3.29 % | 0.9002 | 4 449 | 0 |
+| `direct2` 2:1, budget 0.1 | 9550582 | 1346.0 ms | 1428.6 ms | 5.78 % | 0.93 / 0.90 | 0.60 % | 0.53 % | 0.967 | 1 994 | 68 % |
+| `direct2` 2:1, budget 0.1 | 94081284 | 1317.7 ms | 1408.9 ms | 6.47 % | 0.89 / 0.88 | 0.56 % | 0.49 % | 0.969 | 1 795 | 67 % |
+
+Readings.
+
+- P = 0 recovers 15.0 to 15.7 % at zero loss against 16.1 to 16.7 % for
+  vesting on the same seeds (paired differences 1.0, 1.1, 1.1 points),
+  with 9.5 to 10.5 % of bytes retransmitted against 5.2 to 5.9 %.
+  Forgiveness is worth about one point of training time and half the
+  retransmission load; the exemption is the other fifteen points.
+- The vested sweep spends to its bound at 0.05, 0.1 and 0.2 (worst share
+  equal to 1 - p) and not above: at 0.4 and 0.6 the loss stops at 16 to
+  17 % because the fabric's trim ratio (5.5 to 5.8 %) no longer feeds
+  the cap, and the two budgets read the same 17.5 to 18.4 %. Budget 0.05
+  under vesting (14.2 to 15.4 % for 3.8 %) matches what the earlier rule
+  set needed budget 0.2 for.
+- Turning the schedule off at 0.4 adds 4 points of time for 4 points of
+  loss; the exempt share of flow time on critical steps rises from 15 to
+  25 % to the non-critical 85 %.
+- Forgive-only under the vested cap reads 5.8 to 7.5 % for 6.3 to 6.9 %
+  (the earlier cap gave 5.5 to 6.6 % for 6.8 to 7.0 %).
+- `direct2` at 2:1 and budget 0.1 recovers 5.8 to 6.5 % for 0.89 to
+  0.93 % of DP bytes with the exemption held 67 to 68 % of flow time; at
+  fan-in 2 the baseline trims 0.2 % and there is less for the exemption
+  to recover.

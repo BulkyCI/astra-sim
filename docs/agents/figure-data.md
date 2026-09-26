@@ -1204,8 +1204,8 @@ each joined by seed against the p_low baseline of the paired record that
 already exists for its profile and seed (runs #123 and #125), read
 2026-09-26 from release tag `luvt3kt6cduyzd7lqounyprr3uplta7t` (local
 r132; baselines in scratchpad/base); every run re-analysed and verified.
-Two runs pending at the time of writing: schedule off seed 9550582 and
-`direct2` seed 23172535 (courier to be re-run).
+One run pending at the time of writing: `direct2` seed 23172535 (courier
+re-run after the run completed).
 
 | profile | seed | training time | p_low baseline | reduction | loss gross / net, % of DP bytes | retransmitted | W | worst delivered share | timeouts | exempt share of DP flow time |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -1226,6 +1226,7 @@ Two runs pending at the time of writing: schedule off seed 9550582 and
 | budget 0.6 | 9550582 | 1384.1 ms | 1696.7 ms | 18.42 % | 17.21 / 17.15 | 1.85 % | 5.77 % | 0.569 | 4 221 | 86 % |
 | budget 0.6 | 23172535 | 1389.3 ms | 1696.9 ms | 18.13 % | 16.81 / 16.75 | 1.80 % | 5.63 % | 0.684 | 4 119 | 85 % |
 | budget 0.6 | 94081284 | 1402.3 ms | 1700.6 ms | 17.54 % | 16.10 / 16.04 | 1.81 % | 5.46 % | 0.670 | 4 519 | 85 % |
+| budget 0.4, schedule off | 9550582 | 1352.7 ms | 1696.7 ms | 20.27 % | 20.84 / 20.77 | 1.61 % | 6.49 % | 0.656 | 2 559 | 85 % |
 | budget 0.4, schedule off | 23172535 | 1315.0 ms | 1696.9 ms | 22.50 % | 20.34 / 20.27 | 1.47 % | 6.24 % | 0.651 | 2 313 | 85 % |
 | budget 0.4, schedule off | 94081284 | 1320.5 ms | 1700.6 ms | 22.35 % | 20.01 / 19.94 | 1.54 % | 6.22 % | 0.694 | 2 473 | 85 % |
 | forgive only, congestion control on, 0.1 | 9550582 | 1599.2 ms | 1696.7 ms | 5.75 % | 6.85 / 6.78 | 2.13 % | 3.52 % | 0.9001 | 4 938 | 0 |
@@ -1247,8 +1248,8 @@ Readings.
   the cap, and the two budgets read the same 17.5 to 18.4 %. Budget 0.05
   under vesting (14.2 to 15.4 % for 3.8 %) matches what the earlier rule
   set needed budget 0.2 for.
-- Turning the schedule off at 0.4 adds 4 points of time for 4 points of
-  loss; the exempt share of flow time on critical steps rises from 15 to
+- Turning the schedule off at 0.4 adds 2 to 4 points of time (20.3 to
+  22.5 % against 18.3 to 18.4 %) for 4 points of loss; the exempt share of flow time on critical steps rises from 15 to
   25 % to the non-critical 85 %.
 - Forgive-only under the vested cap reads 5.8 to 7.5 % for 6.3 to 6.9 %
   (the earlier cap gave 5.5 to 6.6 % for 6.8 to 7.0 %).

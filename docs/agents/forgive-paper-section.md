@@ -584,7 +584,7 @@ most congested configuration, three seeds unless stated:
 | 0.2 | 17.7 to 18.6 % | 13.3 to 13.5 % | 3.0 to 3.2 % | 0.800 | 0.80 |
 | 0.4 | 18.3 to 18.4 % | 16.1 to 16.4 % | 1.8 to 1.9 % | 0.637 to 0.683 | 0.60 |
 | 0.6 | 17.5 to 18.4 % | 16.1 to 17.2 % | 1.8 to 1.9 % | 0.569 to 0.684 | 0.40 |
-| 0.4, phase-aware schedule off (two seeds, third pending) | 22.4 to 22.5 % | 20.0 to 20.3 % | 1.5 % | 0.651 to 0.694 | 0.60 |
+| 0.4, phase-aware schedule off | 20.3 to 22.5 % | 20.0 to 20.8 % | 1.5 to 1.6 % | 0.651 to 0.694 | 0.60 |
 
 Three readings. The budget is spent to its bound at 0.05, 0.1 and 0.2
 and not above: at 0.4 and 0.6 the loss stops near 16 to 17 % because the
@@ -592,7 +592,7 @@ fabric no longer trims enough for the vested cap to bind (trim ratio 5.5
 to 5.8 %), so the two budgets read the same. The training-time reduction
 rises from 14 % at 0.05 to 18 % at 0.2 and is flat above it; budget 0.05
 under vesting recovers what the earlier rule set needed budget 0.2 for.
-Turning the phase-aware schedule off at budget 0.4 adds 4 points of
+Turning the phase-aware schedule off at budget 0.4 adds 2 to 4 points of
 training time for 4 points of loss, all of it on the critical steps.
 
 Sender-side shedding across the same budgets is unchanged by the rule

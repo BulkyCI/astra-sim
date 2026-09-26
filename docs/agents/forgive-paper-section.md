@@ -606,7 +606,7 @@ reacts to the incast either way.
 | configuration | p_low baseline training time | p_low baseline trim ratio W | FORGIVE | budget | loss | rules |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `direct7` at 4:1, DCQCN (most congested) | 1697 to 1701 ms | 3.0 to 3.1 % | 16.1 to 16.7 % | 0.1 | 7.55 % | vesting |
-| `direct2` at 2:1, DCQCN (fan-in 2) | 1409 to 1429 ms | 0.2 % | 5.8 to 6.5 % (two seeds, third pending) | 0.1 | 0.89 to 0.93 % | vesting |
+| `direct2` at 2:1, DCQCN (fan-in 2) | 1409 to 1429 ms | 0.2 % | 5.8 to 6.5 % | 0.1 | 0.89 to 0.93 % | vesting |
 | `direct7` at 1:1, DCQCN (non-oversubscribed) | 1248 to 1260 ms | 0.02 to 0.04 % | 4.5 to 7.5 % | 0.1 | 1.0 to 1.3 % | vesting |
 | `direct7` at 1:1, with pacing at P = 0.25 | | | 5.8 to 6.7 % | 0.1 | 0.27 to 0.42 % | vesting |
 | 16 ranks, go-back-N, no congestion control | 7145 ms | | 3.9 % (sender-side shedding, 16 seeds) | 0.1 | 10 % cap | May mechanism |
@@ -902,6 +902,7 @@ does not move training time (section 3.4).
 | pacing below P = 0.25 and budget 0.05 under the earlier rule set (section 7) | #125, 2026-09-16 | main 8213401 | 24 runs, all verified, earlier rule set |
 | the references (3.3) | #126, 2026-09-16 | main a1b30b0 | 15 runs, all verified |
 | the design of record and its ablations (3.2, 3.4) | #127, 2026-09-17 | main 59cf16c, ns-3 3e11ace49 | 21 runs, all verified, worst (rank, step) pair 0.900 to 0.909 |
+| the design-of-record sweep, the forgive-only reference under vesting, P = 0, headline seeds four and five, `direct2` at 2:1 (3.2, 3.3, 3.5, 3.6, 3.7) | #132, run 36093633307, 2026-09-25 | main b6b81a5 | 26 single runs, all verified; the `direct2` seed 23172535 courier was re-run after an SSH timeout |
 | the non-oversubscribed configuration (3.7) | #130, 2026-09-17 | main 65e98e7 | 18 runs; the FORGIVE and pacing runs verified locally, worst (rank, step) pair 0.916 to 0.948 and 0.983 to 0.984 |
 | go-back-N (3.7) | #117, 2026-09-03 | go-back-N era | 16 matched seeds |
 

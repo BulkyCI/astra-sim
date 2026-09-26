@@ -1204,8 +1204,8 @@ each joined by seed against the p_low baseline of the paired record that
 already exists for its profile and seed (runs #123 and #125), read
 2026-09-26 from release tag `luvt3kt6cduyzd7lqounyprr3uplta7t` (local
 r132; baselines in scratchpad/base); every run re-analysed and verified.
-One run pending at the time of writing: `direct2` seed 23172535 (courier
-re-run after the run completed).
+The `direct2` seed 23172535 courier failed once on an SSH timeout and
+was re-run after the wave completed; all 26 runs are verified.
 
 | profile | seed | training time | p_low baseline | reduction | loss gross / net, % of DP bytes | retransmitted | W | worst delivered share | timeouts | exempt share of DP flow time |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -1233,6 +1233,7 @@ re-run after the run completed).
 | forgive only, congestion control on, 0.1 | 23172535 | 1575.7 ms | 1696.9 ms | 7.14 % | 6.27 / 6.22 | 1.84 % | 3.13 % | 0.9001 | 4 340 | 0 |
 | forgive only, congestion control on, 0.1 | 94081284 | 1573.9 ms | 1700.6 ms | 7.45 % | 6.79 / 6.74 | 1.88 % | 3.29 % | 0.9002 | 4 449 | 0 |
 | `direct2` 2:1, budget 0.1 | 9550582 | 1346.0 ms | 1428.6 ms | 5.78 % | 0.93 / 0.90 | 0.60 % | 0.53 % | 0.967 | 1 994 | 68 % |
+| `direct2` 2:1, budget 0.1 | 23172535 | 1331.6 ms | 1417.7 ms | 6.08 % | 0.89 / 0.86 | 0.65 % | 0.54 % | 0.966 | 2 136 | 68 % |
 | `direct2` 2:1, budget 0.1 | 94081284 | 1317.7 ms | 1408.9 ms | 6.47 % | 0.89 / 0.88 | 0.56 % | 0.49 % | 0.969 | 1 795 | 67 % |
 
 Readings.

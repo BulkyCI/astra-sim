@@ -146,6 +146,13 @@ not needed to support a sentence in the text.
 
 ## Landed 2026-09-27 (fork main, one commit, upstream PR to be opened by hand)
 
+Revision the same day: Zechen's permission covers only the DBLP results in
+Section V, so Section II-A, the LLM-parallelism paragraph of V-A and the
+conclusion's closing sentence were restored; the body now runs 0.6 column
+past page 6 and the collaborators decide the remaining cuts. Rebased onto
+upstream `1737640` (PDF untracked); every edit ends with a build and the
+body-end measurement.
+
 PR #1 on the fork was closed as not planned. All changes are one commit,
 `ffb7914`, on the fork's `main` above Zechen's `d4e3e21` (an earlier
 six-commit series was squashed and force-pushed with lease). Built with

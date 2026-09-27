@@ -31,10 +31,17 @@ def panel(ax,title,spines_designed,spines_failed,note):
             ax.add_patch(Rectangle((hx-0.4,1.6),0.8,1.6,fc=fc,ec='#333333',lw=0.5)); ax.plot([hx,hx],[3.2,5.2],color='#888888',lw=0.5,zorder=0)
         ax.text(lx,0.9,f'ranks {l*8} to {l*8+7}',ha='center',va='top',fontsize=6)
     ax.text(LEAVES*5-0.5,-1.4,note,ha='center',va='top',fontsize=7.5)
+if os.environ.get('PAPER'):
+    # Paper variant: the two configurations the paper evaluates most, no footnote (the caption carries it), PDF at full column width.
+    plt.rcParams.update({'font.family':'DejaVu Sans','font.size':7,'pdf.fonttype':42})
+    fig,axs=plt.subplots(2,1,figsize=(7.1,3.1))
+    panel(axs[0],'1:1 (non-oversubscribed): 8 spines',8,0,'each leaf: 8 hosts x 400 Gbps in, 8 uplinks x 400 Gbps out')
+    panel(axs[1],'4:1 (most congested): 4 spines designed, 2 failed',4,2,'each leaf: 8 hosts x 400 Gbps in, 2 live uplinks x 400 Gbps out')
+    fig.tight_layout(pad=0.2); fig.savefig(f'{OUT}/fabric-topology.pdf'); print('ok paper'); sys.exit(0)
 fig,axs=plt.subplots(3,1,figsize=(10.5,11.5))
-panel(axs[0],'1:1, the non-oversubscribed configuration: 8 spines, none failed (profiles *_1to1_*)',8,0,'each leaf: 8 hosts x 400 Gbps in, 8 uplinks x 400 Gbps out')
-panel(axs[1],'2:1, the designed fabric: 4 spines, none failed (profiles *_2to1_*)',4,0,'each leaf: 8 x 400 Gbps in, 4 x 400 Gbps out')
-panel(axs[2],'4:1, the most congested configuration: 4 spines designed, 2 failed (profiles *_4to1_*)',4,2,'each leaf: 8 x 400 Gbps in, 2 live uplinks x 400 Gbps out; a failed spine is absent from the built fabric')
+panel(axs[0],'1:1, the non-oversubscribed configuration: 8 spines, none failed',8,0,'each leaf: 8 hosts x 400 Gbps in, 8 uplinks x 400 Gbps out')
+panel(axs[1],'2:1, the designed fabric: 4 spines, none failed',4,0,'each leaf: 8 x 400 Gbps in, 4 x 400 Gbps out')
+panel(axs[2],'4:1, the most congested configuration: 4 spines designed, 2 failed',4,2,'each leaf: 8 x 400 Gbps in, 2 live uplinks x 400 Gbps out; a failed spine is absent from the built fabric')
 fig.text(0.5,0.035,
  'Two-tier leaf-spine Clos, 64 ranks: one host per rank, 8 hosts per leaf, every leaf linked to every live spine by one 400 Gbps link; host-to-leaf one-way delay 5 us, leaf-to-spine 12.5 us; '
  'per-flow ECMP across spines, no spraying; PFC off; packet trimming (forward trimmed data) with the trimmed class at 25 % WDRR weight.\n'

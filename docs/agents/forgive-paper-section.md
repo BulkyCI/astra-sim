@@ -832,6 +832,23 @@ outstanding trimmed byte does.
 
 ## 6. Figures and data in hand
 
+Paper set (2026-09-27), PDFs in the paper repository under
+`figures/forgive/` with a README, drawn by `paper-figures.py`,
+`forgive-time-utilization.py` and `fabric-topology.py` (PAPER=1) from the
+design-of-record bundles (#123 baseline, #126 references, #127 FORGIVE
+arms, #130 1:1 baseline, #131 incast, #132 P = 0, forgive-only and the
+sweep). Labels use Table IV's configuration names and the paper's terms
+(data-parallel AllReduce, loss budget, retransmitted bytes, bytes trimmed,
+exemption); the style follows the paper's existing figures (sans-serif,
+bold axis labels, framed legends, the proposed mechanism in blue and the
+baseline in red). Goodput figures are excluded: delivered bytes fall with
+forgiveness, so goodput confounds the comparison. Files:
+`time-utilization`, `budget-sweep`, `incast-63-sources`,
+`dp-allreduce-time-cdf`, `dp-delivered-share-cdf`,
+`fabric-cost-per-configuration`, `tp-collective-time-vs-baseline`,
+`exemption-duty-cycle-per-step`, `fabric-topology`.
+
+
 Current, drawn 2026-09-22 from the bundles of runs #123, #125, #126 and
 #127 and named in sections 3.3b and 3.3c: `dp-allreduce-goodput-per-step.svg`,
 `dp-allreduce-goodput-summary.svg`, `dp-allreduce-time-cdf.svg`,

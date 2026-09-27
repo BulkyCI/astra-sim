@@ -20,7 +20,7 @@ SP = os.environ['SP']; OUT = sys.argv[1]; SVG = sys.argv[2] if len(sys.argv) > 2
 SEEDS = (9550582, 23172535, 94081284); CRIT = {1, 2, 3, 20}
 LINKS = 2; RATE = 400e9  # spine-facing links per leaf at 4:1 and their rate, bit/s
 ARMS = {
-    'Baseline (DCQCN, $p=0.005$ dropping)': lambda s: f'{SP}/fig/ex/ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-seed-{s}/seed_{s}/fixed_p_low_baseline',
+    'Baseline ($p=0.005$ dropping)': lambda s: f'{SP}/fig/ex/ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-seed-{s}/seed_{s}/fixed_p_low_baseline',
     'FORGIVE, $P=0$':                       lambda s: f'{SP}/r132/ex/ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-p0-single-seed-{s}',
     'FORGIVE':                              lambda s: f'{SP}/fig/ex/ring-3d-regime-64-dcqcn-direct7-4to1-exempt-p01-single-seed-{s}',
     'No congestion control':                lambda s: f'{SP}/fig/ex/ring-3d-regime-64-none-direct7-4to1-zero-seed-{s}',
@@ -67,8 +67,8 @@ for name, f in ARMS.items():
           f'(step range {min(st.mean(u_d[s_]) for s_ in nc):.3f} to {max(st.mean(u_d[s_]) for s_ in nc):.3f})')
 
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
-plt.rcParams.update({'font.family': 'DejaVu Serif', 'font.size': 7, 'axes.labelsize': 7, 'legend.fontsize': 6, 'xtick.labelsize': 6, 'ytick.labelsize': 6, 'pdf.fonttype': 42})
-cols = {'Baseline (DCQCN, $p=0.005$ dropping)': '#1f77b4', 'FORGIVE, $P=0$': '#2ca02c', 'FORGIVE': '#d62728', 'No congestion control': '#444444'}
+plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 7, 'axes.labelsize': 7, 'axes.labelweight': 'bold', 'legend.fontsize': 6, 'legend.frameon': True, 'legend.framealpha': 0.9, 'legend.edgecolor': '#cccccc', 'legend.fancybox': False, 'xtick.labelsize': 6, 'ytick.labelsize': 6, 'pdf.fonttype': 42})
+cols = {'Baseline ($p=0.005$ dropping)': '#d62728', 'FORGIVE, $P=0$': '#2ca02c', 'FORGIVE': '#1f77b4', 'No congestion control': '#222222'}
 lss = {'No congestion control': '--'}
 fig, (a, b) = plt.subplots(1, 2, figsize=(3.45, 1.55))
 steps = list(range(1, 21))
@@ -79,11 +79,11 @@ for name, (t_end, u_d, _) in res.items():
     b.plot(steps, me, lss.get(name, '-'), color=cols[name], lw=1.1); b.fill_between(steps, lo, hi, color=cols[name], alpha=0.2, lw=0)
 for ax in (a, b):
     for c in CRIT: ax.axvspan(c - 0.5, c + 0.5, color='k', alpha=0.07, lw=0)
-    ax.set_xlim(0.5, 20.5); ax.set_xticks([1, 5, 10, 15, 20]); ax.set_xlabel('training step'); ax.grid(alpha=0.25, lw=0.4)
+    ax.set_xlim(0.5, 20.5); ax.set_xticks([1, 5, 10, 15, 20]); ax.set_xlabel('training step'); ax.grid(alpha=0.3, lw=0.4)
 a.set_ylabel('elapsed time (ms)'); a.set_ylim(bottom=0); a.set_title('(a) completion time', fontsize=7)
 b.set_ylabel('utilization (%)'); b.set_ylim(0, 100); b.set_title('(b) spine-link utilization', fontsize=7)
 h, l = a.get_legend_handles_labels()
-fig.legend(h, l, loc='lower center', ncol=2, frameon=False, handlelength=1.6, columnspacing=1.2, bbox_to_anchor=(0.5, -0.01))
+fig.legend(h, l, loc='lower center', ncol=2, handlelength=1.6, columnspacing=1.2, bbox_to_anchor=(0.5, -0.01))
 fig.tight_layout(pad=0.3, w_pad=0.8, rect=(0, 0.17, 1, 1))
 fig.savefig(OUT)
 if SVG: fig.savefig(SVG)

@@ -162,19 +162,19 @@ fig.tight_layout(pad=0.3); save(fig, 'exemption-duty-cycle-per-step')
 jct = lambda d: summary(d)['completion_time_ns_max'] / 1e6
 base_jct = {s_: jct(BASE(s_)) for s_ in SEEDS}
 def red(f): return [100 * (1 - jct(f(s_)) / base_jct[s_]) for s_ in SEEDS]
-budgets = [0.05, 0.1, 0.2, 0.4, 0.6]; labs = ['0.05', '0.1', '0.2', '0.4', '0.6']
+budgets = [5, 10, 20, 40, 60]; labs = ['0.05', '0.1', '0.2', '0.4', '0.6']  # budget on the axes in percent, so loss and budget share a unit
 rd = [red(SWEEP[l]) for l in labs]; ls_ = [[m_['loss'] for m_ in sweep[l]] for l in labs]
 off_rd = red(SWEEP['0.4, schedule off']); off_ls = [m_['loss'] for m_ in sweep['0.4, schedule off']]
 print('sweep reduction', [(l, round(min(v), 1), round(max(v), 1)) for l, v in zip(labs, rd)], 'schedule off', round(min(off_rd), 1), round(max(off_rd), 1))
 fig, (a, b) = plt.subplots(1, 2, figsize=(3.45, 1.75))
 a.errorbar(budgets, [st.mean(v) for v in rd], yerr=[[st.mean(v) - min(v) for v in rd], [max(v) - st.mean(v) for v in rd]], fmt='s-', color='#1f77b4', ms=3.5, lw=1, capsize=1.5, label='FORGIVE')
-a.errorbar([0.4], [st.mean(off_rd)], yerr=[[st.mean(off_rd) - min(off_rd)], [max(off_rd) - st.mean(off_rd)]], fmt='D', color='#9467bd', ms=3.5, capsize=1.5, label='$p=0.4$ on every step')
+a.errorbar([40], [st.mean(off_rd)], yerr=[[st.mean(off_rd) - min(off_rd)], [max(off_rd) - st.mean(off_rd)]], fmt='D', color='#9467bd', ms=3.5, capsize=1.5, label='$p=0.4$ on every step')
 a.set_ylabel('completion-time\nreduction (%)'); a.set_ylim(0, 25)
 b.errorbar(budgets, [st.mean(v) for v in ls_], yerr=[[st.mean(v) - min(v) for v in ls_], [max(v) - st.mean(v) for v in ls_]], fmt='s-', color='#1f77b4', ms=3.5, lw=1, capsize=1.5)
-b.errorbar([0.4], [st.mean(off_ls)], yerr=[[st.mean(off_ls) - min(off_ls)], [max(off_ls) - st.mean(off_ls)]], fmt='D', color='#9467bd', ms=3.5, capsize=1.5)
-b.plot([0, 0.6], [0, 60], ':', color='k', lw=0.7); b.text(0.105, 13.5, 'loss = budget', fontsize=6, rotation=58)
-b.set_ylabel('data-parallel\nbytes lost (%)'); b.set_ylim(0, 40)
-for ax in (a, b): ax.set_xscale('log'); ax.set_xticks(budgets); ax.set_xticklabels(labs); ax.minorticks_off(); ax.set_xlabel('loss budget $p$')
+b.errorbar([40], [st.mean(off_ls)], yerr=[[st.mean(off_ls) - min(off_ls)], [max(off_ls) - st.mean(off_ls)]], fmt='D', color='#9467bd', ms=3.5, capsize=1.5)
+b.plot([0, 45], [0, 45], ':', color='k', lw=0.8); b.text(24, 27.5, 'loss = budget', fontsize=6, rotation=45, ha='center', va='bottom')
+b.set_ylabel('data-parallel\nbytes lost (%)'); b.set_ylim(0, 45)
+for ax in (a, b): ax.set_xlim(0, 65); ax.set_xticks([0, 10, 20, 30, 40, 50, 60]); ax.set_xlabel('loss budget $p$ (%)')
 a.legend(loc='lower right', handlelength=1.4); fig.tight_layout(pad=0.3, w_pad=0.8); save(fig, 'budget-sweep')
 
 # 10. the 63-source incast on the 1:1 fabric (run #131 against the #130 no-burst baseline)
@@ -212,5 +212,7 @@ b.barh(range(len(nm)), mm, xerr=[[mm[i] - min(r[1] for r in inc[n]) for i, n in 
        color=[ICOL[n] for n in nm], capsize=1.5, alpha=0.9, height=0.7, hatch=['//' if 'no incast' in n else '' for n in nm], edgecolor='white', lw=0.3)
 b.set_yticks(range(len(nm))); b.set_yticklabels([n.replace(' ($p=0.005$ dropping)', '') for n in nm]); b.invert_yaxis(); b.grid(axis='y', visible=False)
 for i, v in enumerate(mm): b.text(v + 25, i, f'{v:.0f}', va='center', fontsize=5.5)
-b.set_xlim(0, max(mm) * 1.22); b.set_xlabel('job completion time (ms)')
+b.set_xlim(0, max(mm) * 1.95); b.set_xlabel('job completion time (ms)')
+from matplotlib.patches import Patch
+b.legend(handles=[Patch(facecolor='#bbbbbb', edgecolor='white', hatch='//', label='no incast'), Patch(facecolor='#bbbbbb', label='63-source incast\nat step 10')], loc='lower right', handlelength=1.4)
 fig.tight_layout(pad=0.3, h_pad=0.6, rect=(0, 0, 1, 0.87)); save(fig, 'incast-63-sources')

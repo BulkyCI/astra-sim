@@ -144,54 +144,34 @@ The DBLP testbed numbers, the training-time normalisation question in
 `introduction-revision-notes.md`, the author list, and any figure that is
 not needed to support a sentence in the text.
 
-## Landed 2026-09-26 (fork main, six commits, one upstream PR to be opened by hand)
+## Landed 2026-09-27 (fork main, one commit, upstream PR to be opened by hand)
 
-PR #1 on the fork was closed as not planned; the same changes went to the
-fork's `main` as separate commits, `bbb6fc5` to `c52ab6c`, built locally
-with tectonic 0.15.0 (aarch64 binary in the scratchpad, `pages.py` measures
-where the references start). The body ends at the foot of page 6 and the
-references start at the top of page 7.
+PR #1 on the fork was closed as not planned. All changes are one commit,
+`ffb7914`, on the fork's `main` above Zechen's `d4e3e21` (an earlier
+six-commit series was squashed and force-pushed with lease). Built with
+tectonic 0.15.0 under `/tmp/tectonic` (`build.sh`); the body ends near the
+foot of page 6 and the references start there.
 
-| commit | concern | size |
-| --- | --- | --- |
-| `bbb6fc5` | corrections of fact and wording (PR 1 above) | 7 lines |
-| `8171445` | condense the DBLP testbed results: Section II-A, the ResNet50 latency table and the training-time table removed; microburst, training-time and accuracy paragraphs merged | -56 lines |
-| `2872447` | FORGIVE evaluation as Section V-E: setup paragraph, ten-row table at 4:1 and budget 0.1, sweep and 1:1 paragraph, 63-source incast paragraph; `$0 \le P \le 1$` | +35 lines |
-| `feb94e0` | abstract, introduction and conclusion aligned (exemption wording, incast sentence, conclusion on congestion control) | net -4 lines |
-| `333fc9c` | the send-latency CDF figure dropped; its numbers stay in the text | -0.8 column |
-| `c52ab6c` | DBLP mechanism text aligned with the archived code (below) | +4 lines |
+What the commit does: the fact and wording fixes of PR 1 (minus the two
+IV-A sentence cuts, restored); Section II-A, the ResNet50 latency table,
+the training-time table and the CDF figure removed with every number kept
+in the text; the FORGIVE evaluation as Section V-E (setup, ten-row table
+at 4:1 and budget 0.1, sweep and 1:1 paragraph, 63-source incast) with
+`$0 \le P \le 1$`; abstract, introduction and conclusion aligned; `jfang`
+added to the author emails; the PDF rebuilt.
 
-Ground truth for the DBLP claims is the archived code
-`github:BulkyCI/DBLP-2026-09-26-archive` (clone in `/tmp/DBLP-archive`),
-audited by an Opus 5.5 subagent against every DBLP sentence of the draft:
-
-- `tools/config.py`: `NON_CLR_MODEL_LOSS = CLR_MODEL_LOSS_TOLERANCE + 0.40`,
-  applied by `server_multithreading.py:221`; the tolerance is raised by
-  40 percentage points (0.8 to 40.8 %, 2.4 to 42.4 %), not to 40 % and not
-  by 40 %.
-- Applied as a fraction of accepted 1456-byte chunks per round,
-  worker-to-server only; the server's broadcast is fully reliable
-  (`utility.py:115`). Missing chunks are zero-filled and averaged over the
-  three workers without renormalisation.
-- CLR check every `CLR_freq` = 93 rounds on CIFAR (one epoch), relative
-  change of the averaged gradient's L2 norm against the previous check,
-  eta 0.5; a detection holds `P_low` for `CLR_freq - 1` rounds, so the
-  first round of every epoch runs at `P_high` (off-by-one,
-  `server_multithreading.py:211-221`). Every injected burst falls on that
-  first round, so "bursts occur outside CLR" holds by construction.
-- A burst is one iteration of application-level drops at the worker's
-  sender (chunks sent to a dead host); drop epochs [3, 7] for
-  EfficientNetB0 and [4, 7, 13] for ResNet50, matching iterations 279/651
-  and 372/651/1209 at 93 per epoch.
-- Tail latency is the maximum per-iteration send latency on worker 0;
-  average is the mean; training times in the plots are hard-coded from a
-  spreadsheet.
-- Preliminary DenseNet run: each layer's averaged gradient zeroed at the
-  server with probability 0.4 or 0.8, over TCP; the archived phase logic
-  is accuracy-driven, the fixed three-epoch run is not archived.
-
-Not changed in the draft, for Zechen to confirm: GPT-2 at HEAD trains on
-C4 for 5 epochs and transmits LoRA adapter gradients only (the draft says
-WikiText-2, Table I says 124 M parameters); Slurm requests 24 GB per
-worker (draft: 32 GB); GPT-2 perplexity 1.60 to 1.65 is exp(eval loss) and
-low for GPT-2; the CLR off-by-one.
+The DBLP sections (Zechen's) were edited for length and wording only. The
+discrepancies between the draft and the archived code
+`github:BulkyCI/DBLP-2026-09-26-archive` (Opus 5.5 audit) are questions in
+`revision-questions-2026-09-27.md` at the top of the paper repository,
+not edits: tolerance worker-to-server only; `G_prev` is the averaged
+gradient at the previous check; CLR check every 93 rounds with an
+off-by-one that runs the first round of every epoch at `P_high`, where
+every injected burst falls; a burst is one iteration of sender-side drops
+(epochs [3, 7] and [4, 7, 13]); tail latency is the maximum on worker 0;
+the DenseNet run zeroed whole layer tensors at the server over TCP; GPT-2
+at HEAD is C4, 5 epochs, LoRA gradients only; perplexity 1.6 is low;
+Slurm asks 24 GB per worker; two unmeasured assertions in V-A; baseline
+`p` "follows MLT" is not in the code. The one code-backed change kept in
+the draft is "40 percentage points" (`tools/config.py:28`,
+`NON_CLR_MODEL_LOSS = p + 0.40`), listed there for confirmation.

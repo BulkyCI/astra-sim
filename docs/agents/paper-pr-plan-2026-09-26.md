@@ -157,8 +157,12 @@ IV-A sentence cuts, restored); Section II-A, the ResNet50 latency table,
 the training-time table and the CDF figure removed with every number kept
 in the text; the FORGIVE evaluation as Section V-E (setup, ten-row table
 at 4:1 and budget 0.1, sweep and 1:1 paragraph, 63-source incast) with
-`$0 \le P \le 1$`; abstract, introduction and conclusion aligned; `jfang`
-added to the author emails; the PDF rebuilt.
+`$0 \le P \le 1$` and Figure 6 (elapsed time per step and spine-link
+utilization per step, `figures/forgive/time-utilization.pdf`, drawn by
+`docs/agents/figures/forgive-time-utilization.py`, figure-data section 22),
+paid for by the EfficientNetB0 latency table and a small-font Table IV;
+abstract, introduction and conclusion aligned; `jfang` added to the author
+emails; the PDF rebuilt.
 
 The DBLP sections (Zechen's) were edited for length and wording only. The
 discrepancies between the draft and the archived code

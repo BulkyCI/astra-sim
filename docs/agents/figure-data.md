@@ -1258,3 +1258,29 @@ Readings.
   0.93 % of DP bytes with the exemption held 67 to 68 % of flow time; at
   fan-in 2 the baseline trims 0.2 % and there is less for the exemption
   to recover.
+
+## 22. Figure 6 of the paper: elapsed time and spine-link utilization per step (2026-09-27)
+
+`docs/agents/figures/forgive-time-utilization.svg`, drawn by
+`forgive-time-utilization.py` from the bundles of runs #123 (p_low
+baseline), #127 (FORGIVE `p01_single`), #126 (no congestion control) and
+#132 (P = 0), `direct7` at 4:1, seeds 9550582, 23172535, 94081284.
+Panel (a) is the latest collective end time of each step; panel (b) is
+the delivered bytes of every data-parallel flow into a leaf's eight hosts
+from another leaf that started inside that leaf's data-parallel
+all-reduce span for the step, over 2 links x 400 Gbps x the span, averaged
+over the eight leaves. `physical_bytes` in `flow_events.csv` equals
+`delivered_bytes` plus forgiven bytes and does not include
+retransmissions, so it is not a link-load measure.
+
+| configuration | end of step 20, ms | utilization, mean of non-critical steps | step range |
+| --- | ---: | ---: | ---: |
+| p_low baseline | 1691.3 to 1695.2 | 33.2 % | 31.2 to 35.6 % |
+| FORGIVE, P = 0 | 1427.2 to 1437.1 | 56.3 % | 49.0 to 62.7 % |
+| FORGIVE | 1408.7 to 1419.1 | 55.1 % | 48.0 to 60.8 % |
+| no congestion control | 1350.3 | 60.1 % | 53.0 to 70.3 % |
+
+The end-of-step-20 times are 5 ms below the job completion times of the
+ledger because the last compute phase follows the last collective.
+FORGIVE's delivered utilization is a point below P = 0's because its
+forgiven 7.5 % of bytes are not delivered; its span is shorter.

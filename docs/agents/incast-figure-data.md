@@ -203,6 +203,32 @@ The medians match because a 2 MiB flow at 400 Gbps takes about 42 us on
 the wire plus queueing behind its six sibling flows into the same receiver;
 FORGIVE shortens the tail, not the body.
 
+## 4c. Does the incast raise per-flow completion times? Where it should, yes
+
+Data-parallel flow completion times during steps 10 to 12, seed 9550582
+(the other seeds agree), in microseconds:
+
+| configuration | all DP flows, median / p99 / max | flows into rank 8 (the incast target), median / p99 / max |
+| --- | --- | --- |
+| FORGIVE, no incast | 380 / 672 / 1 499 | 378 / 652 / 672 |
+| FORGIVE, incast | 380 / 707 / 1 546 | 462 / 543 / 566 |
+| DCQCN, no loss, incast | 379 / 1 578 / 9 825 | 1 603 / 3 329 / 9 825 |
+| No congestion control, incast | 419 / 6 618 / 25 596 | 7 584 / 18 992 / 25 596 |
+
+The incast raises the completion time of flows into its target rank, by
+22 % at the median under FORGIVE, four times under DCQCN, and twenty times
+without congestion control, and leaves flows into the other 63 ranks
+within their no-incast range. The run-wide distribution barely moves
+under FORGIVE (median 377 to 379 us, 99th percentile 1 369 to 1 367 us)
+because the simulator issues each flow only when the collective step that
+needs it is ready: a delayed rank delays the start of its peers' next
+flows rather than lengthening them. The incast's cost to the collective
+therefore appears in the per-step AllReduce time (section 4) and in job
+completion time, not in the flow completion distribution. The 63 incast
+flows themselves complete in 160 to 222 ms under FORGIVE (they run under
+DCQCN and are not eligible for forgiveness), 165 to 235 ms under DCQCN
+alone, and 366 to 846 ms without congestion control.
+
 ## 5. Two readings that the figure supports, and one it does not
 
 - Without congestion control the incast raises job completion time from

@@ -171,6 +171,38 @@ Steps 1 to 8 and 15 to 20 of the incast runs match the corresponding
 no-incast runs to within the seed spread; the reproduction script prints all
 twenty.
 
+## 4b. Per-flow completion times (not plotted)
+
+Each run directory also holds per-flow completion times, in two places
+that agree with each other:
+
+- `telemetry/flow_events.csv`: one row per flow, `start_time_ns`,
+  `end_time_ns`, `parallelism_domain` (`dp` or `tp`), `flow_kind`
+  (`foreground_payload` for collective traffic), `src`, `dst`,
+  `logical_bytes`, `forgiven_bytes`, `retransmitted_bytes`. Flow completion
+  time is `end_time_ns - start_time_ns`.
+- `ns3/fct.txt`: the ns-3 backend's own record, one line per flow, columns
+  source IP, destination IP, source port, destination port, size in bytes,
+  start time in ns, completion time in ns, standalone completion time in
+  ns. IPs encode the rank: `0x0b000001 + rank x 0x100`.
+
+A data-parallel flow is one 2 097 152-byte message from one rank to one
+peer; there are 89 600 per run (70 per rank per step). Under FORGIVE a flow
+completes when every byte has arrived or been forgiven, so its completion
+time includes no repair of the forgiven ranges; under the baseline the
+sender never sends the dropped 0.5 % of flows, which is why it has about
+89 150 flows instead of 89 600.
+
+FORGIVE without the incast (run #130, `recovery_policy`), data-parallel
+flows, three seeds: median 377 to 378 us, 99th percentile 792 to 1 369 us,
+maximum 2 145 to 2 499 us. The paired baseline without the incast
+(`fixed_p_low_baseline`): median 376 us, 99th percentile 1 470 to 1 501 us,
+maximum 2 921 to 3 803 us. Tensor-parallel flows (286 720 per run) are
+unchanged: median 87 to 92 us and 99th percentile 289 to 319 us in both.
+The medians match because a 2 MiB flow at 400 Gbps takes about 42 us on
+the wire plus queueing behind its six sibling flows into the same receiver;
+FORGIVE shortens the tail, not the body.
+
 ## 5. Two readings that the figure supports, and one it does not
 
 - Without congestion control the incast raises job completion time from

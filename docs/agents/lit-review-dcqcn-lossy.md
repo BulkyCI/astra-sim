@@ -45,6 +45,23 @@ describes the mechanism; the claim holds for DCQCN's signal (CNPs) as
 implemented and would need the ECN echoes and trim notifications gated as
 well before it is claimed for a window-based controller.
 
+Pair 4, two sentences, grounded in current use (added 2026-09-29):
+
+> DCQCN [1] is the congestion control of RoCEv2 NICs: switches mark
+> packets with ECN, the receiver returns congestion notification packets,
+> and the sender lowers its rate.
+> It remains the reference congestion control for lossy RDMA fabrics:
+> transports proposed in 2024 to 2026 evaluate against it [8], [9], [18],
+> operators deploy and tune it in production [4], [15], and with selective
+> retransmission it runs without priority flow control [2].
+
+On IRN's numbers: IRN does not rank DCQCN's tail latency above Timely's.
+It reports that IRN with DCQCN and no PFC beats RoCE with PFC (Figure 4),
+that enabling PFC on IRN degrades performance by up to 20 % with DCQCN and
+39 % with Timely (Figure 5), and that RoCE with DCQCN and no PFC
+("Resilient RoCE") is not enough to avoid loss under dynamic traffic
+(Figure 6), all full text [2].
+
 No included paper supports the last sentence of pair 1. It is a claim about
 FORGIVE's own design, and it holds only if the implementation gates a
 signal that NSCC also consumes (ECN echoes or trims), not only DCQCN's CNPs.

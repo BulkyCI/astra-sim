@@ -20,6 +20,7 @@ SERIES = [
     ('Baseline (no incast)',  lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/fixed_p_low_baseline',          '#0072B2', '--', 'o', False),
     ('No CC (no incast)',     lambda s: f'{I}-none-direct7-1to1-zero-seed-{s}',                                                 '#D55E00', '--', 's', False),
     ('FORGIVE (no incast)',   lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/recovery_policy',                 '#009E73', '--', 'v', False),
+    ('DCQCN, no loss (no incast)', lambda s: f'{F}-dcqcn-direct7-1to1-zero-seed-{s}',                                          '#882255', '--', 'D', False),
     ('Baseline (incast)',     lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/fixed_p_low_baseline',    '#0072B2', '-',  'o', True),
     ('No CC (incast)',        lambda s: f'{I}-none-direct7-1to1-zero-burst63-seed-{s}',                                         '#D55E00', '-',  's', True),
     ('FORGIVE (incast)',      lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/recovery_policy',          '#009E73', '-',  'v', True),
@@ -45,8 +46,8 @@ for label, f, *_ in SERIES:
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 7, 'axes.labelsize': 8, 'axes.labelweight': 'bold', 'pdf.fonttype': 42})
-fig = plt.figure(figsize=(3.45, 3.9))
-top = fig.add_axes((.18, .55, .78, .27))
+fig = plt.figure(figsize=(3.45, 4.05))
+top = fig.add_axes((.18, .545, .78, .26))
 steps = list(range(1, 21)); lines = []
 for label, _, color, style, marker, _ in SERIES:
     runs = data[label]
@@ -59,7 +60,7 @@ top.set(yscale='log', xlim=(0.5, 20.5), xlabel='Training step', ylabel='Data-par
 top.set_xticks([1, 5, 10, 15, 20]); top.axvspan(9.5, 10.5, color='black', alpha=.07, linewidth=0); top.grid(alpha=.2, linewidth=.4)
 from matplotlib.lines import Line2D
 blank = Line2D([], [], linestyle='none', label=' ')
-ordered = lines[:3] + [blank] + lines[3:]
+ordered = lines  # four no-incast lines fill the left column, their incast counterparts the right
 legend = fig.legend(handles=ordered, loc='upper center', bbox_to_anchor=(.5, .995), ncol=2, fontsize=6.4, frameon=False,
                     handlelength=2.3, columnspacing=.8, labelspacing=.65, borderaxespad=0)
 for text, line in zip(legend.get_texts(), ordered):
@@ -67,7 +68,7 @@ for text, line in zip(legend.get_texts(), ordered):
 
 # bars: the three runs without the incast, then the four with it
 rows = [(label, label, color, incast) for label, _, color, _, _, incast in SERIES]  # same order as the legend
-bottom = fig.add_axes((.46, .085, .50, .34))
+bottom = fig.add_axes((.46, .08, .50, .36))
 for row, (short, key, color, incast) in enumerate(rows):
     vals = [j for _, j in data[key]]
     mean = st.mean(vals)

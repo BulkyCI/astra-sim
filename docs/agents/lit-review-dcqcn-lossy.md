@@ -62,6 +62,31 @@ that enabling PFC on IRN degrades performance by up to 20 % with DCQCN and
 ("Resilient RoCE") is not enough to avoid loss under dynamic traffic
 (Figure 6), all full text [2].
 
+Pair 5, verified clause by clause against the seven PDFs (2026-09-29;
+this is the version to use):
+
+> DCQCN [1] is the de facto congestion control of RoCEv2 NICs: switches
+> mark packets with ECN, the receiver returns congestion notification
+> packets, and the sender lowers its rate.
+> It remains the baseline against which recent lossy transports are
+> measured [8], [9], [18], it has been deployed in production RDMA fabrics
+> [1], [15], and with selective retransmission it runs without priority
+> flow control [2].
+
+Corrections the verification forced on pair 4: "the congestion control"
+became "de facto" ([8] p1 and [15] p8 use that word; [1] says "implemented
+in Mellanox NICs, being deployed in Microsoft's datacenters"); "reference
+congestion control for lossy RDMA fabrics" was wrong, because in [8], [9],
+[15] and [18] the DCQCN baseline runs with PFC on a lossless fabric and
+only the new transports are lossy ([1] p5: "DCQCN does not obviate the need
+for PFC"); "operators deploy and tune it in production" overstated [4],
+a poster whose abstract claims no deployment, so [4] is dropped and the
+deployment claim rests on [1] (Microsoft) and [15] (Meta at 200 Gbps; Meta
+ran 400 Gbps without it, p9); "2024 to 2026" became "recent", since the
+citations carry the years. Of the baselines, [8] and [9] name DCQCN in
+their simulation setup; [18] names it only in its hardware testbed. [2]
+models packet drops, not trimming.
+
 No included paper supports the last sentence of pair 1. It is a claim about
 FORGIVE's own design, and it holds only if the implementation gates a
 signal that NSCC also consumes (ECN echoes or trims), not only DCQCN's CNPs.

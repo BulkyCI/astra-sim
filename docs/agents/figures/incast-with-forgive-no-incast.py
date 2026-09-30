@@ -7,7 +7,8 @@
 # Usage: SP=<bundle root> python incast-with-forgive-no-incast.py <out.pdf>
 # The root holds fig/ex/ (run #130 bundles, 1:1 no incast) and r131/ex/ (run
 # #131, the incast wave). Numbers are recomputed from telemetry, not read
-# from the earlier PDF; they agree with it to the millisecond.
+# from the earlier PDF; they agree with it to the millisecond. Lines are seed
+# means without bands; bar whiskers are the seed range (min to max).
 import csv, json, os, sys, statistics as st
 
 SP = os.environ['SP']; OUT = sys.argv[1]
@@ -51,7 +52,7 @@ for label, _, color, style, marker, _ in SERIES:
     runs = data[label]
     mean = [st.mean(r[0][k] for r, _ in [(x, 0) for x in runs]) for k in steps]
     lo = [min(x[0][k] for x in runs) for k in steps]; hi = [max(x[0][k] for x in runs) for k in steps]
-    top.fill_between(steps, lo, hi, color=color, alpha=.14, linewidth=0)
+    # no seed band: the two no-CC runs are seed-invariant, so bands would appear on some lines only; the bars carry the seed range
     line, = top.plot(steps, mean, color=color, label=label, linestyle=style, marker=marker, markersize=2.5, markeredgewidth=.4, linewidth=1.05)
     lines.append(line)
 top.set(yscale='log', xlim=(0.5, 20.5), xlabel='Training step', ylabel='Data-parallel AllReduce\ntime per step (ms)')

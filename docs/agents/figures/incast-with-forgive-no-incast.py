@@ -44,8 +44,8 @@ print(f'{"Baseline (incast)":26s} JCT mean {st.mean(base_incast):.1f} ms (range 
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 7, 'axes.labelsize': 8, 'axes.labelweight': 'bold', 'pdf.fonttype': 42})
-fig = plt.figure(figsize=(3.45, 4.25))
-top = fig.add_axes((.18, .575, .78, .24))
+fig = plt.figure(figsize=(3.45, 3.9))
+top = fig.add_axes((.18, .55, .78, .27))
 steps = list(range(1, 21)); lines = []
 for label, _, color, style, marker, _ in SERIES:
     runs = data[label]
@@ -62,9 +62,9 @@ for text, line in zip(legend.get_texts(), lines):
     text.set_color(line.get_color()); text.set_fontweight('bold')
 
 # bars: the three runs without the incast, then the four with it
-rows = [('Baseline', 'Baseline (no incast)', '#0072B2', False), ('No CC', 'No CC (no incast)', '#882255', False), ('FORGIVE', 'FORGIVE (no incast)', '#CC79A7', False),
-        ('Baseline', None, '#0072B2', True), ('No CC', 'No CC (incast)', '#D55E00', True), ('DCQCN (no loss)', 'DCQCN, no loss (incast)', '#A07800', True), ('FORGIVE', 'FORGIVE (incast)', '#009E73', True)]
-bottom = fig.add_axes((.34, .09, .62, .30))
+rows = [('Baseline (no incast)', 'Baseline (no incast)', '#0072B2', False), ('No CC (no incast)', 'No CC (no incast)', '#882255', False), ('FORGIVE (no incast)', 'FORGIVE (no incast)', '#CC79A7', False),
+        ('Baseline (incast)', None, '#0072B2', True), ('No CC (incast)', 'No CC (incast)', '#D55E00', True), ('DCQCN, no loss (incast)', 'DCQCN, no loss (incast)', '#A07800', True), ('FORGIVE (incast)', 'FORGIVE (incast)', '#009E73', True)]
+bottom = fig.add_axes((.46, .085, .50, .34))
 for row, (short, key, color, incast) in enumerate(rows):
     vals = base_incast if key is None else [j for _, j in data[key]]
     mean = st.mean(vals)
@@ -73,10 +73,8 @@ for row, (short, key, color, incast) in enumerate(rows):
     bottom.text(max(vals) + 35, row, str(round(mean)), va='center', fontsize=7)
 bottom.set_yticks(range(len(rows)), labels=[r[0] for r in rows])
 for label in bottom.get_yticklabels(): label.set_fontweight('bold')
-bottom.set(ylim=(len(rows) - .4, -.6), xlim=(0, 2050), xlabel='Job completion time (ms)')
+bottom.set(ylim=(len(rows) - .4, -.6), xlim=(0, 2100), xlabel='Job completion time (ms)')
 bottom.set_xticks([0, 500, 1000, 1500, 2000]); bottom.grid(axis='x', alpha=.2, linewidth=.4); bottom.set_axisbelow(True)
-fig.legend(handles=[Patch(facecolor='.6', edgecolor='white', hatch='////', label='No incast'), Patch(facecolor='.6', label='Incast at step 10')],
-           loc='center', bbox_to_anchor=(.57, .45), ncol=2, frameon=False, prop={'size': 7, 'weight': 'bold'}, handlelength=1.5, columnspacing=1)
 for ax in (top, bottom):
     ax.tick_params(length=2.5, width=.6, pad=2)
     for spine in ax.spines.values(): spine.set_linewidth(.6)

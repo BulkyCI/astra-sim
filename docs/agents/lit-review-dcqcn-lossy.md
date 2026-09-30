@@ -26,6 +26,25 @@ Pair 2, which states the successor openly:
 > Mellanox RoCEv2 NICs [4], the ns-3 RDMA model implements it [5], and
 > selective repair lets it run without priority flow control [2].
 
+Pair 3, positive framing without naming the successor (added 2026-09-29):
+
+> (a) DCQCN [1] is the congestion control of RoCEv2: switches mark packets
+> with ECN, the receiver returns congestion notification packets, and the
+> sender NIC lowers its rate. It has run in production RDMA fabrics since
+> 2015 [1], [12], [15] and is the de facto congestion control of RoCEv2
+> NICs [8], [15].
+> (b) DCQCN remains applicable on a lossy fabric: its rate control is
+> independent of the loss recovery beneath it, and with selective
+> retransmission it runs without priority flow control [2]. It is the
+> congestion control the ns-3 RDMA model implements [5], [12], and FORGIVE
+> acts on the signals delivered to the sender rather than on the rate
+> algorithm, so it does not depend on which controller consumes them.
+
+Every clause of pair 3 traces to a full-text record except the last, which
+describes the mechanism; the claim holds for DCQCN's signal (CNPs) as
+implemented and would need the ECN echoes and trim notifications gated as
+well before it is claimed for a window-based controller.
+
 No included paper supports the last sentence of pair 1. It is a claim about
 FORGIVE's own design, and it holds only if the implementation gates a
 signal that NSCC also consumes (ECN echoes or trims), not only DCQCN's CNPs.

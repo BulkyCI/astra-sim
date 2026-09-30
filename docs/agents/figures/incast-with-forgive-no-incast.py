@@ -80,4 +80,4 @@ fig.legend(handles=[Patch(facecolor='.6', edgecolor='white', hatch='////', label
 for ax in (top, bottom):
     ax.tick_params(length=2.5, width=.6, pad=2)
     for spine in ax.spines.values(): spine.set_linewidth(.6)
-fig.savefig(OUT); fig.savefig(OUT[:-4] + '.png', dpi=300); print('wrote', OUT)
+fig.savefig(OUT); print('wrote', OUT)

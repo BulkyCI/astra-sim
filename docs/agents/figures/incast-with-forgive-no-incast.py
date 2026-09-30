@@ -14,13 +14,15 @@ SP = os.environ['SP']; OUT = sys.argv[1]
 SEEDS = (9550582, 23172535, 94081284)
 F = f'{SP}/fig/ex/ring-3d-regime-64'; I = f'{SP}/r131/ex/ring-3d-regime-64'
 # label, directory per seed, colour, line style, marker, incast?
+# colour = configuration, line style and hatch = incast state (dashed and hatched: no incast; solid: incast)
 SERIES = [
-    ('Baseline (no incast)',  lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/fixed_p_low_baseline', '#0072B2', '--', 'o', False),
-    ('No CC (no incast)',     lambda s: f'{I}-none-direct7-1to1-zero-seed-{s}',                                        '#882255', ':',  's', False),
-    ('FORGIVE (no incast)',   lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/recovery_policy',        '#CC79A7', ':',  'P', False),
-    ('No CC (incast)',        lambda s: f'{I}-none-direct7-1to1-zero-burst63-seed-{s}',                                '#D55E00', '-',  '^', True),
-    ('DCQCN, no loss (incast)', lambda s: f'{I}-dcqcn-direct7-1to1-zero-burst63-seed-{s}',                             '#A07800', '-.', 'D', True),
-    ('FORGIVE (incast)',      lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/recovery_policy', '#009E73', '-',  'v', True),
+    ('Baseline (no incast)',  lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/fixed_p_low_baseline',          '#0072B2', '--', 'o', False),
+    ('No CC (no incast)',     lambda s: f'{I}-none-direct7-1to1-zero-seed-{s}',                                                 '#D55E00', '--', 's', False),
+    ('FORGIVE (no incast)',   lambda s: f'{F}-dcqcn-direct7-1to1-exempt-p01-seed-{s}/seed_{s}/recovery_policy',                 '#009E73', '--', 'v', False),
+    ('Baseline (incast)',     lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/fixed_p_low_baseline',    '#0072B2', '-',  'o', True),
+    ('No CC (incast)',        lambda s: f'{I}-none-direct7-1to1-zero-burst63-seed-{s}',                                         '#D55E00', '-',  's', True),
+    ('FORGIVE (incast)',      lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/recovery_policy',          '#009E73', '-',  'v', True),
+    ('DCQCN, no loss (incast)', lambda s: f'{I}-dcqcn-direct7-1to1-zero-burst63-seed-{s}',                                      '#882255', '-',  'D', True),
 ]
 BASELINE_INCAST = lambda s: f'{I}-dcqcn-direct7-1to1-exempt-p01-burst63-seed-{s}/seed_{s}/fixed_p_low_baseline'
 
@@ -38,8 +40,6 @@ for label, f, *_ in SERIES:
     runs = [(spans(f(s)), jct(f(s))) for s in SEEDS]
     data[label] = runs
     print(f'{label:26s} JCT mean {st.mean(j for _, j in runs):.1f} ms (range {min(j for _, j in runs):.1f} to {max(j for _, j in runs):.1f})')
-base_incast = [jct(BASELINE_INCAST(s)) for s in SEEDS]
-print(f'{"Baseline (incast)":26s} JCT mean {st.mean(base_incast):.1f} ms (range {min(base_incast):.1f} to {max(base_incast):.1f})')
 
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -56,17 +56,19 @@ for label, _, color, style, marker, _ in SERIES:
     lines.append(line)
 top.set(yscale='log', xlim=(0.5, 20.5), xlabel='Training step', ylabel='Data-parallel AllReduce\ntime per step (ms)')
 top.set_xticks([1, 5, 10, 15, 20]); top.axvspan(9.5, 10.5, color='black', alpha=.07, linewidth=0); top.grid(alpha=.2, linewidth=.4)
-legend = fig.legend(handles=lines, loc='upper center', bbox_to_anchor=(.5, .995), ncol=2, fontsize=6.4, frameon=False,
+from matplotlib.lines import Line2D
+blank = Line2D([], [], linestyle='none', label=' ')
+ordered = lines[:3] + [blank] + lines[3:]
+legend = fig.legend(handles=ordered, loc='upper center', bbox_to_anchor=(.5, .995), ncol=2, fontsize=6.4, frameon=False,
                     handlelength=2.3, columnspacing=.8, labelspacing=.65, borderaxespad=0)
-for text, line in zip(legend.get_texts(), lines):
+for text, line in zip(legend.get_texts(), ordered):
     text.set_color(line.get_color()); text.set_fontweight('bold')
 
 # bars: the three runs without the incast, then the four with it
-rows = [('Baseline (no incast)', 'Baseline (no incast)', '#0072B2', False), ('No CC (no incast)', 'No CC (no incast)', '#882255', False), ('FORGIVE (no incast)', 'FORGIVE (no incast)', '#CC79A7', False),
-        ('Baseline (incast)', None, '#0072B2', True), ('No CC (incast)', 'No CC (incast)', '#D55E00', True), ('DCQCN, no loss (incast)', 'DCQCN, no loss (incast)', '#A07800', True), ('FORGIVE (incast)', 'FORGIVE (incast)', '#009E73', True)]
+rows = [(label, label, color, incast) for label, _, color, _, _, incast in SERIES]  # same order as the legend
 bottom = fig.add_axes((.46, .085, .50, .34))
 for row, (short, key, color, incast) in enumerate(rows):
-    vals = base_incast if key is None else [j for _, j in data[key]]
+    vals = [j for _, j in data[key]]
     mean = st.mean(vals)
     bottom.barh(row, mean, height=.68, color=color, edgecolor='white', hatch=None if incast else '////', linewidth=.5)
     bottom.errorbar(mean, row, xerr=[[mean - min(vals)], [max(vals) - mean]], fmt='none', ecolor='black', elinewidth=.7, capsize=2)

@@ -450,6 +450,15 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "regime_64_dcqcn_direct7_4to1_zero.json",
                 "regime_64_dcqcn_direct2_2to1_zero.json",
                 "regime_64_dcqcn_direct7_4to1_recovery_p01.json",
+                # The forgiveness-only ablation row: recovery under the
+                # whole-step cap, the controller obeyed.
+                "regime_64_dcqcn_direct7_4to1_recovery_p01_owed.json",
+            }
+            # The 63-source incast on the 4:1 cell, each the partner of its
+            # no-burst 4:1 profile with the burst alone moved.
+            | {
+                "regime_64_dcqcn_direct7_4to1_zero_burst63.json",
+                "regime_64_dcqcn_direct7_4to1_exempt_p01_burst63.json",
             }
             # The healthy 1:1 cell, which differs from the 4:1 cell in the
             # spine count alone, so congestion control must stay on for the

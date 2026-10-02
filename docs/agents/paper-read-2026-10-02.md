@@ -61,6 +61,35 @@ three (16.1 to 16.7). The commented-out sentence at line 155 ("skipping
 retransmissions for selected trimmed payloads reduces completion time by
 5.8–7.5 %") has the same issue if it is ever restored.
 
+### 2.1a The "Resent" column's denominator is all bytes, the "Lost" column's is data-parallel bytes (Figure 4(c) caption)
+
+The caption says "Resent: data-parallel bytes retransmitted", but the
+numbers are retransmitted bytes over every byte the job sends (793.6 GB,
+data- and tensor-parallel), recomputed from the bundles: baseline 3.53 to
+3.67 %, full FORGIVE 5.23 to 5.89 %, no congestion control 25.25 %. The
+same bytes over the data-parallel total (191.4 GB) are 14.7 to 15.3 %,
+21.7 to 24.4 % and 105 %. "Lost" is over data-parallel bytes. Fix the
+caption rather than the numbers: "Resent: retransmitted bytes as a share
+of all bytes sent." The "Fewer retransmitted bytes" argument in the text
+is unaffected; the ordering of the rows is the same under either
+denominator.
+
+### 2.1b There is no run of forgiveness with neither vesting nor exemption
+
+If the build-up wording is kept, it needs an arm that was never run:
+forgiveness under the whole-step cap (`cap_base = owed`, the paper's "no
+vesting") with the controller obeyed (`domain = recovery`). The profile
+would be a two-line variant of `regime_64_dcqcn_direct7_4to1_recovery_p01.json`
+and a three-seed wave. The nearest existing data is run #126 (main
+a1b30b0, 2026-09-16, before the vesting rule): forgiveness with the
+controller obeyed under the earlier cap, which grew with bytes the sender
+had offered rather than bytes delivered. Per seed (9550582, 23172535,
+94081284): 1585.4, 1603.6, 1588.1 ms against 1696.7, 1696.9, 1700.6 ms,
+reductions 6.56, 5.50, 6.61 %; data-parallel loss 6.81, 6.92, 6.91 %;
+retransmitted 1.84, 1.89, 1.74 % of all bytes. It is neither of the
+paper's two rules and was run on superseded code, so it does not belong
+in a design-of-record table.
+
 ### 2.2 Length: the cuts that cost nothing
 
 About 0.3 column must go. In order of how little is lost:

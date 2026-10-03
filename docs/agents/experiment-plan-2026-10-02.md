@@ -53,7 +53,22 @@ What changes in the paper: the forgiveness-only row of Figure 4(c), and
 either a sentence in the incast paragraph (4:1 confirms 1:1) or a second
 pair of panels if the 4:1 story differs.
 
-## Wave 2: DCQCN sensitivity (dispatch after wave 1 is read)
+## Wave 2: DCQCN sensitivity (dispatched 2026-10-03 as run 37132352699, 48 arms)
+
+Provenance of the default parameters, established 2026-10-03: the ECN
+table is the one ASTRA-sim ships in its ns-3 example configurations
+(`scratch/config/config.txt` of astra-sim/astra-network-ns3), copied
+verbatim; its 25 and 100 Gbps rows are HPCC's rule (KMIN 100 KB and KMAX
+400 KB per 25 Gbps, marking probability 0.2), and the rows above 100 Gbps
+are ASTRA-sim's sublinear extrapolation, so the 400 Gbps row (800/3200 KB,
+16/64 us of queue) is half of HPCC's rule. The unit is kilobytes
+(`SwitchMmu::ConfigEcn` multiplies by 1000 in HPCC and in our fork). The
+×2 arm is therefore HPCC's rule at 400 Gbps; the ×½ arm is the 100 Gbps
+row kept at 400 Gbps. Earlier marking makes DCQCN cut more, so the default
+is stricter on the baseline than HPCC's rule and looser than the DCQCN
+paper's 40 Gbps settings. The standard the paper claims is a fair case,
+the simulator's parameters with no tuning in either direction, shown
+robust by the sweep; not a best case for DCQCN.
 
 The cheapest rebuttal to the headline is that a tuned DCQCN closes the
 gap. The generator exposes `network.congestion_control.rate_ai_fraction`

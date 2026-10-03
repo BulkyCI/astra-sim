@@ -68,7 +68,7 @@ Seed means: Baseline 1253.7 ms; DCQCN, 10 % dropping 1251.1 ms; DBLP dropping 12
 
 ## 3. Loss and fabric cost of the data-parallel traffic
 
-Expected bytes = the bytes the 89 600 data-parallel messages of a run carry (about 191.4 GB). Loss = 1 - delivered / expected, where delivered counts bytes the receiver accepted; for the dropping arms it is the dropped messages, for FORGIVE the forgiven ranges (no byte is both). Retransmitted and trimmed are physical bytes as a share of expected. Switch trims are the fabric's count of trimmed data packets (`trim_ftd_admission`) over all traffic. CNPs are congestion notification packets received by data-parallel senders. Worst cell = the lowest delivered share of any (destination rank, step).
+Expected bytes = the bytes the 89 600 data-parallel messages of a run carry (about 191.4 GB). Loss = 1 - delivered / expected, where delivered counts bytes the receiver accepted; for the dropping arms it is the dropped messages, for FORGIVE the forgiven ranges (no byte is both). Retransmitted is re-sent bytes as a share of expected; trimmed is trimmed bytes that were repaired (forgiven ranges are not in it), as a share of expected. Switch trims are the fabric's count of trimmed data packets (`trim_ftd_admission`) over all traffic. CNPs are congestion notification packets received by data-parallel senders. Worst cell = the lowest delivered share of any (destination rank, step).
 
 | Arm | Seed | Loss (% of expected) | Dropped at sender (%) | Forgiven (%) | Retransmitted (%) | Trimmed (%) | Switch trims (count) | Last-hop trims (count) | Timeouts (DP) | CNPs (DP) | Worst cell delivered share | Worst non-critical cell | Worst critical cell |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

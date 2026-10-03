@@ -23,7 +23,7 @@ wave answers and the outcome that would change the paper.
   the whole-step cap with the controller obeyed was never run (the run
   #126 arm used a pre-vesting cap on superseded code).
 
-## Wave 1: the 4:1 incast and the forgiveness-only arm (dispatch 2026-10-02)
+## Wave 1: the 4:1 incast and the forgiveness-only arm (dispatched 2026-10-02, read 2026-10-03: `wave-1-read-2026-10-03.md`)
 
 Twelve records, gate `forgive_v2`, three seeds each, 21 arms:
 

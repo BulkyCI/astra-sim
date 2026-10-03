@@ -34,6 +34,17 @@ CC_MODE_DCQCN = 1
 DEFAULT_RATE_AI_FRACTION = 1 / 2000
 DEFAULT_RATE_HAI_FRACTION = 1 / 1000
 DEFAULT_MIN_RATE_FRACTION = 1 / 1000
+# The HPCC switch ECN table: (link bps, KMIN KB, KMAX KB) per link speed. ns-3
+# reads each threshold as an integer count of kilobytes, so a scaled value is
+# rounded and must stay at least 1.
+ECN_THRESHOLDS_KB = (
+    (25_000_000_000, 100, 400),
+    (40_000_000_000, 200, 800),
+    (100_000_000_000, 400, 1600),
+    (200_000_000_000, 600, 2400),
+    (400_000_000_000, 800, 3200),
+    (2_400_000_000_000, 800, 3200),
+)
 # Queue 0 carries DSCP_CONTROL (TC_high) and priority groups 1 and 3 carry UET
 # data (TC_low), so TC_med for DSCP_TRIMMED must avoid all three. UEC 1.0.3
 # section 4.1.4.1 requires trimmed packets to sit in their own traffic class.
@@ -99,13 +110,15 @@ class CongestionControl:
     window-based, so a result under it names DCQCN and not UEC congestion
     control. The three rates are fractions of the link rate rather than
     absolute literals, so a profile keeps its intended aggressiveness at any
-    link speed.
+    link speed. ``ecn_threshold_scale`` multiplies every switch KMIN and KMAX
+    threshold and leaves the marking probability alone.
     """
 
     mode: str
     rate_ai_fraction: float = DEFAULT_RATE_AI_FRACTION
     rate_hai_fraction: float = DEFAULT_RATE_HAI_FRACTION
     min_rate_fraction: float = DEFAULT_MIN_RATE_FRACTION
+    ecn_threshold_scale: float = 1.0
 
     @property
     def cc_mode(self) -> int:
@@ -120,6 +133,19 @@ class CongestionControl:
             round(link_bps * self.min_rate_fraction),
         )
 
+    def ecn_threshold_maps(self) -> str:
+        """The KMAX_MAP and KMIN_MAP lines, thresholds scaled, rates not."""
+        kmax = " ".join(
+            f"{rate} {round(high * self.ecn_threshold_scale)}"
+            for rate, _, high in ECN_THRESHOLDS_KB
+        )
+        kmin = " ".join(
+            f"{rate} {round(low * self.ecn_threshold_scale)}"
+            for rate, low, _ in ECN_THRESHOLDS_KB
+        )
+        count = len(ECN_THRESHOLDS_KB)
+        return f"KMAX_MAP {count} {kmax}\nKMIN_MAP {count} {kmin}\n"
+
     def manifest(self, link_rate: str) -> dict[str, str | int | float]:
         rate_ai, rate_hai, min_rate = self.rates_bps(link_rate)
         return {
@@ -128,6 +154,7 @@ class CongestionControl:
             "rate_ai_fraction": self.rate_ai_fraction,
             "rate_hai_fraction": self.rate_hai_fraction,
             "min_rate_fraction": self.min_rate_fraction,
+            "ecn_threshold_scale": self.ecn_threshold_scale,
             "rate_ai_bps": rate_ai,
             "rate_hai_bps": rate_hai,
             "min_rate_bps": min_rate,
@@ -396,7 +423,12 @@ def _load_congestion_control(document: dict[str, Any]) -> CongestionControl:
     if "congestion_control" not in document:
         return CongestionControl(mode="none")
     control = document["congestion_control"]
-    optional = {"rate_ai_fraction", "rate_hai_fraction", "min_rate_fraction"}
+    optional = {
+        "rate_ai_fraction",
+        "rate_hai_fraction",
+        "min_rate_fraction",
+        "ecn_threshold_scale",
+    }
     if not isinstance(control, dict) or not {"mode"} <= set(control) <= (
         {"mode"} | optional
     ):
@@ -427,6 +459,19 @@ def _load_congestion_control(document: dict[str, Any]) -> CongestionControl:
             "network.congestion_control.rate_ai_fraction must not exceed "
             "rate_hai_fraction"
         )
+    scale = control.get("ecn_threshold_scale", 1.0)
+    smallest = min(low for _, low, _ in ECN_THRESHOLDS_KB)
+    if (
+        isinstance(scale, bool)
+        or not isinstance(scale, (int, float))
+        or not isfinite(scale)
+        or scale <= 0
+        or round(smallest * scale) < 1
+    ):
+        raise ValueError(
+            "network.congestion_control.ecn_threshold_scale must be a positive "
+            "number that keeps every threshold at least 1 KB"
+        )
     return CongestionControl(
         mode=mode,
         rate_ai_fraction=rate_ai,
@@ -435,6 +480,7 @@ def _load_congestion_control(document: dict[str, Any]) -> CongestionControl:
             control.get("min_rate_fraction", DEFAULT_MIN_RATE_FRACTION),
             "network.congestion_control.min_rate_fraction",
         ),
+        ecn_threshold_scale=float(scale),
     )
 
 

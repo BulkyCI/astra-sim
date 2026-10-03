@@ -393,6 +393,55 @@ class Ring3DGeneratorTests(unittest.TestCase):
             profile.network.congestion_control.rate_hai_fraction,
         )
 
+    def test_ecn_threshold_scale_moves_thresholds_and_no_rate_key(self) -> None:
+        """The default writes today's literals; a scale moves KMIN and KMAX only."""
+        rates = ("25000000000", "40000000000", "100000000000",
+                 "200000000000", "400000000000", "2400000000000")
+        kmax = (400, 800, 1600, 2400, 3200, 3200)
+        kmin = (100, 200, 400, 600, 800, 800)
+        pmax = "PMAX_MAP 6 " + " ".join(f"{rate} 0.2" for rate in rates) + "\n"
+
+        def ecn_map(name: str, values: tuple[float, ...]) -> str:
+            pairs = " ".join(f"{r} {round(v)}" for r, v in zip(rates, values))
+            return f"{name} 6 {pairs}\n"
+
+        document = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "profile.json"
+            for scale in (None, 2.0, 0.5):
+                control = {"mode": "dcqcn"}
+                if scale is not None:
+                    control["ecn_threshold_scale"] = scale
+                document["network"]["congestion_control"] = control
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                output = Path(temporary_directory) / f"experiment_{scale}"
+                manifest = materialize(profile_path, output)
+                config = Path(manifest["network_config"]).read_text(
+                    encoding="utf-8"
+                )
+                factor = 1.0 if scale is None else scale
+                with self.subTest(scale=scale):
+                    self.assertEqual(
+                        manifest["congestion_control"]["ecn_threshold_scale"],
+                        factor,
+                    )
+                    self.assertIn(
+                        ecn_map("KMAX_MAP", tuple(v * factor for v in kmax))
+                        + ecn_map("KMIN_MAP", tuple(v * factor for v in kmin))
+                        + pmax,
+                        config,
+                    )
+
+            for scale in (0, -1.0, 0.001, True, "2"):
+                document["network"]["congestion_control"] = {
+                    "mode": "dcqcn",
+                    "ecn_threshold_scale": scale,
+                }
+                profile_path.write_text(json.dumps(document), encoding="utf-8")
+                with self.subTest(rejected=scale):
+                    with self.assertRaisesRegex(ValueError, "ecn_threshold_scale"):
+                        load_profile(profile_path)
+
     def test_only_new_families_turn_congestion_control_on(self) -> None:
         """Every arm measured to date ran with no sender reaction at all.
 
@@ -471,6 +520,12 @@ class Ring3DGeneratorTests(unittest.TestCase):
                 "regime_64_dcqcn_direct7_1to1_exempt_p01_burst63.json",
                 "regime_64_dcqcn_direct7_4to1_exempt_p01_p0.json",
                 "regime_64_dcqcn_direct2_2to1_exempt_p01.json",
+            }
+            # Wave 2, the DCQCN sensitivity check: the 4:1 p01 cell with the
+            # controller's increase rates or ECN thresholds scaled.
+            | {
+                f"regime_64_dcqcn_direct7_4to1_exempt_p01_{tag}.json"
+                for tag in ("rateai4x", "rateai025x", "ecn2x", "ecn05x")
             },
         )
 

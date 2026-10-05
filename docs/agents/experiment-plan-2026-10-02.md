@@ -53,7 +53,7 @@ What changes in the paper: the forgiveness-only row of Figure 4(c), and
 either a sentence in the incast paragraph (4:1 confirms 1:1) or a second
 pair of panels if the 4:1 story differs.
 
-## Wave 2: DCQCN sensitivity (dispatched 2026-10-03 as run 37132352699, 48 arms)
+## Wave 2: DCQCN sensitivity (dispatched 2026-10-03 as run 37132352699, 48 arms; read 2026-10-04: `wave-2-read-2026-10-04.md`, kill condition did not fire, gap 12.9 to 18.2 %)
 
 Provenance of the default parameters, established 2026-10-03: the ECN
 table is the one ASTRA-sim ships in its ns-3 example configurations
